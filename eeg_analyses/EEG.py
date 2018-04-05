@@ -132,20 +132,25 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         print('Reference channels and empty channels removed')
         logging.info('Reference channels and empty channels removed')
 
-    def renameChannelAB(self, montage='biosemi64'):
+    def setMontage(self, montage='biosemi64', ch_remove = []):
         '''
-        Change channel labels from A, B etc naming scheme to standard naming conventions.
-        At the same time changes the name of EOG electrodes (assumes an EXG naming scheme)
+        Uses mne function to set the specified montage. Also changes channel labels from A, B etc 
+        naming scheme to standard naming conventions and removes specified channels.
+         At the same time changes the name of EOG electrodes (assumes an EXG naming scheme)
 
         Arguments
         - - - - -
         raw (object): raw mne eeg object
         montage (str): used montage during recording
+        ch_remove (list): channels that you want to exclude from analysis (e.g heart rate)
 
         Returns
         - - - -
         self(object): raw object with changed channel names following biosemi 64 naming scheme (10 - 20 system)
         '''
+
+        # drop channels and get montage
+        self.drop_channels(ch_remove)
 
         montage = mne.channels.read_montage(kind=montage)
 

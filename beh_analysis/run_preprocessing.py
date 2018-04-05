@@ -5,9 +5,9 @@ from PreProcessing import PreProcessing
 
 
 project = 'Dist_suppr'
-part = 'DT_sim'
+part = 'DT_sim2'
 factors = ['block_type','dist_high']
-labels = [['DTsim','DTdisU','DTdisP'],['yes','no']]
+labels = [['DT_sim','DT_dis_DP','DT_dis_P'],['yes','no']]
 to_filter = ['RT'] 
 
 project_parameters = ['subject_nr','subject_parity','condition','cue','invalid_cue_move','degrees_response',

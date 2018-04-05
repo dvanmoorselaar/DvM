@@ -524,10 +524,6 @@ class SpatialEM(FolderStructure):
 		
 		# whiten EEG
 		#eegs = whiten_EEG(eegs, conditions)
-
-		#idx_channel, nr_selected, nr_total, all_channels = self.selectChannelId(subject_id, channels = 'all')
-		idx_channel, nr_selected, nr_total, all_channels = np.arange(64), 64, 64, EEG.ch_names[:64]
-
 		nr_electrodes = eegs.shape[1]
 		
 		if isinstance(filt_art,int):
@@ -546,7 +542,7 @@ class SpatialEM(FolderStructure):
 		# save total nr trials to CTF dict (update info dict)
 		if downsample > 1:
 			nr_samps = np.arange(0,tois.sum(),downsample).size
-		self.info.update({'times':time_filt[tois],'tois':tois, 'nr_samps': nr_samps, 'nr_times': nr_times, 'sel_electr': nr_selected,'all_electr': nr_total,'nr_trials': len(pos_bins)})
+		self.info.update({'times':time_filt[tois],'tois':tois, 'nr_samps': nr_samps, 'nr_times': nr_times,'nr_trials': len(pos_bins)})
 
 		tois = tois[:-1] # FIX THIS!!!!
 
@@ -849,9 +845,9 @@ class SpatialEM(FolderStructure):
 			sname = 'slopes_perm'
 		else:	
 			sname = 'slopes'
-			ctfs = self.readCTF(subject_id, band)
+			ctfs = self.readCTF(subject_id, cnd_name, band)
 
-		info = self.readCTF(subject_id, band, dicts = 'ctf', info = True)
+		info = self.readCTF(subject_id, cnd_name, band, dicts = 'ctf', info = True)
 
 		for i, sbjct in enumerate(subject_id):
 			slopes = {}
@@ -1576,7 +1572,7 @@ class SpatialEM(FolderStructure):
 		if not info:
 			ctf = []
 			for sbjct in subject_id:
-				with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_{}.pickle'.format(cnd_name,str(sbjct),dicts,band)),'rb') as handle:
+				with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_{}_{}.pickle'.format(cnd_name,str(sbjct),dicts,band)),'rb') as handle:
 					ctf.append(pickle.load(handle))
 		else:
 			with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_info.pickle').format(band),'rb') as handle:
@@ -1598,10 +1594,9 @@ class SpatialEM(FolderStructure):
 		
 		''' 
 
-
 		if 'all' in channels:
 			picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
-		elif channels == 'posterior_channels':
+		elif 'posterior' in channels:
 			to_select = ['TP7','CP5','CP3','CP1','CPz','CP2','CP4','CP6',
 						'TP8','P7','P5','P3','P1','Pz','P2','P4','P6',
 						'P8','P9','PO7','PO3','POz','PO4','PO8','P10','O1',
@@ -1697,26 +1692,26 @@ if __name__ == '__main__':
 	os.environ['OMP_NUM_THREADS'] = '4'
 	project_folder = '/home/dvmoors1/big_brother/Dist_suppression'
 	os.chdir(project_folder) 
-	subject_id = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,17,18,19,21,22,23,24]	
+	subject_id = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]	
 
 	### INITIATE SESSION ###
-	header = 'target_loc'
+	header = 'dist_loc'
 	if header == 'target_loc':
 		conditions = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
 	else:
 		conditions = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
 
-	session = SpatialEM('all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+	session = SpatialEM('posterior_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
 	
 	### CTF and SLOPES ###
-	for subject in subject_id:
+	#for subject in subject_id:
 	#	print subject
 	#	session.spatialCTF(subject,[-300,800],500, conditions, freqs = dict(alpha = [8,12]))
-		session.spatialCTF(subject, [-300,800],500, conditions = 'all', freqs = dict(all=[4,30]), downsample = 4)
+	#	session.spatialCTF(subject, [-300,800],500, conditions = 'all', freqs = dict(all=[4,30]), downsample = 4)
 	#	session.permuteSpatialCTF(subject_id = subject, nr_perms = 500)
 	
-	#session.CTFSlopes(subject_id, band = 'alpha', perm = False)
-	session.CTFSlopes(subject_id, cnd_name = 'all', band = 'all', perm = False)
+	session.CTFSlopes(subject_id, band = 'alpha', perm = False)
+	#session.CTFSlopes(subject_id, cnd_name = 'all', band = 'all', perm = False)
 	#session.CTFSlopes(subject_id, band = 'all', perm = True)
 
 
