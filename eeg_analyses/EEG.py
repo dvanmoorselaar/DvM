@@ -184,8 +184,9 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         events(array): numpy array with trigger events (first column contains the event time in samples and the third column contains the event id)
         '''
 
+
         if binary:
-            self._data[-1, :] -= 3840
+            self._data[-1, :] -= 61440 # Make universal
 
         events = mne.find_events(self, stim_channel='STI 014', consecutive=consecutive, min_duration=min_duration)    
 
@@ -193,7 +194,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         if not consecutive:
             spoke_idx = []
             for i in range(events[:-1,2].size):
-                if events[i,2] == events[i + 1,2] and events[i,2] == trigger:
+                if events[i,2] == events[i + 1,2] and events[i,2] in trigger:
                     spoke_idx.append(i)
 
             events = np.delete(events,spoke_idx,0)    
@@ -214,11 +215,12 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         # get triggers logged in beh file
         beh = pd.read_csv(beh_file)
         beh = beh[headers]
-        beh = beh[beh['practice'] == 'no']
-        beh = beh.drop(['practice'], axis=1)
+        if 'practice' in headers:
+            beh = beh[beh['practice'] == 'no']
+            beh = beh.drop(['practice'], axis=1)
         
         # get triggers bdf file
-        idx_trigger = np.where(events[:,2] == trigger)[0] + 1
+        idx_trigger = [idx for idx, tr in enumerate(events[:,2]) if tr in trigger]
         trigger_bdf = events[idx_trigger,2] 
 
         # log number of unique triggers
@@ -654,7 +656,7 @@ class Epochs(mne.Epochs, FolderStructure):
         '''
 
         # check which trials were excluded
-        events[events[:, 2] == trigger, 2] = range(beh.shape[0])
+        events[[i for i, idx in enumerate(events[:,2]) if idx in trigger],2] = range(beh.shape[0])
         sel_tr = events[self.selection, 2]
 
         # create behavior dictionary (only include clean trials after preprocessing)
@@ -725,21 +727,21 @@ class Epochs(mne.Epochs, FolderStructure):
 if __name__ == '__main__':
 
     # Specify project parameters
-    project_folder = '/home/dvmoors1/big_brother/Dist_suppression'
+    project_folder = '/home/dvmoors1/big_brother/Leon'
     os.chdir(project_folder)
     montage = mne.channels.read_montage(kind='biosemi64')
-    subject = 16
-    session = 2
-    tracker = True
+    subject = 1
+    session = 1
+    tracker = False
     data_file = 'subject_{}_session_{}_'.format(subject, session)
-    eeg_runs = [1, 2]
-    #eog = ['EXG1', 'EXG2', 'EXG3', 'EXG4']
-    #ref = ['EXG5', 'EXG6']
-    eog =  ['V_up','V_do','H_r','H_l']
-    ref =  ['Ref_r','Ref_l']
-    trigger = 3
-    t_min = -0.3
-    t_max = 0.8
+    eeg_runs = [1]
+    eog = ['EXG1', 'EXG2', 'EXG5', 'EXG6']
+    ref = ['EXG3', 'EXG4']
+    #eog =  ['V_up','V_do','H_r','H_l']
+    #ref =  ['Ref_r','Ref_l']
+    trigger = range(1,61)
+    t_min = -0.5
+    t_max = 2
     flt_pad = 0.5
 
     replace = {'15': {'session_1': {'B1': 'EXG7'}
@@ -759,7 +761,7 @@ if __name__ == '__main__':
     EEG.replaceChannel(subject, session, replace)
     EEG.reReference(ref_channels=ref, vEOG=eog[
                     :2], hEOG=eog[2:], changevoltage=True)
-    EEG.renameChannelAB(montage='biosemi64')
+    EEG.setMontage(montage='biosemi64')
 
     # FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
     EEGica = EEG.filter(h_freq=None, l_freq=1,
@@ -770,15 +772,14 @@ if __name__ == '__main__':
     # MATCH BEHAVIOR FILE
     events = EEG.eventSelection(trigger, binary=True, min_duration=0)
     beh, missing, events = EEG.matchBeh(subject, session,events, trigger, headers=[
-            'target_loc', 'dist_loc', 'condition', 'trigger', 
-            'practice','nr_trials'])
+            'attend_loc', 'dist_loc', 'trigger','nr_trials'])
 
     # EPOCH DATA
     epochs = Epochs(subject, session, EEG, events, event_id=trigger,
             tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
     # ARTIFACT DETECTION
-    epochs.selectBadChannels(channel_plots = True, inspect=True)
+    epochs.selectBadChannels(channel_plots = False, inspect=False)
     epochs.artifactDetection(inspect=False)
 
     # ICA

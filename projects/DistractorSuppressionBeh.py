@@ -1,5 +1,6 @@
 import os
 import mne
+import sys
 import glob
 import pickle
 import matplotlib
@@ -11,24 +12,82 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from IPython import embed 
+from scipy.stats import ttest_rel
+sys.path.append('/home/dvmoors1/big_brother/ANALYSIS/DvM')
 from support.support import *
 from support.FolderStructure import FolderStructure
 
 # set general plotting parameters
 sns.set(font_scale=2.5)
-sns.set_style('white')
-sns.set_style('white', {'axes.linewidth': 2})
+sns.set_style('ticks', {'xtick.major.size': 10, 'ytick.major.size': 10})
 
 class DistractorSuppressionBeh(FolderStructure):
 
 	def __init__(self): pass
 
+	def DTsim(self, exp = 'DT_sim',column = 'dist_high'):
+		'''
+
+		'''
+
+		# read in data
+		file = self.FolderTracker([exp,'analysis'], filename = 'preprocessed.csv')
+		DF = pd.read_csv(file)
+
+		# creat pivot (with RT filtered data)
+		DF = DF.query("RT_filter == True")
+		
+		# create unbiased DF
+		if column == 'dist_high':
+			DF = DF[DF['target_high'] == 'no']
+		elif column == 'target_high':
+			DF = DF[DF['dist_high'] == 'no']
+
+		pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type',column], aggfunc = 'mean')
+		error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+
+		# plot the seperate conditions (3 X 1 plot design)
+		plt.figure(figsize = (20,10))
+
+		levels = np.unique(pivot.keys().get_level_values('block_type'))
+		for idx, block in enumerate(levels):
+			
+			# get effect and p-value
+			diff = pivot[block]['yes'].mean() -  pivot[block]['no'].mean()
+			t, p = ttest_rel(pivot[block]['yes'], pivot[block]['no'])
+
+			ax = plt.subplot(1,3, idx + 1, title = '{0}: \ndiff = {1:.0f}, p = {2:.3f}'.format(block, diff, p), ylabel = 'RT (ms)', ylim = (300,800))
+			df = pd.DataFrame(np.hstack((pivot[block].values)), columns = ['RT (ms)'])
+			df['sj'] = range(pivot.index.size) * 2
+			df[column] = ['yes'] * pivot.index.size + ['no'] * pivot.index.size
+
+			ax = sns.stripplot(x = column, y = 'RT (ms)', data = df, hue = 'sj', size = 10,jitter = True)
+			ax.legend_.remove()
+			sns.violinplot(x = column, y = 'RT (ms)', data = df, color= 'white', cut = 1)
+
+			sns.despine(offset=50, trim = False)
+		
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker([exp,'analysis','figs'], filename = 'block_effect_{}.pdf'.format(column)))		
+		plt.close()	
+
+		# create text file with pair wise ANOVA comparisons
+		output = open(self.FolderTracker([exp,'analysis','figs'], filename = 'ANOVA_{}.txt'.format(column)), 'w')
+		# sim vs P
+		t, p = ttest_rel(pivot[levels[0]]['yes']- pivot[levels[0]]['no'], pivot[levels[1]]['yes']- pivot[levels[1]]['no'])
+		output.write('{0} vs {1} = {2:0.3f} \n'.format(levels[0],levels[1],p))
+		# sim vs DP
+		t, p = ttest_rel(pivot[levels[0]]['yes']- pivot[levels[0]]['no'], pivot[levels[2]]['yes']- pivot[levels[2]]['no'])
+		output.write('{0} vs {1} = {2:0.3f} \n'.format(levels[0],levels[2],p))
+		# P vs DP
+		t, p = ttest_rel(pivot[levels[2]]['yes']- pivot[levels[2]]['no'], pivot[levels[1]]['yes']- pivot[levels[1]]['no'])
+		output.write('{0} vs {1} = {2:0.3f} \n'.format(levels[2],levels[1],p))
+		output.close()
+
 	def repetitionExp1():
 		'''
 
 		'''
-
-		embed()
 
 		# read in data
 		file = self.FolderTracker(['beh','analysis'], filename = 'preprocessed.csv')
@@ -75,11 +134,12 @@ class DistractorSuppressionBeh(FolderStructure):
 		plt.close()	
 
 if __name__ == '__main__':
-
-	print 'what the fuck'
 	
 	os.chdir('/home/dvmoors1/big_brother/Dist_suppr')
 
 	PO = DistractorSuppressionBeh()
-
-	PO.repetitionExp1()
+	PO.DTsim(exp = 'DT_sim',column = 'dist_high')
+	PO.DTsim(exp = 'DT_sim',column = 'target_high')
+	PO.DTsim(exp = 'DT_sim2',column = 'dist_high')
+	PO.DTsim(exp = 'DT_sim2',column = 'target_high')
+	#PO.repetitionExp1()
