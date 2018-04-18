@@ -184,10 +184,9 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         events(array): numpy array with trigger events (first column contains the event time in samples and the third column contains the event id)
         '''
 
-
         if binary:
             self._data[-1, :] -= 61440 # Make universal
-
+   
         events = mne.find_events(self, stim_channel='STI 014', consecutive=consecutive, min_duration=min_duration)    
 
         # Check for consecutive 
@@ -202,10 +201,23 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         return events
 
-
-    def matchBeh(self, sj, session, events, trigger, headers, max_trigger = 66):
+    def matchBeh(self, sj, session, events, trigger, headers):
         '''
+        Alligns bdf file with csv file with experimental variables
 
+        Arguments
+        - - - - -
+        raw (object): raw mne eeg object
+        sj (int): sj number 
+        session(int): session number
+        events(array): event file from eventSelection (last column contains trigger values)
+        trigger(list|array): trigger values used for epoching
+        headers (list): relevant column names from behavior file
+
+        Returns
+        - - - -
+        beh (object): panda object wwith behavioral data (triggers are alligned)
+        missing (araray): array of missing trials (can be used when selecting eyetracking data)
         '''
 
         # read in data file
@@ -218,44 +230,39 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         if 'practice' in headers:
             beh = beh[beh['practice'] == 'no']
             beh = beh.drop(['practice'], axis=1)
-        
+        beh_triggers = beh['trigger'].values    
+                
         # get triggers bdf file
-        idx_trigger = [idx for idx, tr in enumerate(events[:,2]) if tr in trigger]
-        trigger_bdf = events[idx_trigger,2] 
+        idx_trigger = [idx for idx, tr in enumerate(events[:,2]) if tr in trigger] 
+        bdf_triggers = events[idx_trigger,2] 
 
         # log number of unique triggers
-        unique = np.unique(trigger_bdf)
+        unique = np.unique(bdf_triggers)
         logging.info('{} detected unique triggers (min = {}, max = {})'.
                         format(unique.size, unique.min(), unique.max()))
 
         # make sure trigger info between beh and bdf data matches
         missing_trials = []
-        while beh.shape[0] != trigger_bdf.size:
-
-            # remove spoke triggers, update events
-            if missing_trials == []:
-                logging.info('removed {} spoke triggers from bdf'.format(sum(trigger_bdf > max_trigger)))
-                # update events
-                to_remove = idx_trigger[np.where(trigger_bdf > max_trigger)[0]] -1
-                events = np.delete(events, to_remove, axis = 0)
-                trigger_bdf = trigger_bdf[trigger_bdf < max_trigger]
-
-            trigger_beh = beh['trigger'].values
-            if trigger_beh.size > trigger_bdf.size:
-                for i, trig in enumerate(trigger_bdf):
-                    if trig != trigger_beh[i]:
-                        beh.drop(beh.index[i], inplace=True)  
-                        miss = beh['nr_trials'].iloc[i]
-                        missing_trials.append(miss)
-                        logging.info('Removed trial {} from beh file,because no matching trigger exists in bdf file'.format(miss))
-                        break
-           
+        nr_miss = beh_triggers.size - bdf_triggers.size
+        while nr_miss > 0:
+            # continue to remove beh trials until data files are lined up
+            for i, tr in enumerate(bdf_triggers):
+                if tr != beh_triggers[i]: # remove trigger from beh_file
+                    miss = beh['nr_trials'].iloc[i]
+                    missing_trials.append(miss)
+                    logging.info('Removed trial {} from beh file,because no matching trigger exists in bdf file'.format(miss))
+                    beh.drop(beh.index[i], inplace=True)
+                    beh_triggers = np.delete(beh_triggers, i, axis = 0)
+                    nr_miss -= 1
+                    break
+        
+        # keep track of missing trials toa allign eye tracking data (if available)   
         missing = np.array(missing_trials)        
         # log number of matches between beh and bdf       
-        logging.info('{} matches between beh and epoched data'.
-            format(sum(beh['trigger'].values == trigger_bdf)))           
+        logging.info('{} matches between beh and epoched data out of {}'.
+            format(sum(beh['trigger'].values == bdf_triggers), bdf_triggers.size))           
 
-        return beh, missing, events
+        return beh, missing
 
 class Epochs(mne.Epochs, FolderStructure):
     '''
@@ -311,6 +318,11 @@ class Epochs(mne.Epochs, FolderStructure):
                     plt.savefig(self.FolderTracker(extension=[
                                 'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='ch_{}'.format(ch)))
                     plt.close()
+
+                self.plot_psd(picks = [ch], show = False)   
+                plt.savefig(self.FolderTracker(extension=[
+                                'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='ch_{}_psd'.format(ch)))
+                plt.close() 
 
             # plot power spectra topoplot to detect any clear bad electrodes
             self.plot_psd_topomap(bands=[(0, 4, 'Delta'), (4, 8, 'Theta'), (8, 12, 'Alpha'), (
@@ -727,25 +739,23 @@ class Epochs(mne.Epochs, FolderStructure):
 if __name__ == '__main__':
 
     # Specify project parameters
-    project_folder = '/home/dvmoors1/big_brother/Leon'
+    project_folder = '/home/dvmoors1/big_brother/DT_sim'
     os.chdir(project_folder)
     montage = mne.channels.read_montage(kind='biosemi64')
     subject = 1
-    session = 1
+    session = 2
     tracker = False
     data_file = 'subject_{}_session_{}_'.format(subject, session)
     eeg_runs = [1]
-    eog = ['EXG1', 'EXG2', 'EXG5', 'EXG6']
-    ref = ['EXG3', 'EXG4']
-    #eog =  ['V_up','V_do','H_r','H_l']
-    #ref =  ['Ref_r','Ref_l']
-    trigger = range(1,61)
+    eog =  ['V_up','V_do','H_r','H_l']
+    ref =  ['Ref_r','Ref_l']
+    trigger = [12,13,14,15,16,21,23,24,25,26,31,32,34,35,36,41,42,43,45,46,51,52,53,54,56,61,62,63,64,65,101,102,103,104,105,106]
     t_min = -0.5
-    t_max = 2
+    t_max = 0.6
     flt_pad = 0.5
 
-    replace = {'15': {'session_1': {'B1': 'EXG7'}
-                      }}
+    #replace = {'15': {'session_1': {'B1': 'EXG7'}}}
+    replace = {}
 
     # start logging
     logging.basicConfig(level=logging.DEBUG,
@@ -771,15 +781,18 @@ if __name__ == '__main__':
 
     # MATCH BEHAVIOR FILE
     events = EEG.eventSelection(trigger, binary=True, min_duration=0)
-    beh, missing, events = EEG.matchBeh(subject, session,events, trigger, headers=[
-            'attend_loc', 'dist_loc', 'trigger','nr_trials'])
+    beh, missing = EEG.matchBeh(subject, session,events, trigger, 
+                                headers=['block_type', 'trigger','nr_trials',
+                                         'practice','dist_high','dist_type', 
+                                         'dist_loc', 'target_high','target_type', 
+                                         'target_loc'])
 
     # EPOCH DATA
     epochs = Epochs(subject, session, EEG, events, event_id=trigger,
             tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
     # ARTIFACT DETECTION
-    epochs.selectBadChannels(channel_plots = False, inspect=False)
+    epochs.selectBadChannels(channel_plots = True, inspect=True)
     epochs.artifactDetection(inspect=False)
 
     # ICA

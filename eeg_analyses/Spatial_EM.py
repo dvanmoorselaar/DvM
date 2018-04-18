@@ -100,9 +100,11 @@ class SpatialEM(FolderStructure):
 		picks = self.selectChannelId(EEG, self.channel_folder)
 		eegs = EEG._data[:,picks,:]
 
-		# select conditions from pickle file	
+		# select conditions from pickle file
 		if conditions == 'all':
-			cnd_mask = np.ones(beh['condition'].size, dtype = bool)
+			if 'condition' not in beh.keys():
+				beh['condition'] = np.array(['all'] * beh['trigger'].size)
+			cnd_mask = np.ones(beh['trigger'].size, dtype = bool)
 		else:	
 			cnd_mask = np.array([cnd in conditions for cnd in beh['condition']])
 
@@ -852,7 +854,7 @@ class SpatialEM(FolderStructure):
 		for i, sbjct in enumerate(subject_id):
 			slopes = {}
 
-			for cond in info['conditions']:
+			for cond in [info['conditions']]: # fIX THIS
 				slopes.update({cond:{}})
 				for power in ['evoked','total']:
 					if perm: 
@@ -1690,28 +1692,28 @@ if __name__ == '__main__':
 	os.environ['MKL_NUM_THREADS'] = '4'
 	os.environ['NUMEXP_NUM_THREADS'] = '4'
 	os.environ['OMP_NUM_THREADS'] = '4'
-	project_folder = '/home/dvmoors1/big_brother/Dist_suppression'
+	project_folder = '/home/dvmoors1/big_brother/Leon'
 	os.chdir(project_folder) 
-	subject_id = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]	
+	subject_id = [1]	
 
 	### INITIATE SESSION ###
-	header = 'dist_loc'
+	header = 'attend_loc'
 	if header == 'target_loc':
 		conditions = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
 	else:
 		conditions = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
 
-	session = SpatialEM('posterior_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+	session = SpatialEM('all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
 	
 	### CTF and SLOPES ###
 	#for subject in subject_id:
 	#	print subject
 	#	session.spatialCTF(subject,[-300,800],500, conditions, freqs = dict(alpha = [8,12]))
-	#	session.spatialCTF(subject, [-300,800],500, conditions = 'all', freqs = dict(all=[4,30]), downsample = 4)
+	#	session.spatialCTF(subject, [-300,2000],500, conditions = 'all', freqs = dict(all=[4,30]), downsample = 4)
 	#	session.permuteSpatialCTF(subject_id = subject, nr_perms = 500)
 	
-	session.CTFSlopes(subject_id, band = 'alpha', perm = False)
-	#session.CTFSlopes(subject_id, cnd_name = 'all', band = 'all', perm = False)
+	#session.CTFSlopes(subject_id, band = 'alpha', perm = False)
+	session.CTFSlopes(subject_id, cnd_name = 'all', band = 'all', perm = False)
 	#session.CTFSlopes(subject_id, band = 'all', perm = True)
 
 

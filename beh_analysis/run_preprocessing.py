@@ -4,8 +4,8 @@ from IPython import embed
 from PreProcessing import PreProcessing
 
 
-project = 'Dist_suppr'
-part = 'DT_sim2'
+project = 'DT_sim'
+part = 'beh'
 factors = ['block_type','dist_high']
 labels = [['DT_sim','DT_dis_DP','DT_dis_P'],['yes','no']]
 to_filter = ['RT'] 
