@@ -244,18 +244,30 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         # make sure trigger info between beh and bdf data matches
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
+        logging.info('{} trials will be removed from beh file'.format(nr_miss))
         while nr_miss > 0:
+            stop = True
             # continue to remove beh trials until data files are lined up
             for i, tr in enumerate(bdf_triggers):
                 if tr != beh_triggers[i]: # remove trigger from beh_file
                     miss = beh['nr_trials'].iloc[i]
+                    #print miss
                     missing_trials.append(miss)
                     logging.info('Removed trial {} from beh file,because no matching trigger exists in bdf file'.format(miss))
                     beh.drop(beh.index[i], inplace=True)
                     beh_triggers = np.delete(beh_triggers, i, axis = 0)
                     nr_miss -= 1
+                    stop = False
                     break
-        
+            
+            # check whether there are missing trials at end of beh file        
+            if beh_triggers.size > bdf_triggers.size and stop:
+                # drop the last items from the beh file
+                missing_trials = np.hstack((missing_trials, beh['nr_trials'].iloc[-nr_miss:].values))
+                beh.drop(beh.index[-nr_miss], inplace=True)
+                logging.info('Removed last {} trials because no matches detected'.format(nr_miss))         
+                nr_miss = 0
+      
         # keep track of missing trials toa allign eye tracking data (if available)   
         missing = np.array(missing_trials)        
         # log number of matches between beh and bdf       
@@ -486,7 +498,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         return data
 
-    def detectEye(self, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True):
+    def detectEye(self, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True, extension = 'asc',eye_freq = 500):
         '''
         Marking epochs containing step-like activity that is greater than a given threshold
 
@@ -500,6 +512,8 @@ class Epochs(mne.Epochs, FolderStructure):
         windowsstep (int): moving window step in ms
         channel (str): name of HEOG channel
         tracker (boolean): is tracker data reliable or not
+        extension (str): type of eyetracker file (now supports .asc/ .tsv)
+        eye_freq (int): sampling rate of the eyetracker
 
 
         Returns
@@ -536,7 +550,7 @@ class Epochs(mne.Epochs, FolderStructure):
                 len(sac_epochs), len(sac_epochs) / float(len(self)) * 100))
 
         # CODE FOR EYETRACKER DATA 
-        EO = EYE()
+        EO = EYE(sfreq = eye_freq)
         # read in epochs removed via artifact detection
         noise_epochs = np.loadtxt(self.FolderTracker(extension=[
                                 'preprocessing', 'subject-{}'.format(self.sj), self.session], 
@@ -545,7 +559,7 @@ class Epochs(mne.Epochs, FolderStructure):
         # do binning based on eye-tracking data
         eye_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
                             int((self.tmin + self.flt_pad)*1000), int((self.tmax - self.flt_pad)*1000),
-                            drift_correct = (-300,0))
+                            drift_correct = (-300,0), extension = extension)
 
         # correct for missing data (if eye recording is stopped during experiment)
         if eye_bins.size > 0 and eye_bins.size < self.nr_events:
@@ -693,12 +707,16 @@ class Epochs(mne.Epochs, FolderStructure):
         # update preprocessing information
         logging.info('Nr clean trials is {0} ({1:.0f}%)'.format(
             sel_tr.size, float(sel_tr.size) / beh.shape[0] * 100))
-        cnd = beh['condition'].values
-        min_cnd, cnd = min([sum(cnd == c) for c in np.unique(cnd)]), np.unique(cnd)[
-            np.argmin([sum(cnd == c) for c in np.unique(cnd)])]
+        
+        try:
+        	cnd = beh['condition'].values
+        	min_cnd, cnd = min([sum(cnd == c) for c in np.unique(cnd)]), np.unique(cnd)[
+            	np.argmin([sum(cnd == c) for c in np.unique(cnd)])]
 
-        logging.info(
-            'Minimum condition ({}) number after cleaning is {}'.format(cnd, min_cnd))
+        	logging.info(
+            	'Minimum condition ({}) number after cleaning is {}'.format(cnd, min_cnd))
+        except:
+			logging.info('no condition found in beh file')		
 
         logging.info('EEG data linked to behavior file')
 
@@ -739,12 +757,12 @@ class Epochs(mne.Epochs, FolderStructure):
 if __name__ == '__main__':
 
     # Specify project parameters
-    project_folder = '/home/dvmoors1/big_brother/DT_sim'
-    os.chdir(project_folder)
+    project_folder = '/Users/Dirk/Desktop/dirk test'
+    #os.chdir(project_folder)
     montage = mne.channels.read_montage(kind='biosemi64')
-    subject = 1
-    session = 2
-    tracker = False
+    subject = 3
+    session = 1
+    tracker = True
     data_file = 'subject_{}_session_{}_'.format(subject, session)
     eeg_runs = [1]
     eog =  ['V_up','V_do','H_r','H_l']
@@ -792,14 +810,14 @@ if __name__ == '__main__':
             tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
     # ARTIFACT DETECTION
-    epochs.selectBadChannels(channel_plots = True, inspect=True)
-    epochs.artifactDetection(inspect=False)
+    #epochs.selectBadChannels(channel_plots = True, inspect=True)
+    #epochs.artifactDetection(inspect=False)
 
     # ICA
-    epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+    #epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
 
     # EYE MOVEMENTS
-    epochs.detectEye(missing, time_window=(t_min, t_max), tracker = tracker)
+    epochs.detectEye(missing, time_window=(t_min, t_max), tracker = tracker, extension = 'tsv', eye_freq = 30)
 
     # INTERPOLATE BADS
     epochs.interpolate_bads(reset_bads=True, mode='accurate')

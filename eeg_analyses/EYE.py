@@ -27,6 +27,7 @@ from matplotlib.collections import PatchCollection
 from scipy.signal import savgol_filter
 from FolderStructure import FolderStructure
 from pygazeanalyser.edfreader import *
+from pygazeanalyser.eyetribereader import *
 from pygazeanalyser.detectors import *
 from pygazeanalyser.gazeplotter import *
 
@@ -84,7 +85,10 @@ class EYE(FolderStructure):
 					if ses not in eye_sessions:
 						beh_files.pop(i)
 
-		eye = [read_edf(file, start = start) for file in eye_files]
+		if eye_files[0][-3:] == 'tsv':			
+			eye = [read_eyetribe(file, start = start) for file in eye_files]
+		elif eye_files[0][-3:] == 'asc':	
+			eye = [read_edf(file, start = start) for file in eye_files]
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
@@ -320,7 +324,7 @@ class EYE(FolderStructure):
 		with open(fname ,'wb') as handle:
 			pickle.dump(sac_d, handle)
 
-	def eyeBinEEG(self, sj, session, start, end, drift_correct = (-300,0)):
+	def eyeBinEEG(self, sj, session, start, end, drift_correct = (-300,0), extension = 'asc'):
 		''' 
 
 		Function is called during preprocessing of raw EEG data. If eye-tracking data is available,
@@ -348,7 +352,7 @@ class EYE(FolderStructure):
 
 		# check whether eye tracking data is availabe
 		eye_file = glob.glob(self.FolderTracker(extension = ['eye','raw'], \
-					filename = 'sub_{}_session_{}*.asc'.format(sj,session)))
+					filename = 'sub_{}_session_{}*.{}'.format(sj,session, extension)))
 		
 		# only run eye analysis if data is available for this session
 		if eye_file == []: 
