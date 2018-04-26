@@ -170,22 +170,21 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         print('Channels renamed to 10-20 system, and montage added')
         logging.info('Channels renamed to 10-20 system, and montage added')
 
-    def eventSelection(self, trigger, binary=False, consecutive=False, min_duration=0.003):
+    def eventSelection(self, trigger, binary=0, consecutive=False, min_duration=0.003):
         '''
         Returns array of events necessary for epoching.
 
         Arguments
         - - - - -
         raw (object): raw mne eeg object
-        binary (boolean): specifies whether or not triggers need to be adjusted for binary codes (subtracts 3840)
+        binary (int): is subtracted from stim channel to control for spoke triggers  (e.g. subtracts 3840)
 
         Returns
         - - - -
         events(array): numpy array with trigger events (first column contains the event time in samples and the third column contains the event id)
         '''
 
-        if binary:
-            self._data[-1, :] -= 61440 # Make universal
+        self._data[-1, :] -= binary # Make universal
    
         events = mne.find_events(self, stim_channel='STI 014', consecutive=consecutive, min_duration=min_duration)    
 
@@ -753,12 +752,69 @@ class Epochs(mne.Epochs, FolderStructure):
 
             logging.info('EEG sessions combined')
 
+def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary):
+    '''
+    Standard preprocessing pipeline
+    '''
+
+    # set subject specific parameters
+    file = 'subject_{}_session_{}_'.format(sj, session)
+    replace = sj_info[str(sj)]['replace']
+    tracker, ext, t_freq = sj_info[str(sj)]['tracker']
+
+    # start logging
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                        datefmt='%m-%d %H:%M',
+                        filename='processed/info/preprocess_sj{}_ses{}.log'.format(
+                            sj, session),
+                        filemode='w')
+
+    # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
+    EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
+                                       montage=None, preload=True, eog=eog) for run in eeg_runs])
+    EEG.replaceChannel(sj, session, replace)
+    EEG.reReference(ref_channels=ref, vEOG=eog[
+                    :2], hEOG=eog[2:], changevoltage=True)
+    EEG.setMontage(montage='biosemi64')
+
+    #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+    EEGica = EEG.filter(h_freq=None, l_freq=1,
+                       fir_design='firwin', skip_by_annotation='edge')
+    EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+               skip_by_annotation='edge')
+
+    # MATCH BEHAVIOR FILE
+    events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
+    beh, missing = EEG.matchBeh(sj, session, events, trigger, 
+                                headers = project_param)
+
+    # EPOCH DATA
+    epochs = Epochs(sj, session, EEG, events, event_id=trigger,
+            tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
+
+    # ARTIFACT DETECTION
+    epochs.selectBadChannels(channel_plots = True, inspect=True)
+    epochs.artifactDetection(inspect=False)
+
+    # ICA
+    epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+
+    # EYE MOVEMENTS
+    epochs.detectEye(missing, time_window=(t_min, t_max), tracker = tracker, extension = ext, eye_freq = t_freq)
+
+    # INTERPOLATE BADS
+    epochs.interpolate_bads(reset_bads=True, mode='accurate')
+
+    # LINK BEHAVIOR
+    epochs.linkBeh(beh, events, trigger)
+
 
 if __name__ == '__main__':
 
     # Specify project parameters
-    project_folder = '/Users/Dirk/Desktop/dirk test'
-    #os.chdir(project_folder)
+    project_folder = '/home/dvmoors1/BB/DT_sim'
+    os.chdir(project_folder)
     montage = mne.channels.read_montage(kind='biosemi64')
     subject = 3
     session = 1

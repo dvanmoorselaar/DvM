@@ -100,11 +100,9 @@ class SpatialEM(FolderStructure):
 		picks = self.selectChannelId(EEG, self.channel_folder)
 		eegs = EEG._data[:,picks,:]
 
-		# select conditions from pickle file
+		# select conditions from pickle file	
 		if conditions == 'all':
-			if 'condition' not in beh.keys():
-				beh['condition'] = np.array(['all'] * beh['trigger'].size)
-			cnd_mask = np.ones(beh['trigger'].size, dtype = bool)
+			cnd_mask = np.ones(beh['condition'].size, dtype = bool)
 		else:	
 			cnd_mask = np.array([cnd in conditions for cnd in beh['condition']])
 
@@ -526,6 +524,10 @@ class SpatialEM(FolderStructure):
 		
 		# whiten EEG
 		#eegs = whiten_EEG(eegs, conditions)
+
+		#idx_channel, nr_selected, nr_total, all_channels = self.selectChannelId(subject_id, channels = 'all')
+		idx_channel, nr_selected, nr_total, all_channels = np.arange(64), 64, 64, EEG.ch_names[:64]
+
 		nr_electrodes = eegs.shape[1]
 		
 		if isinstance(filt_art,int):
@@ -544,7 +546,7 @@ class SpatialEM(FolderStructure):
 		# save total nr trials to CTF dict (update info dict)
 		if downsample > 1:
 			nr_samps = np.arange(0,tois.sum(),downsample).size
-		self.info.update({'times':time_filt[tois],'tois':tois, 'nr_samps': nr_samps, 'nr_times': nr_times,'nr_trials': len(pos_bins)})
+		self.info.update({'times':time_filt[tois],'tois':tois, 'nr_samps': nr_samps, 'nr_times': nr_times, 'sel_electr': nr_selected,'all_electr': nr_total,'nr_trials': len(pos_bins)})
 
 		tois = tois[:-1] # FIX THIS!!!!
 
@@ -830,7 +832,7 @@ class SpatialEM(FolderStructure):
 
 		return slopes		
 	
-	def CTFSlopes(self, subject_id, cnd_name = 'cnds', band = 'alpha', perm = False):
+	def CTFSlopes(self, subject_id, conditions,cnd_name = 'cnds', band = 'alpha', perm = False):
 		'''
 		CTFSlopes sets up data to calculate slope values for real or permuted data. Actual slope calculations across frequencies and sample points 
 		is done with helper function calculateSlopes 
@@ -841,6 +843,7 @@ class SpatialEM(FolderStructure):
 		band (str): calculate slopes for a single frequency band or across a range of frequency bands (i.e. all)
 		perm (bool): use real or permuted data for slope calculation 
 		'''
+
 
 		if perm:
 			ctfs = self.readCTF(subject_id, cnd_name, band, 'ctfperm')
@@ -854,7 +857,7 @@ class SpatialEM(FolderStructure):
 		for i, sbjct in enumerate(subject_id):
 			slopes = {}
 
-			for cond in [info['conditions']]: # fIX THIS
+			for cond in conditions:
 				slopes.update({cond:{}})
 				for power in ['evoked','total']:
 					if perm: 
@@ -870,7 +873,7 @@ class SpatialEM(FolderStructure):
 						sl = self.calculateSlopes(data, info['nr_freqs'], info['nr_samps'])
 						slopes[cond].update({power: sl})
 
-			with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_{}.pickle'.format(str(sbjct),sname,band)),'wb') as handle:
+			with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_{}_{}.pickle'.format(cnd_name,str(sbjct),sname,band)),'wb') as handle:
 				print('saving slopes dict')
 				pickle.dump(slopes, handle)	
 	
@@ -1574,6 +1577,7 @@ class SpatialEM(FolderStructure):
 		if not info:
 			ctf = []
 			for sbjct in subject_id:
+				print sbjct
 				with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_{}_{}.pickle'.format(cnd_name,str(sbjct),dicts,band)),'rb') as handle:
 					ctf.append(pickle.load(handle))
 		else:
@@ -1596,9 +1600,10 @@ class SpatialEM(FolderStructure):
 		
 		''' 
 
+
 		if 'all' in channels:
 			picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
-		elif 'posterior' in channels:
+		elif channels == 'posterior_channels':
 			to_select = ['TP7','CP5','CP3','CP1','CPz','CP2','CP4','CP6',
 						'TP8','P7','P5','P3','P1','Pz','P2','P4','P6',
 						'P8','P9','PO7','PO3','POz','PO4','PO8','P10','O1',
@@ -1692,29 +1697,29 @@ if __name__ == '__main__':
 	os.environ['MKL_NUM_THREADS'] = '4'
 	os.environ['NUMEXP_NUM_THREADS'] = '4'
 	os.environ['OMP_NUM_THREADS'] = '4'
-	project_folder = '/home/dvmoors1/big_brother/Leon'
+	project_folder = '/home/dvmoors1/BB/Dist_suppression'
 	os.chdir(project_folder) 
-	subject_id = [1]	
+	subject_id = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]	
 
 	### INITIATE SESSION ###
-	header = 'attend_loc'
+	header = 'dist_loc'
 	if header == 'target_loc':
 		conditions = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
 	else:
 		conditions = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
 
-	session = SpatialEM('all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+	session = SpatialEM('all_channels_no-eye', header, nr_iter = 5, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
 	
 	### CTF and SLOPES ###
-	#for subject in subject_id:
+	for subject in subject_id:
 	#	print subject
-	#	session.spatialCTF(subject,[-300,800],500, conditions, freqs = dict(alpha = [8,12]))
-	#	session.spatialCTF(subject, [-300,2000],500, conditions = 'all', freqs = dict(all=[4,30]), downsample = 4)
-	#	session.permuteSpatialCTF(subject_id = subject, nr_perms = 500)
+	#	session.spatialCTF(subject,[-300,800],500, conditions = conditions, freqs = dict(alpha = [8,12]))
+		session.spatialCTF(subject, [-300,800],500, conditions = 'all', freqs = dict(all=[4,30]), downsample = 4)
+		session.permuteSpatialCTF(subject_id = subject, nr_perms = 500)
 	
-	#session.CTFSlopes(subject_id, band = 'alpha', perm = False)
-	session.CTFSlopes(subject_id, cnd_name = 'all', band = 'all', perm = False)
-	#session.CTFSlopes(subject_id, band = 'all', perm = True)
+	#session.CTFSlopes(subject_id, conditions = conditions,cnd_name = 'cnds', band = 'alpha', perm = False)
+	session.CTFSlopes(subject_id, conditions = ['all'], cnd_name = 'all', band = 'all', perm = False)
+	session.CTFSlopes(subject_id, conditions = ['all'], cnd_name = 'all', band = 'all', perm = True)
 
 
 	#subject_id = [2,3,4,6,7,9]

@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM')
 import mne
 import glob
 import pickle

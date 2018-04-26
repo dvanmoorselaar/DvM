@@ -101,14 +101,15 @@ class BDM(FolderStructure):
 		return 	eegs, beh
 
 
-	def Classify(self,sj, conditions, time = (-0.3, 0.8), nr_perm = 0, bdm_matrix = False):
+	def Classify(self,sj, cnds, cnd_header, time = (-0.3, 0.8), nr_perm = 0, bdm_matrix = False):
 		''' 
 
 		Arguments
 		- - - - - 
 
 		sj(int): subject number
-		conditions (list): list of condition labels (as stored in beh dict). 
+		cnds (list): list of condition labels (as stored in beh dict). 
+		cnds_header (str): variable name containing conditions of interest
 		time (tuple | list): time samples (start to end) for decoding
 		nr_perm (int): If perm = 0, run standard decoding analysis. 
 					If perm > 0, the decoding is performed on permuted labels. 
@@ -126,13 +127,13 @@ class BDM(FolderStructure):
 		eegs, beh = self.selectBDMData(sj, time = time)
 
 		# select minumum number of trials given the specified conditions
-		max_tr = self.selectMaxTrials(beh, conditions)
+		max_tr = self.selectMaxTrials(beh, cnds, cnd_header)
 
 		# create dictionary to save classification accuracy
 		classification = {}
 
 		# loop over conditions
-		for cnd in conditions:
+		for cnd in cnds:
 
 			# reset selected trials
 			bdm_info = {}
@@ -143,7 +144,7 @@ class BDM(FolderStructure):
 			else:	
 				class_acc = np.empty((nr_perm, eegs.shape[2])) * np.nan	
 
-			cnd_idx = np.where(beh['condition'] == cnd)[0]
+			cnd_idx = np.where(beh[cnd_header] == cnd)[0]
 			cnd_labels = beh[self.decoding][cnd_idx]
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
@@ -166,8 +167,7 @@ class BDM(FolderStructure):
 		with open(self.FolderTracker(['bdm',self.decoding], filename = 'class_{}_perm-{}.pickle'.format(sj,bool(nr_perm -1))) ,'wb') as handle:
 			pickle.dump(classification, handle)
 
-
-	def selectMaxTrials(self,beh, conditions):
+	def selectMaxTrials(self,beh, cnds, cnds_header = 'condition'):
 		''' 
 		
 		For each condition the maximum number of trials per decoding label are determined
@@ -177,8 +177,8 @@ class BDM(FolderStructure):
 		Arguments
 		- - - - - 
 		beh (dict): contains all logged variables of interest
-		conditions (list): list of conditions for decoding analysis
-
+		cnds (list): list of conditions for decoding analysis
+		cnds_header (str): variable name containing conditions of interest
 
 		Returns
 		- - - -
@@ -189,10 +189,10 @@ class BDM(FolderStructure):
 
 		cnd_min = []
 		# trials for decoding
-		for cnd in conditions:
+		for cnd in cnds:
 	
 			# select condition trials and get their decoding labels
-			trials = np.where(beh['condition'] == cnd)[0]
+			trials = np.where(beh[cnds_header] == cnd)[0]
 			labels = beh[self.decoding][trials]
 
 			# select the minimum number of trials per label for BDM procedure
@@ -308,7 +308,7 @@ class BDM(FolderStructure):
 						te_t = tr_t
 
 					Xtr = np.array([X[train_tr[n,l,:],:,tr_t] for l in range(nr_labels)]).reshape(-1,nr_elec) 
-					Xte = np.vstack([X[test_tr[n,l,:],:,te_t].reshape(-1,nr_elec) for l in np.unique(labels)])
+					Xte = np.vstack([X[test_tr[n,l,:],:,te_t].reshape(-1,nr_elec) for l, lbl in enumerate(np.unique(labels))])
 
 					lda.fit(Xtr,Ytr)
 					predict = lda.predict(Xte)
