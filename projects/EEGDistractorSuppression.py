@@ -36,6 +36,148 @@ class EEGDistractorSuppression(FolderStructure):
 	def __init__(self): pass
 
 
+	def repetitionPlot(self, T, D, times, chance = 0, p_val = 0.05):
+		'''
+		Standard main plots. A 2*2 visualization of the repetition effect. Top two graphs show
+		analysis tuned to the target location. Bottom two graphs show analysis tuned to distractor
+		location. Variable blocks are shown in blue, target repetition is shown in green and distractor
+		repetition is shown in red. 
+		'''
+
+		# initialize Permutation object
+		PO = Permutation()
+
+		# nice format for 2x2 subplots
+		plt.figure(figsize = (15,10))
+		plt_idx = 1
+		y_lim = (-0.25,0.2)
+		step = ((y_lim[1] - y_lim[0])/70.0)
+
+		embed()
+		for to_plot in [T,D]:
+
+			# set plotting colors and legend labels
+			for plot in ['V','R']:
+				# initialize subplot and beatify plots
+				ax = plt.subplot(2,2 , plt_idx) 
+				ax.tick_params(axis = 'both', direction = 'outer')
+				plt.axhline(y=chance, color = 'black')
+				plt.axvline(x= -250, color = 'black') # onset placeholders
+				plt.axvline(x= 0, color = 'black')	# onset gabors
+				sns.despine(offset=50, trim = False)
+				plt.ylim(y_lim)
+
+				if plot == 'V':
+					cnds, color = ['DvTv_0','DvTv_3'], 'blue'
+				elif plot == 'R':
+					if plt_idx > 2:
+						cnds, color = ['DrTv_0','DrTv_3'], 'red'	
+					elif plt_idx <= 2:
+						cnds, color = ['DvTr_0','DvTr_3'], 'green'
+	
+				# loop over condititions	
+				for i, cnd in enumerate(cnds):
+					err, diff = bootstrap(to_plot[cnd])	
+					# plot timecourse with bootstrapped error bar
+					plt.plot(times, diff, label = cnd, color = color, ls = ['-','--'][i])
+					plt.fill_between(times, diff + err, diff - err, alpha = 0.2, color = color)		
+
+					# indicate significant clusters of individual timecourses
+					sig_cl = PO.clusterBasedPermutation(to_plot[cnd], chance, p_val = 0.05)
+					mask = np.where(sig_cl < 1)[0]
+					sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
+					for cl in sig_cl:
+						plt.plot(times[cl], np.ones(cl.size) * (y_lim[0] + step * i), ls = ['-','--'][i], color = color)
+
+				sig_cl = PO.clusterBasedPermutation(to_plot[cnds[0]], to_plot[cnds[1]], p_val = 0.01)	
+				mask = np.where(sig_cl < 1)[0]
+				sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
+				for cl in sig_cl:
+					plt.plot(times[cl], np.ones(cl.size) * (y_lim[0] + step * 2), color = 'black')	
+
+				sig_cl = PO.clusterBasedPermutation(to_plot[cnds[0]] - to_plot[cnds[1]], to_plot['DvTv_0'] - to_plot['DvTv_3'], p_val = 0.05, cl_p_val = 0.01)	
+				print sig_cl
+				mask = np.where(sig_cl < 1)[0]
+				sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
+				for cl in sig_cl:
+					plt.plot(times[cl], np.ones(cl.size) * (y_lim[0] + step * 3), color = 'grey')	
+				
+				plt.legend(loc = 'best')		
+				# update plot counter
+				plt_idx += 1	
+	
+		plt.tight_layout()	
+	
+	def alphaSlopes(self):
+		'''
+		Main analysis alpha band as reported in MS. CTF slopes is contrasted using cluster-based permutation 
+		in variable and repetition sequences bewteen the first and last repetition.
+		'''
+
+		# read in target repetition
+		slopes, info, times = self.ctfReader(sj_id = 'all', channels = 'all_channels_no-eye', 
+											header = 'target', ctf_name = 'cnds_*_slopes_alpha.pickle', fband = 'alpha')
+
+
+		T = {}
+		for cnd in ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']:
+			#T[cnd] = mne.filter.resample(np.vstack([slopes[i][cnd]['E_slopes'] for i in range(len(slopes))]), down = 4)
+			T[cnd] = np.vstack([slopes[i][cnd]['total'] for i in range(len(slopes))])
+
+		# read in dist repetition
+		slopes, info, times = self.ctfReader(sj_id = 'all', channels = 'all_channels_no-eye', 
+											header = 'dist', ctf_name = 'cnds_*_slopes_alpha.pickle', fband = 'alpha')
+		D = {}
+		for cnd in ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']:
+			#D[cnd] = mne.filter.resample(np.vstack([slopes[i][cnd]['E_slopes'] for i in range(len(slopes))]), down = 4)
+			D[cnd] = np.vstack([slopes[i][cnd]['total'] for i in range(len(slopes))])
+		
+		times = np.linspace(-300, 800, 141) - 250	
+		#times = mne.filter.resample(times, down = 2)
+		self.repetitionPlot(T,D, times)	
+		plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'alpha-slopes.pdf'))
+		plt.close()
+
+	def crossTraining(self):
+		'''
+		Add description if included in MS
+		'''	
+
+		slopes, info, times = self.ctfReader(sj_id = 'all', channels = 'all_channels_no-eye', 
+											header = 'target', ctf_name = '*_cross-training_V-R.pickle', fband = 'alpha')
+
+		plt.figure(figsize = (20,10))
+		for pl, cnd in enumerate(['DvTr_0','DvTr_3']):
+
+			ax = plt.subplot(2,2 , pl + 1, title = cnd, ylabel = 'train time (ms)', xlabel = 'test time (ms)') 
+			X = np.stack([np.squeeze(slopes[i][cnd]['slopes']) for i in range(len(slopes))])
+			p_vals = signedRankArray(X, 0)
+			X = np.mean(X, axis = 0)
+			X[p_vals > 0.05] = 0
+
+			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
+					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = 0, vmax = 0.3)
+			plt.colorbar()
+
+		slopes, info, times = self.ctfReader(sj_id = 'all', channels = 'all_channels_no-eye', 
+											header = 'dist', ctf_name = '*_cross-training_V-R.pickle', fband = 'alpha')
+ 
+		for pl, cnd in enumerate(['DrTv_0','DrTv_3']):
+
+			ax = plt.subplot(2,2 , pl + 3, title = cnd, ylabel = 'train time (ms)', xlabel = 'test time (ms)') 
+			X = np.stack([np.squeeze(slopes[i][cnd]['slopes']) for i in range(len(slopes))])
+			p_vals = signedRankArray(X, 0)
+			X = np.mean(X, axis = 0)
+			X[p_vals > 0.05] = 0
+			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
+					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = -0.3, vmax = 0.3)
+			plt.colorbar()
+
+		plt.tight_layout()
+
+		plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'cross-training.pdf'))
+		plt.close()
+
 	def conditionCheck(self, window = (-0.3,0.8), thresh_bin = 1):
 		'''
 		Checks the mimimum number of conditions after preprocessing
@@ -367,37 +509,6 @@ class EEGDistractorSuppression(FolderStructure):
 
 		plt.savefig(self.FolderTracker(['poster', 'erp'], filename = 'DTdiff.pdf'))
 		plt.close()
-
-
-
-	#### MAIN ANALYSIS
-	def CTFslopes(self, header, ctf_name, fband, cnd_name = 'cnds'):
-		'''
-
-		'''
-
-		# read in data
-		slopes, info, times = self.ctfReader(sj_id = 'all'
-			,channels = 'all_channels_no-eye', header = header, cnd_name = cnd_name, ctf_name = ctf_name, fband = fband)
-
-		# loop over evoked (pahes locked) and total power
-		for power in ['total']:#, 'evoked']:
-
-			if header == 'dist':
-				y_lim = (-0.25,0.1)
-			else:
-				y_lim = (-0.05,0.1)	
-			
-			# get plotting data
-			plotting_data = {}
-			for cnd in ['DvTv_0','DvTv_3','DrTv_0','DrTv_3','DvTr_0','DvTr_3']:
-				if cnd in slopes[0].keys():
-					plotting_data[cnd] = np.vstack([slopes[i][cnd][power] for i in range(len(slopes))])
-
-			#self.inspectTimeCourse(header, plotting_data, times, y_lim = y_lim, chance = 0)
-			self.inspectTimeCourseSEP(header, plotting_data, times, y_lim = y_lim, chance = 0, analysis = 'ctf')
-			#plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = '{}-slopes_{}_{}.pdf'.format(power,fband,header)))
-			#plt.close()
 
 	def diff_ERPS(self, elecs, erp_name, y_lim = (-5,2)):
 		'''
@@ -759,7 +870,7 @@ class EEGDistractorSuppression(FolderStructure):
 
 
 
-	def ctfReader(self, sj_id = 'all', channels = 'all_channels_no_eye', header = 'target_loc', cnd_name = 'cnds',ctf_name = '*_slopes_all.pickle', fband = 'all'):
+	def ctfReader(self, sj_id = 'all', channels = 'all_channels_no_eye', header = 'target_loc',ctf_name = '*_slopes_all.pickle', fband = 'all'):
 		'''
 		Reads in preprocessed CTF data
 
@@ -780,7 +891,7 @@ class EEGDistractorSuppression(FolderStructure):
 		'''
 
 		if sj_id == 'all':
-			files = glob.glob(self.FolderTracker(['ctf',channels,'{}_loc'.format(header)], filename = '{}_*_{}.pickle'.format(cnd_name,ctf_name)))
+			files = glob.glob(self.FolderTracker(['ctf',channels,'{}_loc'.format(header)], filename = ctf_name))
 		else:
 			ctf_name = '{}_' + ctf_name + '.pickle'
 			files = [self.FolderTracker(['ctf',channels,'{}_loc'.format(header)], filename = ctf_name.format(sj)) for sj in sj_id]	
@@ -2014,7 +2125,7 @@ class EEGDistractorSuppression(FolderStructure):
 
 if __name__ == '__main__':
 	
-	os.chdir('/home/dvmoors1/big_brother/Dist_suppression') 
+	os.chdir('/home/dvmoors1/BB/Dist_suppression') 
 
 	PO = EEGDistractorSuppression()
 
@@ -2031,6 +2142,9 @@ if __name__ == '__main__':
 	#PO.indDiffBeh()
 
 	# CTF plots
+	PO.alphaSlopes()
+	#PO.crossTraining()
+
 	#PO.CTFslopes(header = 'target', ctf_name = 'slopes_alpha', fband = 'alpha')
 	#PO.CTFslopes(header = 'dist', ctf_name = 'slopes_alpha', fband = 'alpha')
 	#PO.timeFreqCTF(header = 'target', cnd_name = 'all', perm = False, p_map = False)
@@ -2047,7 +2161,7 @@ if __name__ == '__main__':
 
 
 	# BDM plots
-	PO.bdmdiag()
+	#PO.bdmdiag()
 	#PO.bdmACC(header = 'target')
 
 	# ERP plots

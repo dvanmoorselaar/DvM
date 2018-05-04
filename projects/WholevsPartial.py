@@ -9,13 +9,16 @@ sj_info = {'1': {'tracker': (False, '', ''),  'replace':{}}, # example replace: 
 			'2': {'tracker': (False, '', ''), 'replace':{}},
 			'3': {'tracker': (False, '', ''), 'replace':{}},
 			'4': {'tracker': (True, 'asc', 500), 'replace':{}},
-			'5': {'tracker': (True, 'asc', 500), 'replace':{}}}
+			'5': {'tracker': (True, 'asc', 500), 'replace':{}},
+			'6': {'tracker': (False, '', ''), 'replace':{}},
+			'7': {'tracker': (False, '', ''), 'replace':{}},
+			'8': {'tracker': (False, '', ''), 'replace':{}}} #  first trial is spoke trigger, because wrong experiment was started
 
 # project specific info
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
-trigger = [10,11,12,19,20,21,22,29]
+trigger = [10,11,12,19]
 t_min = -0.5
 t_max = 0.75
 flt_pad = 0.5
@@ -42,15 +45,11 @@ if __name__ == '__main__':
 	os.chdir(project_folder)
 
 	# run preprocessing
-	#preprocessing(5, 1, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary)
+	preprocessing(sj = 4, session = 2, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+				  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+				  trigger = trigger, project_param = project_param, 
+				  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
-	# ERP analysis
-
-	# BDM analysis
-	embed()
-	BDM = test
-
-	PO = WholevsPartial()
 	
 
 

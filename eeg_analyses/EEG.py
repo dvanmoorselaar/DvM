@@ -267,9 +267,9 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
                 logging.info('Removed last {} trials because no matches detected'.format(nr_miss))         
                 nr_miss = 0
       
-        # keep track of missing trials toa allign eye tracking data (if available)   
-        missing = np.array(missing_trials)        
-        # log number of matches between beh and bdf       
+        # keep track of missing trials to allign eye tracking data (if available)   
+        missing = np.array(missing_trials)      
+        # log number of matches between beh and bdf      
         logging.info('{} matches between beh and epoched data out of {}'.
             format(sum(beh['trigger'].values == bdf_triggers), bdf_triggers.size))           
 
@@ -305,7 +305,7 @@ class Epochs(mne.Epochs, FolderStructure):
         self.nr_events = len(self)
         logging.info('{} epochs created'.format(len(self)))
 
-    def selectBadChannels(self, channel_plots=True, inspect=True, n_epochs=10, n_channels=32):
+    def selectBadChannels(self, channel_plots=True, inspect=True, n_epochs=10, n_channels=32, RT = None):
         '''
 
         '''
@@ -321,18 +321,19 @@ class Epochs(mne.Epochs, FolderStructure):
             for ch in picks:
                 # plot evoked responses across channels
                 try:  # handle bug in mne for plotting undefined x, y coordinates
-                    plot_epochs_image(self, ch, show=False)
+                    plot_epochs_image(self.copy().crop(self.tmin + self.flt_pad,self.tmax - self.flt_pad), ch, show=False, overlay_times = RT)
                     plt.savefig(self.FolderTracker(extension=[
-                                'preprocessing', 'subject-{}'.format(self.sj), self.session, 'channel_erps'], filename='ch_{}'.format(ch)))
+                                'preprocessing', 'subject-{}'.format(self.sj), self.session, 'channel_erps'], filename='{}.pdf'.format(self.ch_names[ch])))
                     plt.close()
+
                 except:
                     plt.savefig(self.FolderTracker(extension=[
-                                'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='ch_{}'.format(ch)))
+                                'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='{}.pdf'.format(self.ch_names[ch])))
                     plt.close()
 
                 self.plot_psd(picks = [ch], show = False)   
                 plt.savefig(self.FolderTracker(extension=[
-                                'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='ch_{}_psd'.format(ch)))
+                                'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='_psd_{}'.format(self.ch_names[ch])))
                 plt.close() 
 
             # plot power spectra topoplot to detect any clear bad electrodes
@@ -752,7 +753,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
             logging.info('EEG sessions combined')
 
-def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary):
+def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
     '''
     Standard preprocessing pipeline
     '''
@@ -794,11 +795,14 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
             tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
     # ARTIFACT DETECTION
-    epochs.selectBadChannels(channel_plots = True, inspect=True)
-    epochs.artifactDetection(inspect=False)
+    if 'RT' in beh.keys():
+        epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = beh['RT']/1000)
+    else:
+        epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = None)    
+    epochs.artifactDetection(inspect=inspect)
 
     # ICA
-    epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+    epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
 
     # EYE MOVEMENTS
     epochs.detectEye(missing, time_window=(t_min, t_max), tracker = tracker, extension = ext, eye_freq = t_freq)

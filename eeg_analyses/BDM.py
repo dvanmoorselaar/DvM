@@ -206,14 +206,13 @@ class BDM(FolderStructure):
 
 		return max_trials
 
-
 	def bdmTrialSelection(self, idx, labels, max_tr, bdm_info):
 		''' 
 
 		Splits up data into training and test sets. The number of training and test sets is 
 		equal to the number of folds. Splitting is done such that all data is tested exactly once.
 		Number of folds determines the ratio between training and test trials. With 10 folds, 90%
-		of the data is used for training and 10 for testing. 
+		of the data is used for training and 10% for testing. 
 		
 
 		Arguments

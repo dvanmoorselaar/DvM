@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 from IPython import embed
 from eeg_analyses.FolderStructure import FolderStructure
-#from eeg_analyses.EEG import * 
+from eeg_analyses.EEG import * 
 from eeg_analyses.BDM import BDM 
 
 # subject specific info
@@ -29,12 +29,12 @@ montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
 trigger = [12,13,14,15,16,21,23,24,25,26,31,32,34,35,36,41,42,43,45,46,51,52,53,54,56,61,62,63,64,65,101,102,103,104,105,106]
-t_min = -0.5
-t_max = 0.6
+t_min = -0.75
+t_max = 0.55
 flt_pad = 0.5
 eeg_runs = [1]
-binary =  0
-project_param = ['practice','nr_trials','trigger','condition',
+binary =  61440
+project_param = ['practice','nr_trials','trigger','condition','RT',
 				'block_type', 'correct','dist_high','dist_loc','dist_orient',
 		         'dist_type','high_loc', 'target_high','target_loc','target_type']
 
@@ -81,19 +81,21 @@ if __name__ == '__main__':
 	os.chdir(project_folder)
 
 	# run preprocessing
-	#preprocessing(1, 1, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary)
-
+	preprocessing(sj = 5, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+				  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+				  trigger = trigger, project_param = project_param, 
+				  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 	# ERP analysis
 
 	# BDM analysis
-	BDM = BDM('all_channels','target_type', nr_folds = 10)
-	for sj in [4,7]:
-		BDM.Classify(sj, ['DTsim','DTdisDP','DTdisP'], 'block_type', time = (-0.5, 0.6), nr_perm = 0, bdm_matrix = False)
+	#BDM = BDM('all_channels','target_type', nr_folds = 10)
+	#for sj in [4,7]:
+	#	BDM.Classify(sj, ['DTsim','DTdisDP','DTdisP'], 'block_type', time = (-0.5, 0.6), nr_perm = 0, bdm_matrix = False)
 
 
 	# plot project analysis
-	PO = WholevsPartial()
-	PO.plotBDM(header = 'target', cnds = ['DTsim','DTdisDP','DTdisP']) 
+	#PO = WholevsPartial()
+	#PO.plotBDM(header = 'target', cnds = ['DTsim','DTdisDP','DTdisP']) 
 
 
