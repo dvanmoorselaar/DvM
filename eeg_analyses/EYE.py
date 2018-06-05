@@ -84,7 +84,7 @@ class EYE(FolderStructure):
 				for i, ses in enumerate(beh_sessions):
 					if ses not in eye_sessions:
 						beh_files.pop(i)
-
+		
 		if eye_files[0][-3:] == 'tsv':			
 			eye = [read_eyetribe(file, start = start) for file in eye_files]
 		elif eye_files[0][-3:] == 'asc':	
@@ -238,8 +238,6 @@ class EYE(FolderStructure):
 		eye, beh = self.readEyeData(sj, 'all', 'all')
 		x, y, times = self.getXY(eye, start = start, end = end)	
 
-
-		embed()
 		# read in data (or create new dictionary)
 		if os.path.isfile(fname): 
 			with open(fname ,'rb') as handle:
@@ -324,7 +322,7 @@ class EYE(FolderStructure):
 		with open(fname ,'wb') as handle:
 			pickle.dump(sac_d, handle)
 
-	def eyeBinEEG(self, sj, session, start, end, drift_correct = (-300,0), extension = 'asc'):
+	def eyeBinEEG(self, sj, session, start, end, drift_correct = (-300,0), start_event = '', extension = 'asc'):
 		''' 
 
 		Function is called during preprocessing of raw EEG data. If eye-tracking data is available,
@@ -365,7 +363,7 @@ class EYE(FolderStructure):
 			eye, beh = self.readEyeData(sj, eye_file, [beh_file])
 
 			# collect x, y data 
-			x, y, times = self.getXY(eye, start = start, end = end)	
+			x, y, times = self.getXY(eye, start = start, end = end, start_event = start_event)	
 
 			# create deviation bins for for each trial(after correction for drifts in fixation period)	
 			x, y = self.setXY(x,y, times, drift_correct)

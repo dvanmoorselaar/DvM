@@ -31,7 +31,7 @@ class PreProcessing(object):
 		Arguments
 		- - - - - 
 		project (str): Name of project folder
-		part (str): subfolder of specific experiment
+		part (str): subfolder where behavior of specific experiment is stored
 		factor_headers (list): list of experimental manipulations (column names in .csv file)
 		factor_labels (list): list of factors per experimental manipulation in factor_headers
 
@@ -40,7 +40,8 @@ class PreProcessing(object):
 
 		"""
 
-		self.project_folder = os.path.join(os.getcwd(), project, part)
+
+		self.project_folder = os.path.join(os.getcwd(), part)
 		self.factor_headers = factor_headers
 		self.factor_labels = factor_labels
 		self.outlier = np.array(())

@@ -8,8 +8,8 @@ import os
 import mne
 import pickle
 import math
-import matplotlib
-matplotlib.use('agg') # now it works via ssh connection
+#import matplotlib
+#matplotlib.use('agg') # now it works via ssh connection
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,6 @@ from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
 from FolderStructure import FolderStructure
 from eeg_support import *
-
 
 class ERP(FolderStructure):
 
@@ -40,7 +39,6 @@ class ERP(FolderStructure):
 		self.header = header
 		self.baseline = baseline
 		self.flipped = False
-
 
 	def selectERPData(self, sj, time = [-0.3, 0.8], l_filter = False, thresh_bin = 1):
 		''' 
@@ -241,9 +239,12 @@ class ERP(FolderStructure):
 		if str(sj) not in erps.keys():
 			erps.update({str(sj):{}})
 
+		# filthy hack to get rid of 'None' in index array
+		self.beh[self.header][self.beh[self.header] == 'None'] = np.nan
+
 		# select left and right trials
-		idx_l = np.sort(np.hstack([np.where(self.beh[self.header] == l)[0] for l in left]))
-		idx_r = np.sort(np.hstack([np.where(self.beh[self.header] == r)[0] for r in right]))
+		idx_l = np.sort(np.hstack([np.where(np.array(self.beh[self.header], dtype = float) == l)[0] for l in left]))
+		idx_r = np.sort(np.hstack([np.where(np.array(self.beh[self.header], dtype = float) == r)[0] for r in right]))
 
 		# if midline, only select midline trials
 		if midline != None:
@@ -274,8 +275,12 @@ class ERP(FolderStructure):
 			else:	
 				idx_c = np.where(self.beh['condition'] == cnd)[0]
 			
-			idx_c_l = np.array([l for l in idx_c if l in idx_l])
-			idx_c_r = np.array([r for r in idx_c if r in idx_r])
+			idx_c_l = np.array([l for l in idx_c if l in idx_l], dtype = int)
+			idx_c_r = np.array([r for r in idx_c if r in idx_r], dtype = int)
+
+			if idx_c_l.size == 0 and idx_c_r.size == 0:
+				print 'no data found for {}'.format(cnd)
+				continue
 
 			if self.flipped:
 				# as if all stimuli presented right: left electrodes are contralateral, right electrodes are ipsilateral
@@ -336,8 +341,11 @@ class ERP(FolderStructure):
 		else:
 			conditions = ['all'] + conditions
 
+		# filthy hack to get rid of 'None' in index array
+		self.beh[self.header][self.beh[self.header] == 'None'] = np.nan
+
 		if loc != 'all':
-			idx_l = np.sort(np.hstack([np.where(self.beh[self.header] == l)[0] for l in loc]))
+			idx_l = np.sort(np.hstack([np.where(np.array(self.beh[self.header], dtype = float) == l)[0] for l in loc]))
 
 			# if midline, only select midline trials
 			if midline != None:
@@ -360,7 +368,11 @@ class ERP(FolderStructure):
 			elif loc == 'all' and midline != None:
 				idx_c_l = np.array([l for l in idx_c if l in idx_m])
 			else:
-				idx_c_l = idx_c				
+				idx_c_l = idx_c	
+
+			if idx_c_l.size == 0:
+				print 'no topo data found for {}'.format(cnd)
+				continue				
 
 			topo = self.eeg[idx_c_l,:,:]
 
@@ -448,32 +460,34 @@ class ERP(FolderStructure):
 			
 if __name__ == '__main__':
 
-	project_folder = '/home/dvmoors1/big_brother/Dist_suppression'
-	os.chdir(project_folder) 
-	subject_id = [1,2,5,6,7,8,10,12,13,14,15,18,19,21,22,23,24]
-	subject_id = [3,4,9,11,17,20]	
-	header = 'dist_loc'
+	pass
 
-	session = ERP(header = header, baseline = [-0.3,0])
-	if header == 'target_loc':
-		conditions = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
-		midline = {'dist_loc': [0,3]}
-	else:
-		conditions = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
-		midline = {'target_loc': [0,3]}
+	# project_folder = '/home/dvmoors1/big_brother/Dist_suppression'
+	# os.chdir(project_folder) 
+	# subject_id = [1,2,5,6,7,8,10,12,13,14,15,18,19,21,22,23,24]
+	# subject_id = [3,4,9,11,17,20]	
+	# header = 'dist_loc'
+
+	# session = ERP(header = header, baseline = [-0.3,0])
+	# if header == 'target_loc':
+	# 	conditions = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
+	# 	midline = {'dist_loc': [0,3]}
+	# else:
+	# 	conditions = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
+	# 	midline = {'target_loc': [0,3]}
 	
-	for sj in subject_id:
+	# for sj in subject_id:
 
-		session.selectERPData(sj, time = [-0.3, 0.8], l_filter = 30) 
-		session.ipsiContra(sj, left = [2], right = [4], l_elec = ['P7','P5','P3','PO7','PO3','O1'], 
-									r_elec = ['P8','P6','P4','PO8','PO4','O2'], midline = None, balance = True, erp_name = 'lat-down1')
-		session.ipsiContra(sj, left = [2], right = [4], l_elec = ['P7','P5','P3','PO7','PO3','O1'], 
-									r_elec = ['P8','P6','P4','PO8','PO4','O2'], midline = midline, balance = True, erp_name = 'lat-down1-mid')
+	# 	session.selectERPData(sj, time = [-0.3, 0.8], l_filter = 30) 
+	# 	session.ipsiContra(sj, left = [2], right = [4], l_elec = ['P7','P5','P3','PO7','PO3','O1'], 
+	# 								r_elec = ['P8','P6','P4','PO8','PO4','O2'], midline = None, balance = True, erp_name = 'lat-down1')
+	# 	session.ipsiContra(sj, left = [2], right = [4], l_elec = ['P7','P5','P3','PO7','PO3','O1'], 
+	# 								r_elec = ['P8','P6','P4','PO8','PO4','O2'], midline = midline, balance = True, erp_name = 'lat-down1-mid')
 
-		session.topoFlip(left = [1,2])
+	# 	session.topoFlip(left = [1,2])
 		
-		session.topoSelection(sj, loc = [2,4], midline = None, topo_name = 'lat-down1')
-		session.topoSelection(sj, loc = [2,4], midline = midline, topo_name = 'lat-down1-mid')
+	# 	session.topoSelection(sj, loc = [2,4], midline = None, topo_name = 'lat-down1')
+		# session.topoSelection(sj, loc = [2,4], midline = midline, topo_name = 'lat-down1-mid')
 
 
 

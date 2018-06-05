@@ -13,6 +13,7 @@ import os
 import h5py
 import pickle
 import mne
+import random
 import warnings
 import matplotlib
 matplotlib.use('agg')
@@ -210,20 +211,22 @@ class SpatialEM(BDM):
 		# 	total[:,ch,:] = np.abs(hilbert(filter_data(data[:,ch,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
 	
 
-		try: # FILTHY HACK TO PREVENT CRASH WHEN ANALYZING ALL TRIALS
-			T = np.abs(hilbert(filter_data(data[:,ch,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
+		# try: # FILTHY HACK TO PREVENT CRASH WHEN ANALYZING ALL TRIALS
+		# 	T = np.abs(hilbert(filter_data(data[:,ch,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
+		# 	if evoked:
+		# 		E = hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
+		# 	else:
+		# 		E = T	
+		
+		# except:
+		# print 'fifth order failed'
+		T = np.empty(data.shape, dtype= np.complex_) * np.nan
+		E = np.copy(T)
+
+		for i in range(data.shape[0]):
+			T[i] = np.abs(hilbert(filter_data(data[i], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
 			if evoked:
-				E = hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
-			else:
-				E = T	
-			
-		except:
-			print 'fifth order failed'
-			T = np.abs(hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 4))))**2
-			if evoked:
-				E = hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 4)))
-			else:	
-				E = T	
+				E[i] = hilbert(filter_data(data[i], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
 			
 		# trim filtered data to remove times that are not of interest (after filtering to avoid artifacts)
 		E = E[:,:,tois]
@@ -375,20 +378,21 @@ class SpatialEM(BDM):
 			_, bin_count = np.unique(pos_bins[cnds == of_interest], return_counts = True)			
 
 		min_count = np.min(bin_count)
-		if method == 'Chicago':
+		if method == 'Foster':
 			nr_per_bin = int(np.floor(min_count/self.nr_blocks))						# max number of trials per bin
 		else:
 			nr_per_bin = int(np.floor(min_count/self.nr_iter)*self.nr_iter)
 
 		return nr_per_bin
 
-	def assignBlocks(self, pos_bin, nr_per_bin,  nr_iter):
+	def assignBlocks(self, pos_bin, idx_tr, nr_per_bin,  nr_iter):
 		'''
 		assignBlocks creates a random block assignment (train and test blocks)
 
 		Arguments
 		- - - - - 
 		pos_bin (array): array with position bins
+		idx_tr (array): array of trial numbers corresponding to pos_bin labels
 		nr_per_bin(int): maximum number of trials to be used per location bin
 		nr_iter (int): number of iterations used for IEM
 		Returns
@@ -417,9 +421,30 @@ class SpatialEM(BDM):
 			# unshuffle block assignment and save to CTF
 			blocks[idx_shuf] = shuf_blocks	
 			bl_assign[i] = blocks
-			trials_per_block = sum(blocks == 0)
+			tr_per_block = sum(blocks == 0)/self.nr_bins
 
-		return bl_assign, trials_per_block	
+		# split up data according to number of blocks in one test and remaining training sets
+		tr_idx = np.zeros((nr_iter * self.nr_blocks, self.nr_bins, self.nr_blocks - 1, tr_per_block), dtype = int)
+		te_idx = np.zeros((nr_iter * self.nr_blocks, self.nr_bins, tr_per_block), dtype = int)
+
+		# make sure that data is splitted such that test contains indices of test trials
+		# and train contains indices of rows for all seperate train trials
+		idx = 0
+		for itr in range(nr_iter):
+			for bl in range(self.nr_blocks):
+				for b in range(self.nr_bins): 
+					# select trials where bin is b from test block trials 
+					te_idx[idx,b] = idx_tr[np.where((bl_assign[itr] == bl) * (pos_bin == b))[0]]
+					# select trials where bin is b from no test block trials
+					train = idx_tr[np.where((~np.isnan(bl_assign[itr])) * (bl_assign[itr] != bl) * (pos_bin == b))[0]]
+					random.shuffle(train)
+					# split data in number of training blocks (i.e. nr test blocks - 1) and save data seperately
+					train = np.array_split(train, self.nr_blocks - 1)
+					for j in range(self.nr_blocks - 1):
+						tr_idx[idx, b, j] = train[j]
+				idx += 1
+
+		return tr_idx, te_idx	
 
 	def crosstrainCTF(self, sj, window, train_cnds, test_cnds, freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = False, name = ''):
 		'''
@@ -461,6 +486,7 @@ class SpatialEM(BDM):
 
 		# loop over test conditions
 		for test_cnd in test_cnds:
+			print test_cnd
 
 			# select test data
 			test_X = eegs[cnds == test_cnd,:,:]
@@ -509,10 +535,14 @@ class SpatialEM(BDM):
 						tf[fr,tr_smpl, te_idx] = np.mean(c2s,0)			# save average of shifted channel response
 						W[fr, tr_smpl, te_idx] = w 						# save estimated weights per channel and electrode
 
-				# calculate slopes
-				slopes = np.zeros((nr_freqs, nr_samples, nr_te_samples))
-				for t in range(tf.shape[2]):
-					slopes[:,:,t] = self.calculateSlopes(tf[:,:,t,:],nr_freqs,nr_samples) 
+			# calculate slopes
+			slopes = np.zeros((nr_freqs, nr_samples, nr_te_samples))
+			for t in range(tf.shape[2]):
+				slopes[:,:,t] = self.calculateSlopes(tf[:,:,t,:],nr_freqs,nr_samples) 
+
+			plt.plot(np.squeeze(slopes))
+			plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}-{}_cross-training.pdf'.format(test_cnd,sj)))	
+			plt.close()	
 
 			CTF[test_cnd] = {'C2':C2, 'ctf': tf, 'W': w, 'slopes': slopes}
 
@@ -520,7 +550,7 @@ class SpatialEM(BDM):
 			print('saving cross training CTF dict')
 			pickle.dump(CTF, handle)
 
-	def CTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster'):
+	def CTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', plot = True):
 		'''
 		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
 
@@ -533,6 +563,7 @@ class SpatialEM(BDM):
 		from 1Hz
 		downsample (int): factor to downsample the bandpass filtered data
 		method (str): method used for splitting data into training and testing sets
+		plot (bool): show plots of total power slopes on subject level across conditions
 
 		Returns
 		- - - -
@@ -559,9 +590,10 @@ class SpatialEM(BDM):
 		pos_bins, cnds, eegs, EEG = self.readData(sj, conditions)
 		samples = np.logical_and(EEG.times >= window[0], EEG.times <= window[1])
 		nr_samples = samples.sum()/downsample	
+		ctf_info['times'] = mne.filter.resample(EEG.times[samples], down = downsample)
 
 		# Determine the number of trials that can be used for each position bin, matched across conditions
-		nr_per_bin = self.maxTrial(cnds, pos_bins, conditions) # NEEDS TO BE FIXED
+		nr_per_bin = self.maxTrial(cnds, pos_bins, conditions, method) # NEEDS TO BE FIXED
 
 		# Loop over frequency bands (such that all data is filtered only once)
 		for fr in range(nr_freqs):
@@ -574,6 +606,7 @@ class SpatialEM(BDM):
 			for c, cnd in enumerate(conditions):
 
 				# update CTF dict with preallocated arrays such that condition data can be saved later 
+				ctf_info.update({cnd:{}})
 				ctf.update({cnd: {'tf_E': np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_chans)) * np.nan,
 								 'C2_E': np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
 								 'W_E':	np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan,
@@ -592,52 +625,76 @@ class SpatialEM(BDM):
 						cnd_idx = np.where(cnds == cnd)[0]
 						labels = pos_bins[cnds == cnd]
 						self.nr_folds = self.nr_iter
-						embed()
 						if method == 'Foster':
-							what_here, what_here  = self.assignBlocks(labels, nr_per_bin, self.nr_iter)									
+							ctf_info[cnd]['tr'], ctf_info[cnd]['te']  = self.assignBlocks(labels, cnd_idx, nr_per_bin, self.nr_iter)
+							C1 = np.empty((self.nr_bins* (self.nr_blocks - 1), self.nr_chans)) * np.nan 										
 						else:
-							ctf[cnd]['tr'], ctf[cnd]['te'], _ = self.bdmTrialSelection(cnd_idx, labels, nr_per_bin, {})
+							ctf_info[cnd]['tr'], ctf_info[cnd]['te'], _ = self.bdmTrialSelection(cnd_idx, labels, nr_per_bin, {})
+							C1 = self.basisset
 
 				# Loop through each iteration (is folds in the new set up)
 				for itr in range(self.nr_iter):
 
 					# average data for each position
-					bin_tr_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
 					bin_te_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
-					bin_tr_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
 					bin_te_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
-
+					if method == 'fold':
+						bin_tr_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
+						bin_tr_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
+					elif method == 'Foster':
+						bin_tr_E = np.empty((self.nr_bins * (self.nr_blocks - 1), eegs.shape[1], T.shape[2])) * np.nan
+						bin_tr_T = np.empty((self.nr_bins * (self.nr_blocks - 1), eegs.shape[1], T.shape[2])) * np.nan	
+					
+					bin_cntr = 0
 					for b in range(self.nr_bins):
-						bin_tr_T[b] = np.mean(T[ctf[cnd]['tr'][itr][b]], axis = 0)
-						bin_tr_E[b] = abs(np.mean(E[ctf[cnd]['tr'][itr][b]], axis = 0))**2
-						bin_te_T[b] = np.mean(T[ctf[cnd]['te'][itr][b]], axis = 0)
-						bin_te_E[b] = abs(np.mean(E[ctf[cnd]['te'][itr][b]], axis = 0))**2
-
+						bin_te_E[b] = abs(np.mean(E[ctf_info[cnd]['te'][itr][b]], axis = 0))**2
+						bin_te_T[b] = np.mean(T[ctf_info[cnd]['te'][itr][b]], axis = 0)
+						if method == 'fold':
+							bin_tr_E[b] = abs(np.mean(E[ctf_info[cnd]['tr'][itr][b]], axis = 0))**2
+							bin_tr_T[b] = np.mean(T[ctf_info[cnd]['tr'][itr][b]], axis = 0)	
+						elif method == 'Foster':
+							for j in range(self.nr_blocks - 1):
+								bin_tr_E[bin_cntr] = abs(np.mean(E[ctf_info[cnd]['tr'][itr][b][j]], axis = 0))**2
+								bin_tr_T[bin_cntr] = np.mean(T[ctf_info[cnd]['tr'][itr][b][j]], axis = 0)
+								C1[bin_cntr] = self.basisset[b]
+								bin_cntr += 1
+														
 					# Loop over all samples CHECK WHETHER THIS LOOP CAN BE PARALLIZED 
 					for smpl in range(nr_samples):
 
 						###### ANALYSIS ON EVOKED POWER ######
-						c2, c2s, w = self.forwardModel(bin_tr_E[:,:,smpl], bin_te_E[:,:,smpl], self.basisset)
+						c2, c2s, w = self.forwardModel(bin_tr_E[:,:,smpl], bin_te_E[:,:,smpl], C1)
 						ctf[cnd]['C2_E'][fr,itr,smpl] = c2							# save the unshifted channel response
 						ctf[cnd]['tf_E'][fr,itr, smpl] = np.mean(c2s,0)				# save average of shifted channel response
 						ctf[cnd]['W_E'][fr, itr, smpl] = w 							# save estimated weights per channel and electrode
 
 						###### ANALYSIS ON TOTAL POWER ######
-						c2, c2s, w = self.forwardModel(bin_tr_T[:,:,smpl], bin_te_T[:,:,smpl], self.basisset)
+						c2, c2s, w = self.forwardModel(bin_tr_T[:,:,smpl], bin_te_T[:,:,smpl], C1)
 						ctf[cnd]['C2_T'][fr, itr, smpl] = c2 						# save the unshifted channel response
 						ctf[cnd]['tf_T'][fr,itr, smpl] = np.mean(c2s,0)				# save average of shifted channel response
 						ctf[cnd]['W_T'][fr, itr, smpl] = w 							# save estimated weights per channel and electrode 
 
 		# calculate slopes
+		slopes = {}
 		for cnd in ctf.keys():
-			ctf[cnd]['T_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_T'], axis = 1),nr_freqs,nr_samples) 
-			ctf[cnd]['E_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_E'], axis = 1),nr_freqs,nr_samples)
+			slopes.update({cnd:{}})
+			slopes[cnd]['T_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_T'], axis = 1),nr_freqs,nr_samples) 
+			slopes[cnd]['E_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_E'], axis = 1),nr_freqs,nr_samples)
+			if plot:
+				plt.plot(slopes[cnd]['T_slopes'].T, label = cnd)
+		plt.legend(loc = 'best')
+		plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding, 'figs'], filename = '{}_slopes_{}.pdf'.format(sj, freqs.keys()[0])))		
+		plt.close()
 
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_ctf_{}-new.pickle'.format(cnd_name,str(sj),freqs.keys()[0])),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_ctf_{}.pickle'.format(cnd_name,str(sj),freqs.keys()[0])),'wb') as handle:
 			print('saving CTF dict')
 			pickle.dump(ctf, handle)
+
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-fold_{}.pickle'.format(cnd_name,str(sj),freqs.keys()[0])),'wb') as handle:
+			print('saving CTF dict')
+			pickle.dump(slopes, handle)
 	
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_info-new.pickle'.format(freqs.keys()[0])),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_info.pickle'.format(freqs.keys()[0])),'wb') as handle:
 			print('saving info dict')
 			pickle.dump(ctf_info, handle)
 
@@ -1652,7 +1709,6 @@ class SpatialEM(BDM):
 		plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding,'figs'], filename = 'veog_ind_mem.pdf'))		
 		plt.close()	
 
-
 		plt.figure(figsize= (20,10))			
 
 		for i, cnd in enumerate(conditions):
@@ -1687,11 +1743,10 @@ if __name__ == '__main__':
 
 	session = SpatialEM('all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
 	
-
 	### CTF and SLOPES ###
 	for sj in subject_id:
-		session.CTF(sj, [-300, 800], conditions, method = 'Fold', downsample = 4)
-		#session.crosstrainCTF(sj, [-300, 800], ['DvTv_0','DvTv_3'], ['DrTv_0', 'DrTv_3'], tgm = True, name = 'V-R')
+		session.CTF(sj, [-300, 800], conditions, method = 'fold', downsample = 4)
+	#	session.crosstrainCTF(sj, [-300, 800], ['DvTv_0','DvTv_3'], ['DrTv_0', 'DrTv_3'], tgm = False, name = 'V-R')
 	#	print subject
 	#	session.spatialCTF(sj,[-300,800],500, conditions = conditions, freqs = dict(alpha = [8,12]))
 	#	session.spatialCTF(subject, [-300,800],500, conditions = 'all', freqs = dict(all=[4,30]), downsample = 4)

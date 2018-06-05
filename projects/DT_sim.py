@@ -13,9 +13,12 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from IPython import embed
-from eeg_analyses.FolderStructure import FolderStructure
 from eeg_analyses.EEG import * 
+from eeg_analyses.ERP import * 
 from eeg_analyses.BDM import BDM 
+from support.FolderStructure import *
+from support.support import *
+from stats.nonparametric import *
 
 # subject specific info
 sj_info = {'1': {'tracker': (False, '', ''),  'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
@@ -42,9 +45,43 @@ project_param = ['practice','nr_trials','trigger','condition','RT',
 sns.set(font_scale=2.5)
 sns.set_style('ticks', {'xtick.major.size': 10, 'ytick.major.size': 10})
 
-class WholevsPartial(FolderStructure):
+class DT_sim(FolderStructure):
 
 	def __init__(self): pass
+
+	def plotERP(self):
+		'''
+
+		'''
+
+		# read in cda data
+		with open(self.FolderTracker(['erp','dist_loc'], filename = 'main.pickle') ,'rb') as handle:
+			erp = pickle.load(handle)
+
+		with open(self.FolderTracker(['erp','dist_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+
+		plt.figure(figsize = (30,20))
+		for idx, cnd in enumerate(['DTsim-no','DTsim-yes','DTdisDP-no', 'DTdisDP-yes','DTdisP-no','DTdisP-yes']):
+			ax =  plt.subplot(3,2, idx + 1, title = cnd, ylabel = 'mV', xlabel = 'time (ms)')
+			ipsi = np.squeeze(np.stack([erp[e][cnd]['ipsi'] for e in erp]))
+			contra = np.squeeze(np.stack([erp[e][cnd]['contra'] for e in erp]))
+			err_i, ipsi  = bootstrap(ipsi)	
+			err_c, contra  = bootstrap(contra)	
+
+			#plt.ylim(-8,8)
+			plt.axhline(y = 0, color = 'black')
+			plt.plot(info['times'], ipsi, label = 'ipsi', color = 'red')
+			plt.plot(info['times'], contra, label = 'contra', color = 'green')
+			plt.fill_between(info['times'], ipsi + err_i, ipsi - err_i, alpha = 0.2, color = 'red')	
+			plt.fill_between(info['times'], contra + err_c, contra - err_c, alpha = 0.2, color = 'green')	
+
+			plt.legend(loc = 'best')
+			sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['erp','dist_loc'], filename = 'ipsi-contra.pdf'))
+		plt.close()
 
 	def plotBDM(self, header, cnds):
 		'''
@@ -81,12 +118,19 @@ if __name__ == '__main__':
 	os.chdir(project_folder)
 
 	# run preprocessing
-	preprocessing(sj = 5, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-				  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-				  trigger = trigger, project_param = project_param, 
-				  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+	sj = 2
+	# preprocessing(sj = 5, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+	# 			  trigger = trigger, project_param = project_param, 
+	# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 	# ERP analysis
+	# erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25])
+	# erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
+	# erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7'], 
+	# 								r_elec = ['PO8'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
+	# erp.topoFlip(left = [2])
+	# erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
 
 	# BDM analysis
 	#BDM = BDM('all_channels','target_type', nr_folds = 10)
@@ -95,7 +139,8 @@ if __name__ == '__main__':
 
 
 	# plot project analysis
-	#PO = WholevsPartial()
+	PO = DT_sim()
+	PO.plotERP()
 	#PO.plotBDM(header = 'target', cnds = ['DTsim','DTdisDP','DTdisP']) 
 
 

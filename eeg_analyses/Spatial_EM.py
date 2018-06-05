@@ -211,7 +211,7 @@ class SpatialEM(FolderStructure):
 
 		try: # FILTHY HACK TO PREVENT CRASH WHEN ANALYZING ALL TRIALS
 			evoked = hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
-			total = np.abs(hilbert(filter_data(data[:,ch,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
+			total = np.abs(hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
 		except:
 			evoked = hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 4)))
 			total = np.abs(hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 4))))**2
@@ -627,7 +627,6 @@ class SpatialEM(FolderStructure):
 						# FORWARD MODEL
 						for blck in range(self.nr_blocks):
 
-							embed()
 							###### ANALYSIS ON EVOKED POWER ######
 							C2, C2s, We = self.forwardModel(data_evoked, labels, c, block_nr, blck, all_bins)
 							C2_evoked[freq,itr,smpl,blck,:,:] = C2 					# save the unshifted channel response
@@ -640,7 +639,9 @@ class SpatialEM(FolderStructure):
 							C2_total[freq,itr,smpl,blck,:,:] = C2 					# save the unshifted channel response
 							tf_total[freq,itr,smpl,blck,:] = np.mean(C2s,0)			# save average of shifted channel response
 							W_total[freq, itr, smpl,blck,:,:] = Wt 					# save estimated weights per channel and electrode
-			
+		
+			embed()				
+
 			# save relevant data to CTF dictionary
 			CTF[curr_cond]['C2'] = {}
 			CTF[curr_cond]['C2'].update({'evoked': C2_evoked,'total': C2_total})
@@ -1702,7 +1703,7 @@ if __name__ == '__main__':
 	subject_id = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]	
 
 	### INITIATE SESSION ###
-	header = 'dist_loc'
+	header = 'target_loc'
 	if header == 'target_loc':
 		conditions = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
 	else:
@@ -1714,12 +1715,12 @@ if __name__ == '__main__':
 	for subject in subject_id:
 	#	print subject
 		session.spatialCTF(subject,[-300,800],500, conditions = conditions, freqs = dict(alpha = [8,12]), downsample = 4)
-	#	session.spatialCTF(subject, [-300,800],500, conditions = conditions, freqs = dict(all=[4,30]), downsample = 4)
-	#	session.permuteSpatialCTF(subject_id = subject, nr_perms = 500)
+		session.spatialCTF(subject, [-300,800],500, conditions = conditions, freqs = dict(all=[4,30]), downsample = 4)
+		session.permuteSpatialCTF(subject_id = subject, nr_perms = 500)
 	
-	session.CTFSlopes(subject_id, conditions = conditions,cnd_name = 'cnds', band = 'alpha', perm = False)
-	#session.CTFSlopes(subject_id, conditions = ['all'], cnd_name = 'all', band = 'all', perm = False)
-	#session.CTFSlopes(subject_id, conditions = ['all'], cnd_name = 'all', band = 'all', perm = True)
+	#session.CTFSlopes(subject_id, conditions = conditions,cnd_name = 'cnds', band = 'alpha', perm = False)
+	session.CTFSlopes(subject_id, conditions = ['all'], cnd_name = 'all', band = 'all', perm = False)
+	session.CTFSlopes(subject_id, conditions = ['all'], cnd_name = 'all', band = 'all', perm = True)
 
 
 	#subject_id = [2,3,4,6,7,9]

@@ -81,7 +81,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
                     # print('Electrode {0} replaced by
                     # {1}'.format(e,replace[sj][session][e]))
 
-    def reReference(self, ref_channels=['EXG5', 'EXG6'], vEOG=['EXG1', 'EXG2'], hEOG=['EXG3', 'EXG4'], changevoltage=True):
+    def reReference(self, ref_channels=['EXG5', 'EXG6'], vEOG=['EXG1', 'EXG2'], hEOG=['EXG3', 'EXG4'], changevoltage=True, to_remove = ['EXG1','EXG2','EXG3','EXG4','EXG5','EXG6','EXG7','EXG8']):
         '''
         Rereference raw data to reference channels. By default data is rereferenced to the mastoids.
         Also EOG data is rerefenced. Subtraction of VEOG and HEOG results in a VEOG and an HEOG channel.
@@ -94,6 +94,8 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         ref_channels (list): list with channels for rerefencing
         vEOG (list): list with vEOG channels
         hEOG (list): list with hEOG channels
+        changevoltage (bool):
+        remove(bool): Specify whether channels need to be removed
 
         Returns
         - - - -
@@ -117,8 +119,11 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         idx_v = [self.ch_names.index(vert) for vert in vEOG]
         idx_h = [self.ch_names.index(hor) for hor in hEOG]
 
-        self._data[idx_v[0]] -= self._data[idx_v[1]]
-        self._data[idx_h[0]] -= self._data[idx_h[1]]
+        if len(idx_v) == 2:
+            self._data[idx_v[0]] -= self._data[idx_v[1]]
+        if len(idx_h) == 2:   
+            self._data[idx_h[0]] -= self._data[idx_h[1]]
+        
         ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
         self.rename_channels(ch_mapping)
         print(
@@ -127,7 +132,6 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
             'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
 
         # drop ref chans
-        to_remove = ref_channels + [vEOG[1], hEOG[1]] + ['EXG7', 'EXG8']
         self.drop_channels(to_remove)
         print('Reference channels and empty channels removed')
         logging.info('Reference channels and empty channels removed')
@@ -184,6 +188,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         events(array): numpy array with trigger events (first column contains the event time in samples and the third column contains the event id)
         '''
 
+
         self._data[-1, :] -= binary # Make universal
    
         events = mne.find_events(self, stim_channel='STI 014', consecutive=consecutive, min_duration=min_duration)    
@@ -230,7 +235,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
             beh = beh[beh['practice'] == 'no']
             beh = beh.drop(['practice'], axis=1)
         beh_triggers = beh['trigger'].values    
-                
+
         # get triggers bdf file
         idx_trigger = [idx for idx, tr in enumerate(events[:,2]) if tr in trigger] 
         bdf_triggers = events[idx_trigger,2] 
@@ -311,6 +316,7 @@ class Epochs(mne.Epochs, FolderStructure):
         '''
 
         logging.info('Start selection of bad channels')
+        matplotlib.style.use('classic')
 
         # select channels to display
         picks = mne.pick_types(self.info, eeg=True, exclude='bads')
@@ -498,7 +504,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         return data
 
-    def detectEye(self, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True, extension = 'asc',eye_freq = 500):
+    def detectEye(self, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True, tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500):
         '''
         Marking epochs containing step-like activity that is greater than a given threshold
 
@@ -512,6 +518,8 @@ class Epochs(mne.Epochs, FolderStructure):
         windowsstep (int): moving window step in ms
         channel (str): name of HEOG channel
         tracker (boolean): is tracker data reliable or not
+        tracker_shift (float): specifies difference in ms between onset trigger and event in eyetracker data
+        start_event (str): marking onset of trial in eyetracker data
         extension (str): type of eyetracker file (now supports .asc/ .tsv)
         eye_freq (int): sampling rate of the eyetracker
 
@@ -558,8 +566,8 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # do binning based on eye-tracking data
         eye_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
-                            int((self.tmin + self.flt_pad)*1000), int((self.tmax - self.flt_pad)*1000),
-                            drift_correct = (-300,0), extension = extension)
+                            int((self.tmin + self.flt_pad + tracker_shift)*1000), int((self.tmax - self.flt_pad + tracker_shift)*1000),
+                            drift_correct = (-200,0), start_event = start_event, extension = extension)
 
         # correct for missing data (if eye recording is stopped during experiment)
         if eye_bins.size > 0 and eye_bins.size < self.nr_events:
@@ -681,6 +689,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         '''
 
+        embed()
         # check which trials were excluded
         events[[i for i, idx in enumerate(events[:,2]) if idx in trigger],2] = range(beh.shape[0])
         sel_tr = events[self.selection, 2]
@@ -761,7 +770,7 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
     # set subject specific parameters
     file = 'subject_{}_session_{}_'.format(sj, session)
     replace = sj_info[str(sj)]['replace']
-    tracker, ext, t_freq = sj_info[str(sj)]['tracker']
+    tracker, ext, t_freq, start_event, shift = sj_info[str(sj)]['tracker']
 
     # start logging
     logging.basicConfig(level=logging.DEBUG,
@@ -805,7 +814,7 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
     epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
 
     # EYE MOVEMENTS
-    epochs.detectEye(missing, time_window=(t_min, t_max), tracker = tracker, extension = ext, eye_freq = t_freq)
+    epochs.detectEye(missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
 
     # INTERPOLATE BADS
     epochs.interpolate_bads(reset_bads=True, mode='accurate')
