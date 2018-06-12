@@ -52,7 +52,6 @@ class ERP(FolderStructure):
 
 		'''
 
-		
 		# read in processed behavior from pickle file
 		with open(self.FolderTracker(extension = ['beh','processed'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
 			beh = pickle.load(handle)
@@ -79,11 +78,11 @@ class ERP(FolderStructure):
 	
 		# use mask to select conditions and position bins (flip array for nans)
 		eye_mask = ~(beh['eye_bins'] > thresh_bin)	
-		eegs = eegs[eye_mask,:,:]
+		#eegs = eegs[eye_mask,:,:]
 
-		for key in beh.keys():
-			if key not in ['clean_idx']:
-				beh[key] = beh[key][eye_mask]
+		#for key in beh.keys():
+		#	if key not in ['clean_idx']:
+		#		beh[key] = beh[key][eye_mask]
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
@@ -203,7 +202,7 @@ class ERP(FolderStructure):
 		self.flipped = True	
 
 
-	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', midline = None, balance = False, erp_name = ''):
+	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', midline = None, balance = False, erp_name = '', plot = True):
 		''' 
 
 		Creates laterilized ERP's by cross pairing left and right electrodes with left and right position labels.
@@ -220,6 +219,7 @@ class ERP(FolderStructure):
 		midline (None | dict): Can be used to limit analysis to trials where a specific 
 								stimulus (key of dict) was presented on the midline (value of dict)
 		erp_name (str): name of the pickle file to store erp data
+		plot (bool): show condition averaged differenc ewaves for each subject
 
 		Returns
 		- - - -
@@ -264,7 +264,7 @@ class ERP(FolderStructure):
 
 		if conditions == 'all':
 			conditions = ['all'] + list(np.unique(self.beh['condition']))
-
+	
 		for cnd in conditions:
 
 			erps[str(sj)].update({cnd:{}})
@@ -274,7 +274,7 @@ class ERP(FolderStructure):
 				idx_c = np.arange(self.beh['condition'].size)
 			else:	
 				idx_c = np.where(self.beh['condition'] == cnd)[0]
-			
+		
 			idx_c_l = np.array([l for l in idx_c if l in idx_l], dtype = int)
 			idx_c_r = np.array([r for r in idx_c if r in idx_r], dtype = int)
 
@@ -304,11 +304,19 @@ class ERP(FolderStructure):
 			ipsi = np.mean(ipsi, axis = 0) 
 			contra = np.mean(contra, axis = 0)
 
+			if plot:
+				plt.plot(contra.mean(axis = 0) - ipsi.mean(axis = 0), label = cnd)
+
 			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'elec': [l_elec, r_elec]})	
 
 		# save erps	
 		with open(self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name)) ,'wb') as handle:
-			pickle.dump(erps, handle)			
+			pickle.dump(erps, handle)	
+
+		if plot:
+			plt.legend(loc = 'best')
+			plt.savefig(self.FolderTracker(['erp',self.header],'sj-{}_diff.pdf'.format(sj)))	
+			plt.close()	
 
 
 	def topoSelection(self, sj, conditions = 'all', loc = 'all', midline = None, balance = False, topo_name = ''):

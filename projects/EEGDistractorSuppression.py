@@ -53,7 +53,6 @@ class EEGDistractorSuppression(FolderStructure):
 		y_lim = (-0.25,0.2)
 		step = ((y_lim[1] - y_lim[0])/70.0)
 
-		embed()
 		for to_plot in [T,D]:
 
 			# set plotting colors and legend labels
@@ -144,31 +143,31 @@ class EEGDistractorSuppression(FolderStructure):
 		'''	
 
 		slopes, info, times = self.ctfReader(sj_id = 'all', channels = 'all_channels_no-eye', 
-											header = 'target', ctf_name = '*_cross-training_V-R.pickle', fband = 'alpha')
+											header = 'target', ctf_name = '*_slopes-sub_cross.pickle', fband = 'alpha')
 
 		plt.figure(figsize = (20,10))
 		for pl, cnd in enumerate(['DvTr_0','DvTr_3']):
 
 			ax = plt.subplot(2,2 , pl + 1, title = cnd, ylabel = 'train time (ms)', xlabel = 'test time (ms)') 
-			X = np.stack([np.squeeze(slopes[i][cnd]['slopes']) for i in range(len(slopes))])
-			p_vals = signedRankArray(X, 0)
+			X = np.stack([np.squeeze(slopes[i][cnd]['cross']) for i in range(len(slopes))])
+			#p_vals = signedRankArray(X, 0)
 			X = np.mean(X, axis = 0)
-			X[p_vals > 0.05] = 0
+			#X[p_vals > 0.05] = 0
 
 			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
-					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = 0, vmax = 0.3)
+					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = -0.3, vmax = 0.3)
 			plt.colorbar()
 
 		slopes, info, times = self.ctfReader(sj_id = 'all', channels = 'all_channels_no-eye', 
-											header = 'dist', ctf_name = '*_cross-training_V-R.pickle', fband = 'alpha')
- 
+											header = 'dist', ctf_name = '*_slopes-sub_cross.pickle', fband = 'alpha')
+ 	
 		for pl, cnd in enumerate(['DrTv_0','DrTv_3']):
 
 			ax = plt.subplot(2,2 , pl + 3, title = cnd, ylabel = 'train time (ms)', xlabel = 'test time (ms)') 
-			X = np.stack([np.squeeze(slopes[i][cnd]['slopes']) for i in range(len(slopes))])
-			p_vals = signedRankArray(X, 0)
+			X = np.stack([np.squeeze(slopes[i][cnd]['cross']) for i in range(len(slopes))])
+			#p_vals = signedRankArray(X, 0)
 			X = np.mean(X, axis = 0)
-			X[p_vals > 0.05] = 0
+			#X[p_vals > 0.05] = 0
 			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
 					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = -0.3, vmax = 0.3)
 			plt.colorbar()
@@ -2142,8 +2141,8 @@ if __name__ == '__main__':
 	#PO.indDiffBeh()
 
 	# CTF plots
-	PO.alphaSlopes()
-	#PO.crossTraining()
+	#PO.alphaSlopes()
+	PO.crossTraining()
 
 	#PO.CTFslopes(header = 'target', ctf_name = 'slopes_alpha', fband = 'alpha')
 	#PO.CTFslopes(header = 'dist', ctf_name = 'slopes_alpha', fband = 'alpha')

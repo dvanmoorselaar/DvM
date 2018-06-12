@@ -67,7 +67,7 @@ class WholevsPartial(FolderStructure):
 		PP.combine_single_subject_files(save = False)
 		PP.select_data(project_parameters = project_param, save = False)
 		#PP.filter_data(to_filter = to_filter, filter_crit = ' and correct == 1', cnd_sel = False, save = True)
-		PP.exclude_outliers(criteria = dict(dev_0 = ''))
+		#PP.exclude_outliers(criteria = dict(dev_0 = ''))
 		PP.prep_JASP(agg_func = 'mean', voi = 'dev_0', data_filter = "", save = True)
 		PP.save_data_file()
 
@@ -94,7 +94,7 @@ class WholevsPartial(FolderStructure):
 		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
 		EEG.replaceChannel(sj, session, replace)
 		EEG.reReference(ref_channels=ref, vEOG=['V_up','V_do'], hEOG=['H_r','H_l'], changevoltage=True, 
-						to_remove = ['V_do','H_l','Ref_r','Ref_l'])
+						to_remove = ['V_do','H_l','Ref_r','Ref_l','EXG7','EXG8'])
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
@@ -140,6 +140,9 @@ class WholevsPartial(FolderStructure):
 		with open(self.FolderTracker(['erp','cue_loc'], filename = 'topo_cda.pickle') ,'rb') as handle:
 			topo = pickle.load(handle)
 
+		with open(self.FolderTracker(['erp','cue_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+
 		
 		for idx, cnd in enumerate(['partial-cue', 'whole-cue']):
 			plt.figure(figsize = (30,10))
@@ -156,15 +159,12 @@ class WholevsPartial(FolderStructure):
 		with open(self.FolderTracker(['erp','cue_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
 
-
-
-
 		plt.figure(figsize = (30,10))
 		diff = []
 		for idx, cnd in enumerate(['partial-cue', 'whole-cue']):
 			ax =  plt.subplot(1,3, idx + 1, title = cnd, ylabel = 'mV', xlabel = 'time (ms)')
-			ipsi = np.squeeze(np.stack([erp[e][cnd]['ipsi'] for e in erp]))
-			contra = np.squeeze(np.stack([erp[e][cnd]['contra'] for e in erp]))
+			ipsi = np.mean(np.stack([erp[e][cnd]['ipsi'] for e in erp]), axis = 1)
+			contra = np.mean(np.stack([erp[e][cnd]['contra'] for e in erp]), axis = 1)
 			diff.append(contra - ipsi)
 			err_i, ipsi  = bootstrap(ipsi)	
 			err_c, contra  = bootstrap(contra)	
@@ -183,8 +183,18 @@ class WholevsPartial(FolderStructure):
 		err_p, partial  = bootstrap(diff[0])
 		err_w, whole  = bootstrap(diff[1])
 		plt.axhline(y = 0, color = 'black')
+		plt.ylim(-2,2)
 		plt.plot(info['times'], partial, label = 'partial', color = 'red')
 		plt.plot(info['times'], whole, label = 'whole', color = 'green')
+
+		# indicate significant clusters of individual timecourses
+		stat = Permutation()
+		sig_cl = stat.clusterBasedPermutation(diff[1], diff[0], p_val = 0.05)
+		mask = np.where(sig_cl < 1)[0]
+		sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
+		for cl in sig_cl:
+			plt.plot(info['times'][cl], np.ones(cl.size) * -1.75, color = 'black')
+
 		plt.legend(loc = 'best')
 		sns.despine(offset=50, trim = False)
 
@@ -205,18 +215,18 @@ if __name__ == '__main__':
 
 	sj = 15
 	# run preprocessing
-	PO.preprocessingEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-				  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-				  trigger = trigger, project_param = project_param, 
-				  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+	# PO.preprocessingEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+	# 			  trigger = trigger, project_param = project_param, 
+	# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 	#CDA analysis
-	# erp = ERP(header = 'cue_loc', baseline = [-0.2,0])
-	# erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = 40) 
-	# erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7'], 
-	# 								r_elec = ['PO8'], midline = None, balance = False, erp_name = 'cda')
-	# erp.topoFlip(left = [1])
-	# erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
+	erp = ERP(header = 'cue_loc', baseline = [-0.2,0])
+	erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = 40) 
+	erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7','PO3','O1'], 
+									r_elec = ['PO8','PO4','O2'], midline = None, balance = False, erp_name = 'cda')
+	erp.topoFlip(left = [1])
+	erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
 
-	#PO.plotCDA()
-	PO.cdaTopo()
+	PO.plotCDA()
+	#PO.cdaTopo()

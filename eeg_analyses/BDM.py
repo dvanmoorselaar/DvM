@@ -25,7 +25,7 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, channel_folder, decoding, nr_folds):
+	def __init__(self, channel_folder, decoding, nr_folds, eye ):
 		''' 
 
 		Arguments
@@ -40,6 +40,7 @@ class BDM(FolderStructure):
 		self.channel_folder = channel_folder
 		self.decoding = decoding
 		self.nr_folds = nr_folds
+		self.eye = eye
 
 	def selectBDMData(self, sj, time = (-0.3, 0.8), thresh_bin = 1, downsample = 128):
 		''' 
@@ -86,11 +87,12 @@ class BDM(FolderStructure):
 	
 		# use mask to select conditions and position bins (flip array for nans)
 		eye_mask = ~(beh['eye_bins'] > thresh_bin)	
-		eegs = eegs[eye_mask,:,:]
+		if self.eye:
+			eegs = eegs[eye_mask,:,:]
 
-		for key in beh.keys():
-			if key not in ['clean_idx']:
-				beh[key] = beh[key][eye_mask]
+			for key in beh.keys():
+				if key not in ['clean_idx']:
+					beh[key] = beh[key][eye_mask]
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
@@ -101,7 +103,7 @@ class BDM(FolderStructure):
 		return 	eegs, beh
 
 
-	def Classify(self,sj, cnds, cnd_header, time = (-0.3, 0.8), nr_perm = 0, bdm_matrix = False):
+	def Classify(self,sj, cnds, cnd_header, subset = None, time = (-0.3, 0.8), nr_perm = 0, bdm_matrix = False):
 		''' 
 
 		Arguments
@@ -109,7 +111,8 @@ class BDM(FolderStructure):
 
 		sj(int): subject number
 		cnds (list): list of condition labels (as stored in beh dict). 
-		cnds_header (str): variable name containing conditions of interest
+		cnd_header (str): variable name containing conditions of interest
+		subset (list | None): Specifies whether all labels or only a subset of labels should be decoded
 		time (tuple | list): time samples (start to end) for decoding
 		nr_perm (int): If perm = 0, run standard decoding analysis. 
 					If perm > 0, the decoding is performed on permuted labels. 
@@ -132,6 +135,9 @@ class BDM(FolderStructure):
 		# create dictionary to save classification accuracy
 		classification = {}
 
+		if cnds == 'all':
+			cnds = [cnds]
+
 		# loop over conditions
 		for cnd in cnds:
 
@@ -144,8 +150,17 @@ class BDM(FolderStructure):
 			else:	
 				class_acc = np.empty((nr_perm, eegs.shape[2])) * np.nan	
 
-			cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-			cnd_labels = beh[self.decoding][cnd_idx]
+			if cnd != 'all':
+				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
+				cnd_labels = beh[self.decoding][cnd_idx]
+			else:
+				cnd_idx = np.arange(beh[cnd_header].size)
+				cnd_labels = beh[self.decoding]	
+
+			if subset != None:
+				sub_idx =  [i for i,l in enumerate(cnd_labels) if l in subset]	
+				cnd_idx = cnd_idx[sub_idx]
+				cnd_labels = cnd_labels[sub_idx]
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -189,20 +204,25 @@ class BDM(FolderStructure):
 
 		cnd_min = []
 		# trials for decoding
-		for cnd in cnds:
-	
-			# select condition trials and get their decoding labels
-			trials = np.where(beh[cnds_header] == cnd)[0]
-			labels = beh[self.decoding][trials]
+		if cnds != 'all':
+			for cnd in cnds:
+		
+				# select condition trials and get their decoding labels
+				trials = np.where(beh[cnds_header] == cnd)[0]
+				labels = beh[self.decoding][trials]
 
-			# select the minimum number of trials per label for BDM procedure
-			# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
+				# select the minimum number of trials per label for BDM procedure
+				# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
+				min_tr = np.unique(labels, return_counts = True)[1]
+				min_tr = int(np.floor(min(min_tr)/N)*N)	
+
+				cnd_min.append(min_tr)
+
+			max_trials = min(cnd_min)
+		elif cnds == 'all':
+			labels = beh[self.decoding]
 			min_tr = np.unique(labels, return_counts = True)[1]
-			min_tr = int(np.floor(min(min_tr)/N)*N)	
-
-			cnd_min.append(min_tr)
-
-		max_trials = min(cnd_min)	
+			max_trials = int(np.floor(min(min_tr)/N)*N)	
 
 		return max_trials
 

@@ -6,7 +6,8 @@ import seaborn as sns
 from IPython import embed
 from beh_analyses.PreProcessing import *
 from eeg_analyses.EEG import * 
-from eeg_analyses.ERP import * 
+from eeg_analyses.ERP import *
+from eeg_analyses.BDM import *  
 from support.FolderStructure import *
 from support.support import *
 from stats.nonparametric import *
@@ -111,10 +112,14 @@ if __name__ == '__main__':
 
 	# behavior analysis
 	PO =  Audio()
-	sj = 1
+	sj = 2
 	# run preprocessing
-	PO.preprocessingEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-				  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-				  trigger = trigger, project_param = project_param, 
-				  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
+	# PO.preprocessingEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+	# 			  trigger = trigger, project_param = project_param, 
+	# 			  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
+
+	session = BDM('all_channels', 'condition', nr_folds = 10, eye = False)
+	session.Classify(sj, cnds = 'all', cnd_header = 'condition', subset = [1,3], time = (0, 1.8), nr_perm = 0, bdm_matrix = False)
+
 

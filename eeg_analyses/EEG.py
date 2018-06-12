@@ -689,7 +689,6 @@ class Epochs(mne.Epochs, FolderStructure):
 
         '''
 
-        embed()
         # check which trials were excluded
         events[[i for i, idx in enumerate(events[:,2]) if idx in trigger],2] = range(beh.shape[0])
         sel_tr = events[self.selection, 2]
