@@ -2,8 +2,8 @@ import os
 import mne
 import pickle
 import random
-import matplotlib
-matplotlib.use('agg') # now it works via ssh connection
+#import matplotlib
+#matplotlib.use('agg') # now it works via ssh connection
 
 import numpy as np
 import pandas as pd

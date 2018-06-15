@@ -154,7 +154,6 @@ class PreProcessing(object):
 
 		"""
 		
-
 		work_data = self.work_data 
 
 		for f, filt in enumerate(to_filter):

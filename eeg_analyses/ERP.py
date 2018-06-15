@@ -24,7 +24,7 @@ from eeg_support import *
 
 class ERP(FolderStructure):
 
-	def __init__(self, header, baseline):
+	def __init__(self, header, baseline, eye = False):
 		''' 
 
 		Arguments
@@ -39,6 +39,7 @@ class ERP(FolderStructure):
 		self.header = header
 		self.baseline = baseline
 		self.flipped = False
+		self.eye = eye
 
 	def selectERPData(self, sj, time = [-0.3, 0.8], l_filter = False, thresh_bin = 1):
 		''' 
@@ -78,11 +79,12 @@ class ERP(FolderStructure):
 	
 		# use mask to select conditions and position bins (flip array for nans)
 		eye_mask = ~(beh['eye_bins'] > thresh_bin)	
-		#eegs = eegs[eye_mask,:,:]
+		if self.eye:
+			eegs = eegs[eye_mask,:,:]
 
-		#for key in beh.keys():
-		#	if key not in ['clean_idx']:
-		#		beh[key] = beh[key][eye_mask]
+			for key in beh.keys():
+				if key not in ['clean_idx']:
+					beh[key] = beh[key][eye_mask]
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
@@ -99,7 +101,7 @@ class ERP(FolderStructure):
 	def baselineCorrect(X, times, base_period):
 		''' 
 
-		Applies baseline correction to an array of data by subtarcting the average 
+		Applies baseline correction to an array of data by subtracting the average 
 		from the base_period from data array.
 
 		Arguments

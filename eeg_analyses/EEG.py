@@ -21,9 +21,9 @@ import time
 import numpy as np
 import scipy as sp
 import pandas as pd
-import matplotlib.pyplot as plt
-plt.switch_backend('Qt4Agg') # run next two lines to interactively scroll through plots
-import matplotlib
+#import matplotlib.pyplot as plt
+#plt.switch_backend('Qt4Agg') # run next two lines to interactively scroll through plots
+#import matplotlib
 import seaborn as sns
 from matplotlib import cm
 

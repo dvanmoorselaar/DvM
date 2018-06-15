@@ -13,9 +13,12 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from IPython import embed
+from beh_analyses.PreProcessing import *
+from eeg_analyses.TF import * 
 from eeg_analyses.EEG import * 
 from eeg_analyses.ERP import * 
-from eeg_analyses.BDM import BDM 
+from eeg_analyses.BDM import * 
+from visuals.visuals import MidpointNormalize
 from support.FolderStructure import *
 from support.support import *
 from stats.nonparametric import *
@@ -28,6 +31,16 @@ sj_info = {'1': {'tracker': (False, '', ''),  'replace':{}}, # example replace: 
 			'5': {'tracker': (True, 'asc', 500), 'replace':{}}}
 
 # project specific info
+
+project = 'DT_sim'
+part = 'beh'
+factors = ['block_type','dist_high']
+labels = [['DTsim','DTdisP','DTdisDP'],['yes','no']]
+to_filter = ['RT'] 
+project_param = ['practice','nr_trials','trigger','condition','RT', 'subject_nr',
+				'block_type', 'correct','dist_high','dist_loc','dist_orient',
+		         'dist_type','high_loc', 'target_high','target_loc','target_type']
+
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
@@ -37,9 +50,7 @@ t_max = 0.55
 flt_pad = 0.5
 eeg_runs = [1]
 binary =  61440
-project_param = ['practice','nr_trials','trigger','condition','RT',
-				'block_type', 'correct','dist_high','dist_loc','dist_orient',
-		         'dist_type','high_loc', 'target_high','target_loc','target_type']
+
 
 # set general plotting parameters
 sns.set(font_scale=2.5)
@@ -49,8 +60,83 @@ class DT_sim(FolderStructure):
 
 	def __init__(self): pass
 
+
+	def prepareBEH(self, project, part, factors, labels, project_param):
+		'''
+		standard Behavior processing
+		'''
+		PP = PreProcessing(project = project, part = part, factor_headers = factors, factor_labels = labels)
+		PP.create_folder_structure()
+		PP.combine_single_subject_files(save = False)
+		PP.select_data(project_parameters = project_param, save = False)
+		PP.filter_data(to_filter = to_filter, filter_crit = ' and correct == 1', cnd_sel = False, save = True)
+		PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
+		PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
+		PP.save_data_file()
+
+
+	def mainBEH(self, column = 'dist_high'):
+		'''
+
+		'''
+
+		# read in data
+		file = self.FolderTracker(['beh','analysis'], filename = 'preprocessed.csv')
+		DF = pd.read_csv(file)
+
+		# creat pivot (with RT filtered data)
+		DF = DF.query("RT_filter == True")
+		
+		# create unbiased DF
+		if column == 'dist_high':
+			DF = DF[DF['target_high'] == 'no']
+		elif column == 'target_high':
+			DF = DF[DF['dist_high'] == 'no']
+
+		pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type',column], aggfunc = 'mean')
+		error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+
+		# plot the seperate conditions (3 X 1 plot design)
+		plt.figure(figsize = (20,10))
+
+		levels = np.unique(pivot.keys().get_level_values('block_type'))
+		for idx, block in enumerate(levels):
+			
+			# get effect and p-value
+			diff = pivot[block]['yes'].mean() -  pivot[block]['no'].mean()
+			t, p = ttest_rel(pivot[block]['yes'], pivot[block]['no'])
+
+			ax = plt.subplot(1,3, idx + 1, title = '{0}: \ndiff = {1:.0f}, p = {2:.3f}'.format(block, diff, p), ylabel = 'RT (ms)', ylim = (250,600))
+			df = pd.DataFrame(np.hstack((pivot[block].values)), columns = ['RT (ms)'])
+			df['sj'] = range(pivot.index.size) * 2
+			df[column] = ['yes'] * pivot.index.size + ['no'] * pivot.index.size
+
+			ax = sns.stripplot(x = column, y = 'RT (ms)', data = df, hue = 'sj', size = 10, jitter = True)
+			ax.legend_.remove()
+			sns.violinplot(x = column, y = 'RT (ms)', data = df, color= 'white', cut = 1)
+
+			sns.despine(offset=50, trim = False)
+		
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['beh','analysis','figs'], filename = 'block_effect_{}.pdf'.format(column)))		
+		plt.close()	
+
+	def clusterPlot(self, X1, X2, p_val, times, y, color):
+		'''
+		plots significant clusters in the current plot
+		'''	
+
+		# indicate significant clusters of individual timecourses
+		sig_cl = clusterBasedPermutation(X1, X2, p_val = 0.05)
+		mask = np.where(sig_cl < 1)[0]
+		sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
+		for cl in sig_cl:
+			plt.plot(times[cl], np.ones(cl.size) * y, color = color, ls = '--')
+
+
 	def plotERP(self):
 		'''
+		plot ipsi and contra and difference waves
 
 		'''
 
@@ -61,15 +147,22 @@ class DT_sim(FolderStructure):
 		with open(self.FolderTracker(['erp','dist_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
 
+		# ipsi and contra plots
+		diff_waves = {}
 		plt.figure(figsize = (30,20))
 		for idx, cnd in enumerate(['DTsim-no','DTsim-yes','DTdisDP-no', 'DTdisDP-yes','DTdisP-no','DTdisP-yes']):
 			ax =  plt.subplot(3,2, idx + 1, title = cnd, ylabel = 'mV', xlabel = 'time (ms)')
-			ipsi = np.squeeze(np.stack([erp[e][cnd]['ipsi'] for e in erp]))
-			contra = np.squeeze(np.stack([erp[e][cnd]['contra'] for e in erp]))
+			ipsi = np.mean(np.stack([erp[e][cnd]['ipsi'] for e in erp]), axis = 1)
+			contra = np.mean(np.stack([erp[e][cnd]['contra'] for e in erp]), axis = 1)
+			block, supp = cnd.split('-')
+			if block not in diff_waves.keys():
+				diff_waves.update({block:{}})
+			diff_waves[block][supp] = contra - ipsi	
+
 			err_i, ipsi  = bootstrap(ipsi)	
 			err_c, contra  = bootstrap(contra)	
 
-			#plt.ylim(-8,8)
+			plt.ylim(-8,8)
 			plt.axhline(y = 0, color = 'black')
 			plt.plot(info['times'], ipsi, label = 'ipsi', color = 'red')
 			plt.plot(info['times'], contra, label = 'contra', color = 'green')
@@ -83,7 +176,31 @@ class DT_sim(FolderStructure):
 		plt.savefig(self.FolderTracker(['erp','dist_loc'], filename = 'ipsi-contra.pdf'))
 		plt.close()
 
-	def plotBDM(self, header, cnds):
+		# difference waves
+		plt.figure(figsize = (25,10))
+		for idx, block in enumerate(diff_waves.keys()):
+			ax =  plt.subplot(1,3, idx + 1, title = block, ylabel = 'mV', xlabel = 'time (ms)', ylim = (-5,3))
+			to_test = []
+			for i, supp in enumerate(diff_waves[block].keys()):
+				to_test.append(diff_waves[block][supp])
+				err_d, diff = bootstrap(diff_waves[block][supp])
+				plt.plot(info['times'], diff, label = supp, color = ['red', 'green'][i])
+				plt.fill_between(info['times'], diff + err_d, diff - err_d, alpha = 0.2, color = ['red', 'green'][i])
+				self.clusterPlot(to_test[-1], 0, p_val = 0.05, times = info['times'], y = (-5 + 0.2*i), color = ['red', 'green'][i])
+
+			self.clusterPlot(to_test[0], to_test[1], p_val = 0.05, times = info['times'], y = (-5 + 0.2*2), color = 'black')
+			plt.axhline(y = 0, color = 'black', ls = '--')
+			plt.axvline(x = -0.2, color = 'black', ls = '--')
+			plt.axvline(x = 0, color = 'black', ls = '--')
+			plt.legend(loc = 'best')
+			sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['erp','dist_loc'], filename = 'diffwaves.pdf'))
+		plt.close()
+
+
+	def plotBDM(self, header):
 		'''
 		
 		'''
@@ -91,6 +208,7 @@ class DT_sim(FolderStructure):
 		# read in data
 		with open(self.FolderTracker(['bdm','{}_type'.format(header)], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
+		times = info['times']	
 
 		files = glob.glob(self.FolderTracker(['bdm', '{}_type'.format(header)], filename = 'class_*_perm-False.pickle'))
 		bdm = []
@@ -98,49 +216,95 @@ class DT_sim(FolderStructure):
 			with open(file ,'rb') as handle:
 				bdm.append(pickle.load(handle))	
 
-		plt.figure(figsize = (10,10))
-		for i, cnd in enumerate(cnds):
-
-			#ax = plt.subplot(2,3 , plt_idx[i])#, title = cnd, ylabel = 'Time (ms)', xlabel = 'Time (ms)')
-			plt.tick_params(direction = 'in', length = 5)
-			X = np.mean(np.stack([bdm[j][cnd]['standard'] for j in range(len(bdm))]), axis = 0)
-			plt.plot(info['times'], X, label = cnd)
-
-		plt.legend(loc = 'best')
+		plt.figure(figsize = (30,20))
+		norm = MidpointNormalize(midpoint=1/3.0)
+		plt_idx = 1
+		for i, cnd in enumerate(['DTsim', 'DTdisP', 'DTdisDP']):
+			for plot in ['matrix', 'diag']:
+				ax = plt.subplot(3,2 , plt_idx, title = cnd)#, title = cnd, ylabel = 'Time (ms)', xlabel = 'Time (ms)')
+				X = np.stack([bdm[j][cnd]['standard'] for j in range(len(bdm))])
+				p_vals = signedRankArray(X, 1/3.0)
+				h,_,_,_ = FDR(p_vals)
+				dec = np.mean(X,0)
+				dec[~h] = 1/3.0
+				X_diag = np.stack([np.diag(x) for x in X])
+				if plot == 'matrix':
+					plt.imshow(dec, norm = norm, cmap = cm.bwr, interpolation='none', aspect='auto', 
+							   origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], 
+							   vmin = 0.3, vmax = 0.40)
+					plt.colorbar()
+				elif  plot == 'diag':
+					plt.ylim(0.3,0.45)
+					self.clusterPlot(X_diag, 1/3.0, p_val = 0.05, times = times, y = (0.31), color = 'blue')
+					err_diag, X_diag  = bootstrap(X_diag)	
+					plt.plot(times, X_diag)	
+					plt.fill_between(times, X_diag + err_diag, X_diag - err_diag, alpha = 0.2)
+					plt.axhline(y = 0.33, color = 'black', ls = '--')
+					plt.axvline(x = -0.2, color = 'black', ls = '--')
+					plt.axvline(x = 0, color = 'black', ls = '--')
+					sns.despine(offset=50, trim = False)
+				plt_idx += 1	
+			
+		plt.tight_layout()			
 		plt.savefig(self.FolderTracker(['bdm','{}_type'.format(header)], filename = 'dec.pdf'))
 		plt.close()	
 
+	def plotTF(self):
+
+		embed()
+
 
 if __name__ == '__main__':
+
+	os.environ['MKL_NUM_THREADS'] = '2' 
+	os.environ['NUMEXP_NUM_THREADS'] = '2'
+	os.environ['OMP_NUM_THREADS'] = '2'
 	
 	# Specify project parameters
 	project_folder = '/home/dvmoors1/BB/DT_sim'
 	os.chdir(project_folder)
 
+	# initiate current project
+	PO = DT_sim()
+
+	# analyze behavior
+	#PO.prepareBEH(project, part, factors, labels, project_param)
+	#PO.mainBEH()
+
+	# analyze eeg
+	PO.plotERP()
+	PO.plotBDM(header = 'target')
+	PO.plotBDM(header = 'dist')
+	PO.plotTF()
+
+
 	# run preprocessing
-	sj = 2
+	for sj in [2,3]:
 	# preprocessing(sj = 5, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
 	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
 	# 			  trigger = trigger, project_param = project_param, 
 	# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
-	# ERP analysis
-	# erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25])
-	# erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
-	# erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7'], 
-	# 								r_elec = ['PO8'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
-	# erp.topoFlip(left = [2])
-	# erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
+		# TF analysis
+		tf = TF()
+		tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
+					  cnd_header ='block_type', base_period = (-0.8,-0.6), 
+					  time_period = (-0.6,0), flip = dict(high_prob = 'left'), downsample = 4)
 
-	# BDM analysis
-	#BDM = BDM('all_channels','target_type', nr_folds = 10)
-	#for sj in [4,7]:
-	#	BDM.Classify(sj, ['DTsim','DTdisDP','DTdisP'], 'block_type', time = (-0.5, 0.6), nr_perm = 0, bdm_matrix = False)
+		# ERP analysis
+		erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
+		erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
+		erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
+										r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
+		erp.topoFlip(left = [2])
+		erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
 
+		# BDM analysis
+		bdm = BDM('all_channels', 'dist_type', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 
-	# plot project analysis
-	PO = DT_sim()
-	PO.plotERP()
-	#PO.plotBDM(header = 'target', cnds = ['DTsim','DTdisDP','DTdisP']) 
+		bdm = BDM('all_channels', 'target_type', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+	
 
 
