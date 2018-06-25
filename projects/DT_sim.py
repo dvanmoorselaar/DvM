@@ -74,6 +74,34 @@ class DT_sim(FolderStructure):
 		PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
 		PP.save_data_file()
 
+	def countCndCheck(self):
+		'''
+		Checks min condition number per cnd after preprocessing
+		'''
+
+		# loop across all processed behavior files
+		files = glob.glob(self.FolderTracker(['beh', 'processed'], filename = 'subject-*_all.pickle'))
+		for file in files:
+			# open file
+			with open(file, 'rb') as handle:
+				beh = pickle.load(handle)
+
+			# get minimum condition number
+			cnd_info = np.unique(beh['condition'], return_counts = True)	
+			cnd_sort = np.argsort(cnd_info)[1]
+
+			if 'no' in cnd_info[0][cnd_sort[0]]:
+				max_trial = 756.0
+			elif 'yes' in cnd_info[0][cnd_sort[0]]:
+				max_trial = 1260.0	
+
+			# calculate percentage of min condition
+			min_p =  cnd_info[1][cnd_sort[0]]/max_trial * 100
+			
+			if min_p < 75:
+				print min_p, cnd_info[0][cnd_sort[0]], file
+
+
 
 	def mainBEH(self, column = 'dist_high'):
 		'''
@@ -249,10 +277,35 @@ class DT_sim(FolderStructure):
 		plt.savefig(self.FolderTracker(['bdm','{}_type'.format(header)], filename = 'dec.pdf'))
 		plt.close()	
 
-	def plotTF(self):
+	def plotTF(self, c_elec, i_elec, times = (-0.6)):
 
-		embed()
 
+		with open(self.FolderTracker(['tf'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+
+		times = info['times']	
+		files = glob.glob(self.FolderTracker(['tf'], filename = '*-tf.pickle'))
+		tf = []
+		for file in files:
+			with open(file ,'rb') as handle:
+				tf.a ppend(pickle.load(handle))	
+
+		contra_idx = [info['ch_names'].index(e) for e in c_elec]
+		ipsi_idx = [info['ch_names'].index(e) for e in i_elec]
+
+		plt.figure(figsize = (30,10))
+		for plt_idx, cnd in enumerate(['DTsim','DTdisP','DTdisDP']):
+			ax = plt.subplot(1,3 , plt_idx + 1, title = cnd, xlabel = 'time (ms)', ylabel = 'freq')
+			contra = np.stack([np.mean(tf[i][cnd]['power'][:,contra_idx,:], axis = 1) for i in range(len(tf))])
+			ipsi = np.stack([np.mean(tf[i][cnd]['power'][:,ipsi_idx,:], axis = 1) for i in range(len(tf))])
+			X = contra - ipsi
+			plt.imshow(X.mean(axis = 0), cmap = cm.jet, interpolation='none', aspect='auto', 
+							   origin = 'lower', extent=[times[0],times[-1],5,40])
+			plt.colorbar()
+
+		plt.tight_layout()			
+		plt.savefig(self.FolderTracker(['tf','figs'], filename = 'tf-main.pdf'))
+		plt.close()	
 
 if __name__ == '__main__':
 
@@ -265,21 +318,22 @@ if __name__ == '__main__':
 	os.chdir(project_folder)
 
 	# initiate current project
-	PO = DT_sim()
+	#PO = DT_sim()
 
 	# analyze behavior
 	#PO.prepareBEH(project, part, factors, labels, project_param)
 	#PO.mainBEH()
 
 	# analyze eeg
-	PO.plotERP()
-	PO.plotBDM(header = 'target')
-	PO.plotBDM(header = 'dist')
-	PO.plotTF()
+	#PO.countCndCheck()
+	#PO.plotERP()
+	#PO.plotBDM(header = 'target')
+	#PO.plotBDM(header = 'dist')
+	#PO.plotTF()
 
 
 	# run preprocessing
-	for sj in [2,3]:
+	for sj in [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]:
 	# preprocessing(sj = 5, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
 	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
 	# 			  trigger = trigger, project_param = project_param, 
@@ -292,19 +346,19 @@ if __name__ == '__main__':
 					  time_period = (-0.6,0), flip = dict(high_prob = 'left'), downsample = 4)
 
 		# ERP analysis
-		erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
-		erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
-		erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
-										r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
-		erp.topoFlip(left = [2])
-		erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
+		# erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
+		# erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
+		# erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
+		# 								r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
+		# erp.topoFlip(left = [2])
+		# erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
 
-		# BDM analysis
-		bdm = BDM('all_channels', 'dist_type', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+		# # BDM analysis
+		# bdm = BDM('all_channels', 'dist_type', nr_folds = 10, eye = False)
+		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 
-		bdm = BDM('all_channels', 'target_type', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+		# bdm = BDM('all_channels', 'target_type', nr_folds = 10, eye = False)
+		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 	
 
 

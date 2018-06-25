@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from mne.filter import filter_data
+from scipy.signal import hilbert
 from scipy.fftpack import fft, ifft
 from FolderStructure import FolderStructure
 from IPython import embed
@@ -115,9 +117,33 @@ class TF(FolderStructure):
 		
 		return eegs
 
-	def TFanalysis(self, sj, cnds, cnd_header, base_period, time_period, flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
+
+	def hilbertMethod(self, X, l_freq, h_freq, s_freq = 512):
 		'''
-		Time frequency analysis. Currently onlu supports MORLET method
+		Apply filter-Hilbert method for time-frequency decomposition. 
+		Data is bandpass filtered before a Hilbert transform is applied
+
+		Arguments
+		- - - - - 
+		X (array): eeg signal
+		l_freq (int): lower border of frequency band
+		h_freq (int): upper border of frequency band
+		s_freq (int): sampling frequency
+		
+		Returns
+		- - - 
+
+		X (array): filtered eeg signal
+		
+		'''	
+
+		X = hilbert(filter_data(X, s_freq, l_freq, h_freq))
+
+		return X
+
+	def TFanalysis(self, sj, cnds, cnd_header, base_period, time_period, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
+		'''
+		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decmposition
 
 		Add option to subtract ERP to get evoked power
 		Add option to match trial number
@@ -129,7 +155,8 @@ class TF(FolderStructure):
 		cnd_header (str): key in behavior file that contains condition info
 		base_period (tuple | list): time window used for baseline correction
 		time_period (tuple | list): time window of interest
-		flip (dict): flips a subset of trials. Key of dictionary specifies header in beh that contains flip info. 
+		method (str): specifies whether hilbert or wavelet convolution is used for time-frequency decomposition
+		flip (dict): flips a subset of trials. Key of dictionary specifies header in beh that contains flip info 
 		List in dict contains variables that need to be flipped. Note: flipping is done from right to left hemifield
 		base_type (str): specifies whether DB conversion is condition specific ('conspec') or averaged across conditions ('conavg')
 		downsample (int): factor used for downsampling (aplied after filtering). Default is no downsampling
@@ -161,9 +188,13 @@ class TF(FolderStructure):
 		# get parameters
 		nr_time = eegs.shape[-1]
 		nr_chan = eegs.shape[1]
-		wavelets, frex = self.createMorlet(min_freq = min_freq, max_freq = max_freq, num_frex = num_frex, 
+		if method == 'wavelet':
+			wavelets, frex = self.createMorlet(min_freq = min_freq, max_freq = max_freq, num_frex = num_frex, 
 									cycle_range = cycle_range, freq_scaling = freq_scaling, 
 									nr_time = nr_time, s_freq = s_freq)
+		elif method == 'hilbert':
+			frex = [(i,i + 4) for i in range(min_freq, max_freq, 2)]
+			num_frex = len(frex)	
 
 		base_s, base_e = [np.argmin(abs(times - b)) for b in base_period]
 		idx_time = np.where((times >= time_period[0]) * (times <= time_period[1]))[0]  
@@ -187,15 +218,22 @@ class TF(FolderStructure):
 				print '\r{0:.0f}% of channels ({1} out {2} conditions)'.format((float(ch)/nr_chan)*100, c + 1, len(cnds)),
 
 				# fft decomposition
-				eeg_fft = fft(eegs[cnd_idx,ch].T.ravel(), l_conv)    # eeg is time by trial after transpose
+				if method == 'wavelet':
+					eeg_fft = fft(eegs[cnd_idx,ch].T.ravel(), l_conv)    # eeg is time by trial after transpose
+
 
 				# loop over frequencies
 				for f in range(num_frex):
 
-					# convolve and get analytic signal
-					m = ifft(eeg_fft * fft(wavelets[f], l_conv), l_conv)
-					m = m[:nr_time * cnd_idx.size + nr_time - 1]
-					m = np.reshape(m[(nr_time-1)/2 - 1:-(nr_time-1)/2-1], (nr_time, -1), order = 'F').T 
+					if method == 'wavelet':
+						# convolve and get analytic signal
+						m = ifft(eeg_fft * fft(wavelets[f], l_conv), l_conv)
+						m = m[:nr_time * cnd_idx.size + nr_time - 1]
+						m = np.reshape(m[(nr_time-1)/2 - 1:-(nr_time-1)/2-1], (nr_time, -1), order = 'F').T 
+					elif method == 'hilbert':
+						X = eegs[cnd_idx,ch].ravel()
+						m = self.hilbertMethod(X, frex[f][0], frex[f][1], s_freq)
+						m = np.reshape(m, (-1, times.size))	
 
 					# populate
 					raw_conv[:,f,ch] = m[:,idx_2_save]
@@ -216,13 +254,13 @@ class TF(FolderStructure):
 				tf[cnd]['power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
 
 		# save TF matrices
-		with open(self.FolderTracker(['tf'],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
+		with open(self.FolderTracker(['tf',method],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
 			pickle.dump(tf, handle)		
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': ch_names, 'times':times[idx_2_save], 'frex': frex}
 
-		with open(self.FolderTracker(['tf'], filename = 'plot_dict.pickle'),'wb') as handle:
+		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)		
 	
 	def createMorlet(self, min_freq, max_freq, num_frex, cycle_range, freq_scaling, nr_time, s_freq):

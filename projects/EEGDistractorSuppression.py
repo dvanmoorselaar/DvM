@@ -522,12 +522,11 @@ class EEGDistractorSuppression(FolderStructure):
 		erp_name (str): name of preprocessed erps
 		'''
 
-		PO = Permutation()
-
 		# open file to store timing of significant clusters
 		f = open(self.FolderTracker(['erp','MS-plots'], filename = 'main_erp-{}.txt'.format(erp_name)),'w')
 
 		# read in data and shift timing
+		embed()
 		T_erps, info, times = self.erpReader('target', erp_name)
 		D_erps, info, times = self.erpReader('dist', erp_name)
 
@@ -2142,7 +2141,7 @@ if __name__ == '__main__':
 
 	# CTF plots
 	#PO.alphaSlopes()
-	PO.crossTraining()
+	#PO.crossTraining()
 
 	#PO.CTFslopes(header = 'target', ctf_name = 'slopes_alpha', fband = 'alpha')
 	#PO.CTFslopes(header = 'dist', ctf_name = 'slopes_alpha', fband = 'alpha')
@@ -2168,7 +2167,7 @@ if __name__ == '__main__':
 	# PO.erpInspection(header = 'dist_loc', erp_name = 'lat-down1')
 	# PO.topoChannelSelection(header = 'target_loc', topo_name = 'topo_lat-down1')
 	# PO.erpInspection(header = 'target_loc', erp_name = 'lat-down1')
-	#PO.diff_ERPS(elecs = ['PO7','PO3','O1'], header = 'dist', erp_name= 'lat-down1')
+	PO.diff_ERPS(elecs = ['PO7','PO3','O1'], erp_name= 'lat-down1')
 	#PO.diff_ERPS(elecs = ['PO7','PO3','O1'], header = 'target', erp_name= 'lat-down1')
 	#PO.cndTOPO('dist', start = 0.05, stop = 0.15, step = 0.01)
 	#PO.cndTOPO('dist')

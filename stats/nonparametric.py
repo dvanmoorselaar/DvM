@@ -320,6 +320,137 @@ def signedRankArray(X, Y):
 	return p_vals		
 
 
+def bootstrap(X, b_iter = 1000):
+	'''
+	bootstrap uses a bootstrap procedure to calculate standard error of data in X.
+
+	Arguments
+	- - - - - 
+	test
+
+	Returns
+	- - - -
+
+	'''	
+
+	nr_obs = X.shape[0]
+	bootstrapped = np.zeros((b_iter,X.shape[1]))
+
+	for b in range(b_iter):
+		idx = np.random.choice(nr_obs,nr_obs,replace = True) 				# sample nr subjects observations from the slopes sample (with replacement)
+		bootstrapped[b,:] = np.mean(X[idx,:],axis = 0)
+
+	error = np.std(bootstrapped, axis = 0)
+	mean = X.mean(axis = 0)
+
+	return error, mean
+
+
+def jacklatency(x1, x2, thresh_1, thresh_2, times):
+	'''
+	Helper function of jackknife. Calculates the latency difference between
+	threshold crosses using linear interpolation
+
+	Arguments
+	- - - - - 
+	x1 (array): subject X time. Values in array represent some dependent
+				measure. (e.g. ERP voltages)
+	x2 (array): array with same dimensions as X1
+	thresh_1 (float): criterion value
+	thresh_2 (float): criterion value
+	times (array): timing of samples in X1 and X2
+	times (str): calculate onset or offset latency differences
+
+	Returns
+	- - - -
+
+	D (float): latency difference
+	'''
+
+	# get latency exceeding thresh 
+	idx_1 = np.where(x1 >= thresh_1)[0][0]
+	lat_1 = times[idx_1 - 1] + (times[idx_1] - times[idx_1 - 1]) * \
+				(thresh_1 - x1[idx_1 - 1])/(x1[idx_1] - x1[idx_1-1])
+	idx_2 = np.where(x2 >= thresh_2)[0][0]
+	lat_2 = times[idx_2 - 1] + (times[idx_2] - times[idx_2 - 1]) * \
+			(thresh_2 - x2[idx_2 - 1])/(x2[idx_2] - x2[idx_2-1])
+
+	D = lat_2 - lat_1	
+
+	return D	
+
+
+def jackknife(X1, X2, times, peak_window, percent_amp = 50, timing = 'onset'):
+	'''
+	Implements Miller, J., Patterson, T., & Ulrich, R. (1998). Jackknife-based method for measuring 
+	LRP onset latency differences. Psychophysiology, 35(1), 99-115. 
+
+	Compares onset latencies between two grand-average waveforms. For each waveform a criterion 
+	is determined based on a set percentage of the grand average peak. The latency at which this 
+	criterion is first reached is then determined using linear interpolation. Next the jackknife 
+	estimate of the standard error of the difference is used, which is then used to calculate the
+	t value corresponding to the null hypothesis of no differences in onset latencies 
+
+	Arguments
+	- - - - - 
+	X1 (array): subject X time. Values in array represent some dependent
+				measure. (e.g. ERP voltages)
+	X2 (array): array with same dimensions as X1
+	times (array): timing of samples in X1 and X2
+	peak_window (tuple | list): time window that contains peak of interest
+	percent_amp (int): used to calculate criterion value
+	timing (str): calculate onset or offset latency differnces
+
+	Returns
+	- - - -
+
+	onset (float): onset differnce between grand waveform of X1 and X2
+	t_value (float): orresponding to the null hypothesis of no differences in onset latencies
+	'''	
+
+	# set number of observations 
+	nr_sj = X1.shape[0]
+
+	# flip arrays if necessary
+	if timing == 'offset':
+		X1 = np.fliplr(X1)
+		X2 = np.fliplr(X2)
+		times = np.flipud(times)
+	
+	# get time window of interest
+	s,e = np.sort([np.argmin(abs(times - t)) for t in peak_window])
+	t = times[s:e]
+
+	# slice data containing the peak average 
+	x1 = np.mean(abs(X1[:,s:e]), axis = 0)
+	x2 = np.mean(abs(X2[:,s:e]), axis = 0)
+	
+	# get the criterion based on peak amplitude percentage
+	c_1 = max(x1) * percent_amp/ 100.0 
+	c_2 = max(x2) * percent_amp/ 100.0 
+
+	onset = jacklatency(x1, x2, c_1, c_2, t) 
+
+	# repeat previous steps but exclude all data points once
+	D = []
+	idx = np.arange(nr_sj)
+	for i in range(nr_sj):
+		x1 = np.mean(abs(X1[np.where(idx != i)[0],s:e]), axis = 0)
+		x2 = np.mean(abs(X2[:,s:e]), axis = 0)
+
+		c_1 = max(x1) * percent_amp/ 100.0 
+		c_2 = max(x2) * percent_amp/ 100.0 
+
+		D.append(jacklatency(x1, x2, c_1, c_2, t) )
+
+	# compute the jackknife estimate of the standard error of the differnce
+	Sd = np.sqrt((nr_sj - 1.0)/ nr_sj * np.sum([(d - np.mean(D))**2 for d in np.array(D)]))	
+
+	t_value = onset/ Sd 
+
+	return onset, t_value
+
+	
 
 
 

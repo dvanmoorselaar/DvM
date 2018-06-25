@@ -71,7 +71,7 @@ class ERP(FolderStructure):
 		ch_names = EEG.ch_names
 
 		# exclude trials contaminated by unstable eye position
-		nan_idx = np.where(np.isnan(beh['eye_bins'])> 0)[0]
+		nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
 		heog = EEG._data[:,ch_names.index('HEOG'),s:e]
 
 		eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
@@ -242,7 +242,8 @@ class ERP(FolderStructure):
 			erps.update({str(sj):{}})
 
 		# filthy hack to get rid of 'None' in index array
-		self.beh[self.header][self.beh[self.header] == 'None'] = np.nan
+		if self.beh[self.header].dtype != 'int64':
+			self.beh[self.header][self.beh[self.header] == 'None'] = np.nan
 
 		# select left and right trials
 		idx_l = np.sort(np.hstack([np.where(np.array(self.beh[self.header], dtype = float) == l)[0] for l in left]))
@@ -343,20 +344,21 @@ class ERP(FolderStructure):
 		if str(sj) not in topos.keys():
 			topos.update({str(sj):{}})
 
-		if balance:
-			max_trial = self.selectMaxTrial(idx_l, conditions, self.beh['condition'])
-
 		if conditions == 'all':
 			conditions = ['all'] + list(np.unique(self.beh['condition']))
 		else:
 			conditions = ['all'] + conditions
 
 		# filthy hack to get rid of 'None' in index array
-		self.beh[self.header][self.beh[self.header] == 'None'] = np.nan
+		if self.beh[self.header].dtype != 'int64':
+			self.beh[self.header][self.beh[self.header] == 'None'] = np.nan
 
 		if loc != 'all':
 			idx_l = np.sort(np.hstack([np.where(np.array(self.beh[self.header], dtype = float) == l)[0] for l in loc]))
 
+		if balance:
+			max_trial = self.selectMaxTrial(idx_l, conditions, self.beh['condition'])
+			
 			# if midline, only select midline trials
 			if midline != None:
 				idx_m = []
