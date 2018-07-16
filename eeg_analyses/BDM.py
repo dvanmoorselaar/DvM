@@ -18,6 +18,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
+from support.support import select_electrodes
 
 from IPython import embed
 
@@ -25,7 +26,7 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, channel_folder, decoding, nr_folds, eye ):
+	def __init__(self, decoding, nr_folds, eye, elec_oi = 'all'):
 		''' 
 
 		Arguments
@@ -37,10 +38,10 @@ class BDM(FolderStructure):
 
 		'''
 
-		self.channel_folder = channel_folder
 		self.decoding = decoding
 		self.nr_folds = nr_folds
 		self.eye = eye
+		self.elec_oi = elec_oi
 
 	def selectBDMData(self, sj, time = (-0.3, 0.8), thresh_bin = 1, downsample = 128):
 		''' 
@@ -75,6 +76,7 @@ class BDM(FolderStructure):
 		# select time window and EEG electrodes
 		s, e = [np.argmin(abs(EEG.times - t)) for t in time]
 		picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
+		picks = select_electrodes(np.array(EEG.ch_names)[picks], self.elec_oi)
 		eegs = EEG._data[:,picks,s:e]
 		times = EEG.times[s:e]
 
@@ -179,7 +181,7 @@ class BDM(FolderStructure):
 				classification[cnd].update({'perm': class_acc[1:]})
 
 		# store classification dict	
-		with open(self.FolderTracker(['bdm',self.decoding], filename = 'class_{}_perm-{}.pickle'.format(sj,bool(nr_perm -1))) ,'wb') as handle:
+		with open(self.FolderTracker(['bdm',self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.elec_oi)) ,'wb') as handle:
 			pickle.dump(classification, handle)
 
 	def selectMaxTrials(self,beh, cnds, cnds_header = 'condition'):

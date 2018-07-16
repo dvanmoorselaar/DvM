@@ -27,7 +27,7 @@ from stats.nonparametric import *
 sj_info = {'1': {'tracker': (False, '', ''),  'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
 			'2': {'tracker': (False,'', ''), 'replace':{}},
 			'3': {'tracker': (False, '', ''), 'replace':{}},
-			'4': {'tracker': (True, 'asc', 500), 'replace':{}},
+			'4': {'tracker': (True, 'asc', 500,'',''), 'replace':{}},
 			'5': {'tracker': (True, 'asc', 500), 'replace':{}}}
 
 # project specific info
@@ -101,15 +101,13 @@ class DT_sim(FolderStructure):
 			if min_p < 75:
 				print min_p, cnd_info[0][cnd_sort[0]], file
 
-
-
-	def mainBEH(self, column = 'dist_high'):
+	def mainBEH(self, exp = 'beh', column = 'dist_high', ylim = (350,750)):
 		'''
 
 		'''
 
 		# read in data
-		file = self.FolderTracker(['beh','analysis'], filename = 'preprocessed.csv')
+		file = self.FolderTracker([exp,'analysis'], filename = 'preprocessed.csv')
 		DF = pd.read_csv(file)
 
 		# creat pivot (with RT filtered data)
@@ -125,7 +123,7 @@ class DT_sim(FolderStructure):
 		error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
 
 		# plot the seperate conditions (3 X 1 plot design)
-		plt.figure(figsize = (20,10))
+		f = plt.figure(figsize = (30,10))
 
 		levels = np.unique(pivot.keys().get_level_values('block_type'))
 		for idx, block in enumerate(levels):
@@ -134,20 +132,30 @@ class DT_sim(FolderStructure):
 			diff = pivot[block]['yes'].mean() -  pivot[block]['no'].mean()
 			t, p = ttest_rel(pivot[block]['yes'], pivot[block]['no'])
 
-			ax = plt.subplot(1,3, idx + 1, title = '{0}: \ndiff = {1:.0f}, p = {2:.3f}'.format(block, diff, p), ylabel = 'RT (ms)', ylim = (250,600))
-			df = pd.DataFrame(np.hstack((pivot[block].values)), columns = ['RT (ms)'])
+			ax = plt.subplot(1,3, idx + 1, title = '{0}: \ndiff = {1:.0f}, p = {2:.3f}'.format(block, diff, p), ylabel = 'RT (ms)', ylim = ylim)
+			df =pd.melt(pivot[block], value_name = 'RT (ms)')
 			df['sj'] = range(pivot.index.size) * 2
-			df[column] = ['yes'] * pivot.index.size + ['no'] * pivot.index.size
-
 			ax = sns.stripplot(x = column, y = 'RT (ms)', data = df, hue = 'sj', size = 10, jitter = True)
 			ax.legend_.remove()
 			sns.violinplot(x = column, y = 'RT (ms)', data = df, color= 'white', cut = 1)
 
 			sns.despine(offset=50, trim = False)
 		
+		f.subplots_adjust(wspace=50)
 		plt.tight_layout()
-		plt.savefig(self.FolderTracker(['beh','analysis','figs'], filename = 'block_effect_{}.pdf'.format(column)))		
+		plt.savefig(self.FolderTracker([exp,'figs'], filename = 'block_effect_{}.pdf'.format(column)))		
 		plt.close()	
+
+	def beautifyPlot(self, y = 0, xlabel = 'Time (ms)', ylabel = 'Mv'):
+		'''
+		Adds markers to the current plot. Onset placeholder and onset search and horizontal axis
+		'''
+
+		plt.axhline(y=y, ls = '-', color = 'black')
+		plt.axvline(x=-0.25, ls = '-', color = 'black')
+		plt.axvline(x=0, ls = '-', color = 'black')
+		plt.ylabel(ylabel)
+		plt.xlabel(xlabel)
 
 	def clusterPlot(self, X1, X2, p_val, times, y, color):
 		'''
@@ -205,9 +213,9 @@ class DT_sim(FolderStructure):
 		plt.close()
 
 		# difference waves
-		plt.figure(figsize = (25,10))
+		f = plt.figure(figsize = (30,10))
 		for idx, block in enumerate(diff_waves.keys()):
-			ax =  plt.subplot(1,3, idx + 1, title = block, ylabel = 'mV', xlabel = 'time (ms)', ylim = (-5,3))
+			ax =  plt.subplot(1,3, idx + 1, title = block, ylim = (-5,3))
 			to_test = []
 			for i, supp in enumerate(diff_waves[block].keys()):
 				to_test.append(diff_waves[block][supp])
@@ -217,12 +225,10 @@ class DT_sim(FolderStructure):
 				self.clusterPlot(to_test[-1], 0, p_val = 0.05, times = info['times'], y = (-5 + 0.2*i), color = ['red', 'green'][i])
 
 			self.clusterPlot(to_test[0], to_test[1], p_val = 0.05, times = info['times'], y = (-5 + 0.2*2), color = 'black')
-			plt.axhline(y = 0, color = 'black', ls = '--')
-			plt.axvline(x = -0.2, color = 'black', ls = '--')
-			plt.axvline(x = 0, color = 'black', ls = '--')
+			self.beautifyPlot(y = 0, xlabel = 'Time (ms)', ylabel = 'mV')	
 			plt.legend(loc = 'best')
 			sns.despine(offset=50, trim = False)
-
+		f.subplots_adjust(wspace=50)
 		plt.tight_layout()
 		plt.savefig(self.FolderTracker(['erp','dist_loc'], filename = 'diffwaves.pdf'))
 		plt.close()
@@ -243,6 +249,28 @@ class DT_sim(FolderStructure):
 		for file in files:
 			with open(file ,'rb') as handle:
 				bdm.append(pickle.load(handle))	
+
+		# plot diagonal decoding (all conditions in one plot)
+		plt.figure(figsize = (15,10))	
+		diff = []
+		for i, cnd in enumerate(['DTsim', 'DTdisP', 'DTdisDP']):
+			ax = plt.subplot(1,1 ,1, ylim = (0.3, 0.45))
+			X = np.stack([bdm[j][cnd]['standard'] for j in range(len(bdm))])
+			X_diag = np.stack([np.diag(x) for x in X])
+			diff.append(X_diag)
+			self.clusterPlot(X_diag, 1/3.0, p_val = 0.05, times = times, y = plt.ylim()[0] + i * 0.002, color = ['red','purple', 'darkblue'][i])	
+			err_diag, X_diag  = bootstrap(X_diag)	
+			plt.plot(times, X_diag, label = cnd, color = ['red','purple', 'darkblue'][i])
+			plt.fill_between(info['times'], X_diag + err_diag, X_diag - err_diag, alpha = 0.2, color = ['red','purple', 'darkblue'][i])
+			
+		self.clusterPlot(diff[-1], diff[-2], p_val = 0.05, times = times, y = plt.ylim()[0] + 3 * 0.002, color = 'black')	
+		plt.legend(loc = 'best')
+		self.beautifyPlot(y = 1/3.0, xlabel = 'Time (ms)', ylabel = 'Decoding accuracy (%)')	
+		sns.despine(offset=50, trim = False)
+		plt.tight_layout()			
+		plt.savefig(self.FolderTracker(['bdm','{}_type'.format(header)], filename = 'cnd-dec.pdf'))
+		plt.close()	
+
 
 		plt.figure(figsize = (30,20))
 		norm = MidpointNormalize(midpoint=1/3.0)
@@ -277,18 +305,18 @@ class DT_sim(FolderStructure):
 		plt.savefig(self.FolderTracker(['bdm','{}_type'.format(header)], filename = 'dec.pdf'))
 		plt.close()	
 
-	def plotTF(self, c_elec, i_elec, times = (-0.6)):
+	def plotTF(self, c_elec, i_elec, method = 'hilbert'):
 
 
 		with open(self.FolderTracker(['tf'], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
 
 		times = info['times']	
-		files = glob.glob(self.FolderTracker(['tf'], filename = '*-tf.pickle'))
+		files = glob.glob(self.FolderTracker(['tf', method], filename = '*-tf.pickle'))
 		tf = []
 		for file in files:
 			with open(file ,'rb') as handle:
-				tf.a ppend(pickle.load(handle))	
+				tf.append(pickle.load(handle))	
 
 		contra_idx = [info['ch_names'].index(e) for e in c_elec]
 		ipsi_idx = [info['ch_names'].index(e) for e in i_elec]
@@ -296,15 +324,18 @@ class DT_sim(FolderStructure):
 		plt.figure(figsize = (30,10))
 		for plt_idx, cnd in enumerate(['DTsim','DTdisP','DTdisDP']):
 			ax = plt.subplot(1,3 , plt_idx + 1, title = cnd, xlabel = 'time (ms)', ylabel = 'freq')
-			contra = np.stack([np.mean(tf[i][cnd]['power'][:,contra_idx,:], axis = 1) for i in range(len(tf))])
-			ipsi = np.stack([np.mean(tf[i][cnd]['power'][:,ipsi_idx,:], axis = 1) for i in range(len(tf))])
+			contra = np.stack([np.mean(tf[i][cnd]['base_power'][:,contra_idx,:], axis = 1) for i in range(len(tf))])
+			ipsi = np.stack([np.mean(tf[i][cnd]['base_power'][:,ipsi_idx,:], axis = 1) for i in range(len(tf))])
 			X = contra - ipsi
-			plt.imshow(X.mean(axis = 0), cmap = cm.jet, interpolation='none', aspect='auto', 
+			#sig = clusterBasedPermutation(X,0)
+			X = X.mean(axis = 0)
+			#X[sig == 1] = 0
+			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
 							   origin = 'lower', extent=[times[0],times[-1],5,40])
 			plt.colorbar()
 
 		plt.tight_layout()			
-		plt.savefig(self.FolderTracker(['tf','figs'], filename = 'tf-main.pdf'))
+		plt.savefig(self.FolderTracker(['tf','figs'], filename = 'tf-main-base.pdf'))
 		plt.close()	
 
 if __name__ == '__main__':
@@ -318,47 +349,49 @@ if __name__ == '__main__':
 	os.chdir(project_folder)
 
 	# initiate current project
-	#PO = DT_sim()
+	PO = DT_sim()
 
 	# analyze behavior
 	#PO.prepareBEH(project, part, factors, labels, project_param)
-	#PO.mainBEH()
+	#PO.mainBEH(exp = 'exp_2', column = 'dist_high',  ylim = (300,800))
+	#PO.mainBEH(exp = 'exp_2', column = 'target_high',  ylim = (350,900))
 
 	# analyze eeg
 	#PO.countCndCheck()
 	#PO.plotERP()
 	#PO.plotBDM(header = 'target')
 	#PO.plotBDM(header = 'dist')
-	#PO.plotTF()
+	PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'hilbert')
 
 
 	# run preprocessing
-	for sj in [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]:
-	# preprocessing(sj = 5, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	for sj in [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]:
+		pass
+	# 	preprocessing(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
 	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
 	# 			  trigger = trigger, project_param = project_param, 
 	# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
-		# TF analysis
-		tf = TF()
-		tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
-					  cnd_header ='block_type', base_period = (-0.8,-0.6), 
-					  time_period = (-0.6,0), flip = dict(high_prob = 'left'), downsample = 4)
+	# # 	#TF analysis
+	# 	tf = TF()
+	# 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
+	# 				  cnd_header ='block_type', base_period = (-0.8,-0.6), 
+	# 				  time_period = (-0.6,0), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
 
-		# ERP analysis
-		# erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
-		# erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
-		# erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
-		# 								r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
-		# erp.topoFlip(left = [2])
-		# erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
+	# 	# ERP analysis
+	# 	erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
+	# 	erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
+	# 	erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
+	# 									r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
+	# 	erp.topoFlip(left = [2])
+	# 	erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
 
-		# # BDM analysis
-		# bdm = BDM('all_channels', 'dist_type', nr_folds = 10, eye = False)
-		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+	# 	# # BDM analysis
+	# 	bdm = BDM('all_channels', 'dist_type', nr_folds = 10, eye = False)
+	# 	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 
-		# bdm = BDM('all_channels', 'target_type', nr_folds = 10, eye = False)
-		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+	# 	bdm = BDM('all_channels', 'target_type', nr_folds = 10, eye = False)
+	# 	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 	
 
 

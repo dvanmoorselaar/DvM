@@ -1,4 +1,5 @@
 import numpy as np
+import mne
 import scipy.sparse as sparse
 
 from IPython import embed 
@@ -7,6 +8,20 @@ from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
+
+def select_electrodes(ch_names, subset):
+	'''
+
+	'''
+
+	if subset == 'all':
+		elecs = []
+	elif subset == 'post':
+		elecs = ['Iz','Oz','O1','O2','PO7','PO8','PO3','PO4','POz','Pz','P9','P10','P7','P8','P5','P6','P3','P4','P1','P2','Pz']	
+
+	picks = mne.pick_channels(ch_names, include = elecs)
+
+	return picks	
 
 def confidence_int(data, p_value = 0.05, morey = True):
 	"""

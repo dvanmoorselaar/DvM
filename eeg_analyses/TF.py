@@ -143,7 +143,7 @@ class TF(FolderStructure):
 
 	def TFanalysis(self, sj, cnds, cnd_header, base_period, time_period, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
-		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decmposition
+		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decomposition
 
 		Add option to subtract ERP to get evoked power
 		Add option to match trial number
@@ -192,6 +192,7 @@ class TF(FolderStructure):
 			wavelets, frex = self.createMorlet(min_freq = min_freq, max_freq = max_freq, num_frex = num_frex, 
 									cycle_range = cycle_range, freq_scaling = freq_scaling, 
 									nr_time = nr_time, s_freq = s_freq)
+		
 		elif method == 'hilbert':
 			frex = [(i,i + 4) for i in range(min_freq, max_freq, 2)]
 			num_frex = len(frex)	
@@ -212,7 +213,7 @@ class TF(FolderStructure):
 			cnd_idx = np.where(beh['block_type'] == cnd)[0]
 			l_conv = 2**self.nextpow2(nr_time * cnd_idx.size + nr_time - 1)
 			raw_conv = np.zeros((cnd_idx.size, num_frex, nr_chan, idx_2_save.size)) 
-
+			
 			# loop over channels
 			for ch in range(nr_chan):
 				print '\r{0:.0f}% of channels ({1} out {2} conditions)'.format((float(ch)/nr_chan)*100, c + 1, len(cnds)),
@@ -237,7 +238,7 @@ class TF(FolderStructure):
 
 					# populate
 					raw_conv[:,f,ch] = m[:,idx_2_save]
-
+					
 					# baseline correction (actual correction is done after condition loop)
 					base[cnd][f,ch] = np.mean(abs(m[:,base_s:base_e])**2)
 
@@ -245,13 +246,13 @@ class TF(FolderStructure):
 			tf[cnd]['power'] = np.mean(abs(raw_conv)**2, axis = 0) 
 			tf[cnd]['phase'] = '?'
 
-		# db convert: condition specific baseline
+		# baseline normalization
 		for cnd in cnds:
-			if base_type == 'conspec':
-				tf[cnd]['power'] = 10*np.log10(tf[cnd]['power']/np.repeat(base[cnd][:,:,np.newaxis],idx_2_save.size,axis = 2))
+			if base_type == 'conspec': #db convert: condition specific baseline
+				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(base[cnd][:,:,np.newaxis],idx_2_save.size,axis = 2))
 			elif base_type == 'conavg':	
 				con_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
-				tf[cnd]['power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
+				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
 
 		# save TF matrices
 		with open(self.FolderTracker(['tf',method],'{}-tf.pickle'.format(sj)) ,'wb') as handle:

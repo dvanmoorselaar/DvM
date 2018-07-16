@@ -783,15 +783,15 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
     EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
                                        montage=None, preload=True, eog=eog) for run in eeg_runs])
     EEG.replaceChannel(sj, session, replace)
-    EEG.reReference(ref_channels=ref, vEOG=eog[
-                    :2], hEOG=eog[2:], changevoltage=True)
+    #EEG.reReference(ref_channels=ref, vEOG=eog[
+    #                :2], hEOG=eog[2:], changevoltage=True)
     EEG.setMontage(montage='biosemi64')
 
     #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-    EEGica = EEG.filter(h_freq=None, l_freq=1,
-                       fir_design='firwin', skip_by_annotation='edge')
-    EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-               skip_by_annotation='edge')
+    #EEGica = EEG.filter(h_freq=None, l_freq=1,
+    #                   fir_design='firwin', skip_by_annotation='edge')
+    #EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+    #           skip_by_annotation='edge')
 
     # MATCH BEHAVIOR FILE
     events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
@@ -803,14 +803,14 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
             tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
     # ARTIFACT DETECTION
-    if 'RT' in beh.keys():
-        epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = beh['RT']/1000)
-    else:
-        epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = None)    
+    # if 'RT' in beh.keys():
+    #     epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = beh['RT']/1000)
+    # else:
+    #     epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = None)    
     epochs.artifactDetection(inspect=inspect)
-
+    embed()
     # ICA
-    epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
+    #epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
 
     # EYE MOVEMENTS
     epochs.detectEye(missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
@@ -818,6 +818,7 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
     # INTERPOLATE BADS
     epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
+    embed()
     # LINK BEHAVIOR
     epochs.linkBeh(beh, events, trigger)
 

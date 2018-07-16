@@ -221,7 +221,7 @@ class ERP(FolderStructure):
 		midline (None | dict): Can be used to limit analysis to trials where a specific 
 								stimulus (key of dict) was presented on the midline (value of dict)
 		erp_name (str): name of the pickle file to store erp data
-		plot (bool): show condition averaged differenc ewaves for each subject
+		plot (bool): show condition averaged difference waves for each subject
 
 		Returns
 		- - - -

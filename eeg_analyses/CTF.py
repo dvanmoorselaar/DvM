@@ -34,7 +34,7 @@ from scipy.stats import norm
 from scipy.ndimage.measurements import label
 from IPython import embed 
 
-class SpatialEM(BDM):
+class CTF(BDM):
 	'''
 	Spatial encoding scripts modeled after: "The topography of alpha-band activity tracks the content of spatial working memory" by Foster et al. (2015).
 	Scipts based on Matlab scripts published on open science Framework (https://osf.io/bwzjj/) and lab visit to Chicago University (spring quarter 2016).
@@ -61,15 +61,13 @@ class SpatialEM(BDM):
 
 		self.channel_folder = channel_folder
 		self.decoding = decoding
-		self.project_folder = '/Users/dirk/Desktop/suppression' 
-		#os.chdir(os.path.join(os.getcwd(), 'ctf', channel_folder, decoding))	
-		
+
 		# specify model parameters
 		self.nr_bins = nr_bins													# nr of spatial locations 
 		self.nr_chans = nr_chans 												# underlying channel functions coding for spatial location
 		self.nr_iter = nr_iter													# nr iterations to apply forward model 		
 		self.nr_blocks = nr_blocks												# nr blocks to split up training and test data with leave one out test procedure
-		self.sfreq = 512													# shift of channel position
+		self.sfreq = 512														# shift of channel position
 		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, delta = delta)		# hypothesized set tuning functions underlying power measured across electrodes
 
 
@@ -126,6 +124,7 @@ class SpatialEM(BDM):
 
 		return pos_bins, cnds, eegs, EEG
 
+
 	def calculateBasisset(self, nr_bins = 8, nr_chans = 8, sin_power = 7, delta = False):
 		'''
 		calculateBasisset returns a basisset that is used to reconstruct location-selective CTFs from the topographic distribution 
@@ -179,7 +178,8 @@ class SpatialEM(BDM):
 	
 		return basisset	
 
-	def powerAnalysis(self, data, tois, sfreq, band, downsample, evoked = True):
+
+	def powerAnalysis(self, data, tois, sfreq, band, downsample):
 		'''
 		powerAnalysis bandpass filters raw EEG signal to isolate frequency-specific activity using a 5th order butterworth filter (different then original FIR filter). 
 		A Hilbert Transform is then applied to the filtered data to extract the complex analytic signal. To extract the total power this signal is computed by squaring 
@@ -192,7 +192,6 @@ class SpatialEM(BDM):
 		sfreq(int): sampling rate in Hz
 		band(list): lower and higher cut-off value for bandpass filter
 		downsample(int): factor to downsample data after filtering
-		evoked (bool): specifys whether or not evoked data should be calculated.
 
 		Returns
 		- - - -
@@ -200,44 +199,31 @@ class SpatialEM(BDM):
 		data_total(array): total power (phase-locked activity)
 		'''	
 
-		#OLD CODE
-		# evoked = np.empty((data.shape[0], data.shape[1], data.shape[2]), dtype=np.complex_) * np.nan; 
-		# total = np.copy(evoked)
-
-		# # Filter each electrode seperately
-		# for ch in range(data.shape[1]): 
-		# 	
-		# 	evoked[:,ch,:] = hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
-		# 	total[:,ch,:] = np.abs(hilbert(filter_data(data[:,ch,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
-	
-
-		# try: # FILTHY HACK TO PREVENT CRASH WHEN ANALYZING ALL TRIALS
-		# 	T = np.abs(hilbert(filter_data(data[:,ch,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
-		# 	if evoked:
-		# 		E = hilbert(filter_data(data[:,:,:], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
-		# 	else:
-		# 		E = T	
-		
-		# except:
-		# print 'fifth order failed'
+		_, nr_chan, nr_time = data.shape
 		T = np.empty(data.shape, dtype= np.complex_) * np.nan
 		E = np.copy(T)
 
-		for i in range(data.shape[0]):
-			T[i] = np.abs(hilbert(filter_data(data[i], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))))**2
-			if evoked:
-				E[i] = hilbert(filter_data(data[i], sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
+		# loop over channels 
+		for ch in range(nr_chan):
+			# concatenate trials to speed up processing time
+			x = np.ravel(data[:,ch,:])
+			x_hilb = hilbert(filter_data(x, sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
+			x_hilb = np.reshape(x_hilb, (data.shape[0],-1))
+			T[:,ch] = np.abs(x_hilb)**2
+			E[:,ch] = x_hilb
 			
 		# trim filtered data to remove times that are not of interest (after filtering to avoid artifacts)
 		E = E[:,:,tois]
 		T = T[:,:,tois]
 
 		# downsample to reduced sample rate (after filtering so that downsampling doesn't affect filtering)
-		if downsample > 1:
-			E = mne.filter.resample(E, down = downsample)
-			T = mne.filter.resample(T, down = downsample)
+		E = E[:,:,::downsample]
+		T = T[:,:,::downsample]
+		#E = mne.filter.resample(E, down = downsample, npad = 'auto')
+		#T = mne.filter.resample(T, down = downsample, npad = 'auto')
 
 		return E, T
+
 
 	def forwardModel(self, train_X, test_X, C1):
 		'''
@@ -289,64 +275,7 @@ class SpatialEM(BDM):
 		return C2, C2s, W 											# return the unshifted and the shifted channel response
 
 
-	def forwardModelold(self, data, labels, c, block_nr, block, bins):
-		'''
-		forwardModel applies an inverted encoding model (IEM) to each time point in the analyses. This routine proceeds in two stages (train and test).
-		1. In the training stage, training data (B1) is used to estimate weights (W) that approximate the relative contribution of each spatial channel 
-		to the observed response measured at each electrode, with:
-
-		B1 = W*C1
-
-		,where B1 is power at each electrode, C1 is the predicted response of each spatial channel, and W is weight matrix that characterizes a 
-		linear mapping from channel space to electrode space. Equation is solved via least-squares estimation.
-		2. In the test phase, the model is inverted to transform the observed test data B2 into estimated channel responses. The estimated channel response 
-		are then shifted to a common center by aligning the estimate dchannel response to the channel tuned for the stimulus bin. 
-
-		Arguments
-		- - - - - 
-		data (array): array of training and test data for each electrode
-		labels(): training and test labels 
-		c (array): basisset
-		block_nr (array): array that contains block numbers used to seperate training and test blocks
-		block(int): used to specify test block. The other blocks are automatically used as training blocks
-		bins(array): all bins used in IEM
-
-		Returns
-		- - - -
-		C2(array): unshifted predicted channel response
-		C2s(array): shifted predicted channels response
-		'''
-
-		idx_train = np.hstack(block_nr != block)
-		idx_test = np.hstack(block_nr == block)
-
-		train_label = labels[idx_train]							# training labels
-		test_label = labels[idx_test]							# test labels
-
-		###### POWER ANALYSIS ######
-		B1 = data[idx_train,:] 									# training data (nr training blocks x nr_electrodes)
-		B2 = data[idx_test,:]									# test data (nr test blocks x nr_electrodes)
-		C1 = c[idx_train,:]										# predicted channel outputs for training data (nr training blocks x nr_chans)
-		W, resid_w, rank_w, s_w = np.linalg.lstsq(C1,B1)		# estimate weight matrix W (nr_chans x nr_electrodes)
-		C2, resid_c, rank_c, s_c = np.linalg.lstsq(W.T,B2.T)	# estimate channel response C2 (nr_chans x nr test blocks) 
-
-		# TRANSPOSE C2 so that we take the average across channels rather than across position bins
-		C2 = C2.T
-
-		C2s = np.copy(C2)
-		# shift eegs to common center
-		nr_2_shift = int(np.ceil(C2.shape[1]/2.0))
-		for i in range(C2.shape[0]):
-			idx_shift = abs(bins - test_label[i]).argmin()
-			shift = idx_shift - nr_2_shift
-			if self.nr_bins % 2 == 0:							# CHECK THIS: WORKS FOR 5 AND 8 BINS
-				C2s[i,:] = np.roll(C2[i,:], - shift)	
-			else:
-				C2s[i,:] = np.roll(C2[i,:], - shift - 1)			
-
-		return C2, C2s, W 											# return the unshifted and the shifted channel response
-
-	def maxTrial(self, conditions, pos_bins, of_interest, method = 'fold'):
+	def maxTrial(self, conditions, pos_bins, of_interest, method = 'k-fold'):
 		'''
 		maxTrial calculates the maximum number of trials that can be used in the block/fold assignment 
 		of the forward model such that the number of trials used in the IEM is equated across conditions
@@ -380,10 +309,11 @@ class SpatialEM(BDM):
 		min_count = np.min(bin_count)
 		if method == 'Foster':
 			nr_per_bin = int(np.floor(min_count/self.nr_blocks))						# max number of trials per bin
-		else:
+		elif method == 'k-fold':
 			nr_per_bin = int(np.floor(min_count/self.nr_iter)*self.nr_iter)
 
 		return nr_per_bin
+
 
 	def assignBlocks(self, pos_bin, idx_tr, nr_per_bin,  nr_iter):
 		'''
@@ -445,6 +375,7 @@ class SpatialEM(BDM):
 				idx += 1
 
 		return tr_idx, te_idx	
+
 
 	def crosstrainCTF(self, sj, window, train_cnds, test_cnds, freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = False, name = ''):
 		'''
@@ -550,7 +481,7 @@ class SpatialEM(BDM):
 			print('saving cross training CTF dict')
 			pickle.dump(CTF, handle)
 
-	def CTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', plot = True):
+	def spatialCTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', plot = True):
 		'''
 		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
 
@@ -572,6 +503,10 @@ class SpatialEM(BDM):
 
 		ctf = {}
 		ctf_info = {}
+
+		# set nr_blocks (only relevant when Foster method is used)
+		if method == 'k-fold':
+			self.nr_blocks = 1
 		
 		# set condition for loop
 		if type(conditions) == str:
@@ -588,10 +523,10 @@ class SpatialEM(BDM):
 
 		# read in all data 
 		pos_bins, cnds, eegs, EEG = self.readData(sj, conditions)
-		samples = np.logical_and(EEG.times >= window[0], EEG.times <= window[1])
-		nr_samples = samples.sum()/downsample	
-		ctf_info['times'] = mne.filter.resample(EEG.times[samples], down = downsample)
-
+		samples = np.logical_and(EEG.times >= window[0], EEG.times <= window[1])	
+		ctf_info['times'] = EEG.times[samples][::downsample]
+		nr_samples = ctf_info['times'].size
+		
 		# Determine the number of trials that can be used for each position bin, matched across conditions
 		nr_per_bin = self.maxTrial(cnds, pos_bins, conditions, method) # NEEDS TO BE FIXED
 
@@ -607,12 +542,12 @@ class SpatialEM(BDM):
 
 				# update CTF dict with preallocated arrays such that condition data can be saved later 
 				ctf_info.update({cnd:{}})
-				ctf.update({cnd: {'tf_E': np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_chans)) * np.nan,
-								 'C2_E': np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
-								 'W_E':	np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan,
-								 'tf_T': np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_chans)) * np.nan,
-								 'C2_T': np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
-								 'W_T':	np.empty((nr_freqs,self.nr_iter,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan	}})	
+				ctf.update({cnd: {'tf_E': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
+								 'C2_E': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
+								 'W_E':	np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan,
+								 'tf_T': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
+								 'C2_T': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
+								 'W_T':	np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan	}})	
 
 				# select data and create training and test sets across folds for each condition
 				# this is done only on the first frequency loop to ensure that datasets are identical across frequencies
@@ -628,17 +563,17 @@ class SpatialEM(BDM):
 						if method == 'Foster':
 							ctf_info[cnd]['tr'], ctf_info[cnd]['te']  = self.assignBlocks(labels, cnd_idx, nr_per_bin, self.nr_iter)
 							C1 = np.empty((self.nr_bins* (self.nr_blocks - 1), self.nr_chans)) * np.nan 										
-						else:
+						elif method == 'k-fold':
 							ctf_info[cnd]['tr'], ctf_info[cnd]['te'], _ = self.bdmTrialSelection(cnd_idx, labels, nr_per_bin, {})
 							C1 = self.basisset
 
 				# Loop through each iteration (is folds in the new set up)
-				for itr in range(self.nr_iter):
+				for itr in range(self.nr_iter * self.nr_blocks):
 
 					# average data for each position
 					bin_te_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
 					bin_te_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
-					if method == 'fold':
+					if method == 'k-fold':
 						bin_tr_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
 						bin_tr_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
 					elif method == 'Foster':
@@ -673,7 +608,7 @@ class SpatialEM(BDM):
 						ctf[cnd]['C2_T'][fr, itr, smpl] = c2 						# save the unshifted channel response
 						ctf[cnd]['tf_T'][fr,itr, smpl] = np.mean(c2s,0)				# save average of shifted channel response
 						ctf[cnd]['W_T'][fr, itr, smpl] = w 							# save estimated weights per channel and electrode 
-
+			
 		# calculate slopes
 		slopes = {}
 		for cnd in ctf.keys():
@@ -681,7 +616,7 @@ class SpatialEM(BDM):
 			slopes[cnd]['T_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_T'], axis = 1),nr_freqs,nr_samples) 
 			slopes[cnd]['E_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_E'], axis = 1),nr_freqs,nr_samples)
 			if plot:
-				plt.plot(slopes[cnd]['T_slopes'].T, label = cnd)
+				plt.plot(ctf_info['times'], slopes[cnd]['E_slopes'].T, label = cnd)
 		plt.legend(loc = 'best')
 		plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding, 'figs'], filename = '{}_slopes_{}.pdf'.format(sj, freqs.keys()[0])))		
 		plt.close()
@@ -690,8 +625,8 @@ class SpatialEM(BDM):
 			print('saving CTF dict')
 			pickle.dump(ctf, handle)
 
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-fold_{}.pickle'.format(cnd_name,str(sj),freqs.keys()[0])),'wb') as handle:
-			print('saving CTF dict')
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
+			print('saving slopes dict')
 			pickle.dump(slopes, handle)
 	
 		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_info.pickle'.format(freqs.keys()[0])),'wb') as handle:

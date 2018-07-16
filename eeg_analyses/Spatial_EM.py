@@ -267,6 +267,7 @@ class SpatialEM(FolderStructure):
 		W, resid_w, rank_w, s_w = np.linalg.lstsq(C1,B1)		# estimate weight matrix W (nr_chans x nr_electrodes)
 		C2, resid_c, rank_c, s_c = np.linalg.lstsq(W.T,B2.T)	# estimate channel response C2 (nr_chans x nr test blocks) 
 
+		print C1
 		# TRANSPOSE C2 so that we take the average across channels rather than across position bins
 		C2 = C2.T
 
@@ -464,8 +465,6 @@ class SpatialEM(FolderStructure):
 						tf[itr,smpl,blck,:] = np.mean(C2s,0)					# save average of shifted channel response
 						W[itr, smpl,blck,:,:] = We 						# save estimated weights per channel and electrode
 
-
-
 			# save relevant data to CTF dictionary
 			CTF[curr_cond]['C2'] = {}
 			CTF[curr_cond]['C2'].update({'raw_eeg': C2})
@@ -640,8 +639,6 @@ class SpatialEM(FolderStructure):
 							tf_total[freq,itr,smpl,blck,:] = np.mean(C2s,0)			# save average of shifted channel response
 							W_total[freq, itr, smpl,blck,:,:] = Wt 					# save estimated weights per channel and electrode
 		
-			embed()				
-
 			# save relevant data to CTF dictionary
 			CTF[curr_cond]['C2'] = {}
 			CTF[curr_cond]['C2'].update({'evoked': C2_evoked,'total': C2_total})
@@ -650,6 +647,18 @@ class SpatialEM(FolderStructure):
 			#CTF[curr_cond]['W'] = {}
 			#CTF[curr_cond]['W'] = {'evoked': W_evoked,'total': W_total}
 
+		embed()
+		# calculate slopes
+		slopes = {}
+		for cnd in conditions:
+			slopes.update({cnd:{}})
+			slopes[cnd]['T_slopes'] = self.calculateSlopes(np.mean(CTF[cnd]['ctf']['total'], axis = (1,3)),nr_freqs,nr_samps) 
+			slopes[cnd]['E_slopes'] = self.calculateSlopes(np.mean(CTF[cnd]['ctf']['evoked'], axis = (1,3)),nr_freqs,nr_samps)
+			if plot:
+				plt.plot(mne.filter.resample(time, down = downsample, npad = 'auto'),slopes[cnd]['T_slopes'].T, label = cnd)
+		plt.legend(loc = 'best')
+		plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding, 'figs'], filename = '{}_slopes-old_{}.pdf'.format(sj, 'alpha')))		
+		plt.close()
 		# save data
 		if len(conditions) == 1:
 			cnd_name = conditions[0]
@@ -1698,9 +1707,9 @@ if __name__ == '__main__':
 	os.environ['MKL_NUM_THREADS'] = '4'
 	os.environ['NUMEXP_NUM_THREADS'] = '4'
 	os.environ['OMP_NUM_THREADS'] = '4'
-	project_folder = '/home/dvmoors1/BB/Dist_suppression'
+	project_folder = '/home/dvmoors1/BB/DT_reps'
 	os.chdir(project_folder) 
-	subject_id = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]	
+	subject_id = [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]	
 
 	### INITIATE SESSION ###
 	header = 'target_loc'
@@ -1709,7 +1718,7 @@ if __name__ == '__main__':
 	else:
 		conditions = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
 
-	session = SpatialEM('all_channels_no-eye', header, nr_iter = 5, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+	session = SpatialEM('all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
 	
 	### CTF and SLOPES ###
 	for subject in subject_id:
