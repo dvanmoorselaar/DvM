@@ -374,10 +374,28 @@ class CTF(BDM):
 						tr_idx[idx, b, j] = train[j]
 				idx += 1
 
-		return tr_idx, te_idx	
+		return tr_idx, te_idx
 
+	def equateBins(self, bins, X):
+		'''
+		removes trials such that number of observations per bin is equalized
+		'''	
 
-	def crosstrainCTF(self, sj, window, train_cnds, test_cnds, freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = False, name = ''):
+		idx_to_keep = []
+		min_tr = np.min(np.unique(bins, return_counts= True)[1])
+		for b in np.unique(bins):
+			idx = np.where(bins == b)[0]	
+			np.random.shuffle(idx)
+			idx_to_keep.append(idx[:min_tr])
+
+		idx = np.sort(np.hstack(idx_to_keep))
+		
+		bins = bins[idx]
+		X = X[idx]
+
+		return bins, X	
+
+	def crosstrainCTF(self, sj, window, train_cnds, test_cnds, freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = False, nr_perm = 0, name = ''):
 		'''
 		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
 		Is a specfic case of CTF as training and testing is not done within conditions but across conditions
@@ -393,9 +411,13 @@ class CTF(BDM):
 		filt_art (float): time in s added to correct for filter artifacts
 		downsample (int): factor used to downsample the data (e.g. downsample = 4 downsamples 512 Hz to 128 Hz)
 		tgm (bool): create a train test generalization matrix
+		nr_perm (int): Number of permutations. If 0, analysis is only performed on non-permuted data
 		name (str): name of cross training combination
 
 		'''
+
+		# set number of permutations
+		nr_perm += 1
 
 		CTF = {} 
 
@@ -408,80 +430,93 @@ class CTF(BDM):
 		# read in all data (train plus test data)
 		pos_bins, cnds, eegs, EEG = self.readData(sj, train_cnds + test_cnds)
 		samples = np.logical_and(EEG.times >= window[0], EEG.times <= window[1])
-		nr_samples = samples.sum()/downsample	
-
-		# select training data 
-		train_mask = np.array([True if cnd in train_cnds else False for cnd in cnds])
-		train_X = eegs[train_mask,:,:]
-		train_bins = pos_bins[train_mask]
-
+		nr_samples = EEG.times[samples][::downsample].size
+	
 		# loop over test conditions
 		for test_cnd in test_cnds:
-			print test_cnd
 
-			# select test data
+			# select train and test data
+			train_mask = np.array([True if cnd in train_cnds and cnd != test_cnd else False for cnd in cnds])
+			train_X = eegs[train_mask,:,:]
+			train_bins = pos_bins[train_mask]
+			train_bins, train_X = self.equateBins(train_bins, train_X)
+
 			test_X = eegs[cnds == test_cnd,:,:]
 			test_bins = pos_bins[cnds == test_cnd]
+			test_bins, test_X = self.equateBins(test_bins, test_X)
 
 			if tgm:
 				nr_te_samples = nr_samples
 			else:
 				nr_te_samples = 1	
 
-			tf = np.empty((nr_freqs, nr_samples, nr_te_samples, self.nr_chans)) * np.nan
-			C2 = np.empty((nr_freqs, nr_samples, nr_te_samples, self.nr_bins, self.nr_chans)) * np.nan
-			W = np.empty((nr_freqs, nr_samples, nr_te_samples, self.nr_chans, eegs.shape[1])) * np.nan
+			# tf = np.empty((nr_perm, nr_freqs, nr_samples, nr_te_samples, self.nr_chans)) * np.nan
+			# C2 = np.empty((nr_perm,nr_freqs, nr_samples, nr_te_samples, self.nr_bins, self.nr_chans)) * np.nan
+			# W = np.empty((nr_perm, nr_freqs, nr_samples, nr_te_samples, self.nr_chans, eegs.shape[1])) * np.nan
+
+			tf = np.zeros((nr_perm, nr_freqs, nr_samples, nr_te_samples, self.nr_chans))
+			C2 = np.zeros((nr_perm,nr_freqs, nr_samples, nr_te_samples, self.nr_bins, self.nr_chans))
+			W = np.zeros((nr_perm, nr_freqs, nr_samples, nr_te_samples, self.nr_chans, eegs.shape[1]))
 
 			# Loop over frequency bands
 			for fr in range(nr_freqs):
 				print('Started cross training of frequency {} out of {}'.format(fr + 1, freqs.shape[0]))
 
 				# TF analysis
-				_, tr_total = self.powerAnalysis(train_X, samples, self.sfreq, [freqs[fr][0],freqs[fr][1]], downsample, evoked = False)
-				_, te_total = self.powerAnalysis(test_X, samples, self.sfreq, [freqs[fr][0],freqs[fr][1]], downsample, evoked = False)
+				_, tr_total = self.powerAnalysis(train_X, samples, self.sfreq, [freqs[fr][0],freqs[fr][1]], downsample)
+				_, te_total = self.powerAnalysis(test_X, samples, self.sfreq, [freqs[fr][0],freqs[fr][1]], downsample)
 
 				# average data for each position
 				bin_tr_X = np.empty((self.nr_bins, eegs.shape[1], tr_total.shape[2])) * np.nan
 				bin_te_X = np.empty((self.nr_bins, eegs.shape[1],te_total.shape[2])) * np.nan
 
-				for b in range(self.nr_bins):
-					idx_tr = train_bins == b
-					idx_te = test_bins == b
-					bin_tr_X[b] = np.mean(tr_total[idx_tr], axis = 0)
-					bin_te_X[b] = np.mean(te_total[idx_te], axis = 0)
+				for p in range(nr_perm):
+					print "\r{0:.2f}% of permutations".format((float(p)/nr_perm)*100),
 
-				# Loop over all samples
-				for tr_smpl in range(nr_samples):
-					print "\r{0:.0f}% of tr matrix".format((float(tr_smpl)/nr_samples)*100),
-					for te_smpl in range(nr_te_samples):
-						if not tgm:
-							te_smpl = tr_smpl
-							te_idx = 0
-						else:
-							te_idx = te_smpl	
+					# first time train labels are not shuffled. # PERMUTATION INDICES ATE NOT YET SAVED
+					if p > 0:
+						np.random.shuffle(train_bins)
 
-						###### ANALYSIS ON TOTAL POWER ######
-						c2, c2s, w = self.forwardModel(bin_tr_X[:,:,tr_smpl], bin_te_X[:,:,te_smpl], self.basisset)
-						C2[fr,tr_smpl,te_idx] = c2 						# save the unshifted channel response
-						tf[fr,tr_smpl, te_idx] = np.mean(c2s,0)			# save average of shifted channel response
-						W[fr, tr_smpl, te_idx] = w 						# save estimated weights per channel and electrode
+					for b in range(self.nr_bins):
+						idx_tr = train_bins == b
+						idx_te = test_bins == b
+						bin_tr_X[b] = np.mean(tr_total[idx_tr], axis = 0)
+						bin_te_X[b] = np.mean(te_total[idx_te], axis = 0)
 
-			# calculate slopes
-			slopes = np.zeros((nr_freqs, nr_samples, nr_te_samples))
-			for t in range(tf.shape[2]):
-				slopes[:,:,t] = self.calculateSlopes(tf[:,:,t,:],nr_freqs,nr_samples) 
+					# Loop over all samples
+					for tr_smpl in range(nr_samples):
+						#print "\r{0:.0f}% of tr matrix".format((float(tr_smpl)/nr_samples)*100),
+						for te_smpl in range(nr_te_samples):
+							if not tgm:
+								te_smpl = tr_smpl
+								te_idx = 0
+							else:
+								te_idx = te_smpl	
 
-			plt.plot(np.squeeze(slopes))
-			plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}-{}_cross-training.pdf'.format(test_cnd,sj)))	
-			plt.close()	
-
-			CTF[test_cnd] = {'C2':C2, 'ctf': tf, 'W': w, 'slopes': slopes}
+							###### ANALYSIS ON TOTAL POWER ######
+							c2, c2s, w = self.forwardModel(bin_tr_X[:,:,tr_smpl], bin_te_X[:,:,te_smpl], self.basisset)
+							C2[p,fr,tr_smpl,te_idx] = c2 						# save the unshifted channel response
+							tf[p,fr,tr_smpl, te_idx] = np.mean(c2s,0)			# save average of shifted channel response
+							W[p,fr, tr_smpl, te_idx] = w 						# save estimated weights per channel and electrode
+			
+			# calculate slopes (for non-permuted data)
+			slopes = np.zeros((nr_perm,nr_freqs, nr_samples, nr_te_samples))
+			for p_ in range(nr_perm):
+				for t in range(tf.shape[2]):
+					slopes[p_,:,:,t] = self.calculateSlopes(tf[p_,:,:,t,:],nr_freqs,nr_samples) 
+	
+			#CTF[test_cnd] = {'C2':C2, 'ctf': tf, 'W': w, 'slopes': slopes}
+			
+			if nr_perm == 1:
+				CTF[test_cnd] = {'slopes': slopes[0]}
+			else:
+				CTF[test_cnd] = {'slopes_p': slopes[1:], 'slopes': slopes[0]}	
 
 		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_cross-training_{}.pickle'.format(sj, name)),'wb') as handle:
 			print('saving cross training CTF dict')
 			pickle.dump(CTF, handle)
 
-	def spatialCTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', plot = True):
+	def spatialCTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', plot = True, nr_perm = 0):
 		'''
 		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
 
@@ -495,12 +530,16 @@ class CTF(BDM):
 		downsample (int): factor to downsample the bandpass filtered data
 		method (str): method used for splitting data into training and testing sets
 		plot (bool): show plots of total power slopes on subject level across conditions
+		nr_perm (int): number of times model is run with permuted data
 
 		Returns
 		- - - -
 		self(object): dict of CTF data
 		'''	
 
+		# set number of permutations
+		nr_perm += 1
+		
 		ctf = {}
 		ctf_info = {}
 
@@ -542,12 +581,19 @@ class CTF(BDM):
 
 				# update CTF dict with preallocated arrays such that condition data can be saved later 
 				ctf_info.update({cnd:{}})
-				ctf.update({cnd: {'tf_E': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
-								 'C2_E': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
-								 'W_E':	np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan,
-								 'tf_T': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
-								 'C2_T': np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
-								 'W_T':	np.empty((nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan	}})	
+				# ctf.update({cnd: {'tf_E': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
+				# 				 'C2_E': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
+				# 				 'W_E':	np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan,
+				# 				 'tf_T': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
+				# 				 'C2_T': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
+				# 				 'W_T':	np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan	}})	
+
+				ctf.update({cnd: {'tf_E': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)),
+								 'C2_E': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)),
+								 'W_E':	np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])),
+								 'tf_T': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)),
+								 'C2_T': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)),
+								 'W_T':	np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) }})	
 
 				# select data and create training and test sets across folds for each condition
 				# this is done only on the first frequency loop to ensure that datasets are identical across frequencies
@@ -569,61 +615,79 @@ class CTF(BDM):
 
 				# Loop through each iteration (is folds in the new set up)
 				for itr in range(self.nr_iter * self.nr_blocks):
+	
+					# loop over permutations
+					for p in range(nr_perm):
+						print "\r{0:.2f}% of permutations".format((float(p)/nr_perm)*100),
+						# first time train labels are not shuffled. # PERMUTATION INDICES ATE NOT YET SAVED
+						tr_idx = ctf_info[cnd]['tr'][itr]
+						if p > 0:	
+							to_shuffle = tr_idx.ravel()
+							np.random.shuffle(to_shuffle)
+							tr_idx = to_shuffle.reshape((self.nr_bins, self.nr_blocks - 1, -1))
 
-					# average data for each position
-					bin_te_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
-					bin_te_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
-					if method == 'k-fold':
-						bin_tr_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
-						bin_tr_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
-					elif method == 'Foster':
-						bin_tr_E = np.empty((self.nr_bins * (self.nr_blocks - 1), eegs.shape[1], T.shape[2])) * np.nan
-						bin_tr_T = np.empty((self.nr_bins * (self.nr_blocks - 1), eegs.shape[1], T.shape[2])) * np.nan	
-					
-					bin_cntr = 0
-					for b in range(self.nr_bins):
-						bin_te_E[b] = abs(np.mean(E[ctf_info[cnd]['te'][itr][b]], axis = 0))**2
-						bin_te_T[b] = np.mean(T[ctf_info[cnd]['te'][itr][b]], axis = 0)
-						if method == 'fold':
-							bin_tr_E[b] = abs(np.mean(E[ctf_info[cnd]['tr'][itr][b]], axis = 0))**2
-							bin_tr_T[b] = np.mean(T[ctf_info[cnd]['tr'][itr][b]], axis = 0)	
+						# average data for each position
+						bin_te_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
+						bin_te_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
+						if method == 'k-fold':
+							bin_tr_E = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
+							bin_tr_T = np.empty((self.nr_bins, eegs.shape[1], T.shape[2])) * np.nan
 						elif method == 'Foster':
-							for j in range(self.nr_blocks - 1):
-								bin_tr_E[bin_cntr] = abs(np.mean(E[ctf_info[cnd]['tr'][itr][b][j]], axis = 0))**2
-								bin_tr_T[bin_cntr] = np.mean(T[ctf_info[cnd]['tr'][itr][b][j]], axis = 0)
-								C1[bin_cntr] = self.basisset[b]
-								bin_cntr += 1
-														
-					# Loop over all samples CHECK WHETHER THIS LOOP CAN BE PARALLIZED 
-					for smpl in range(nr_samples):
+							bin_tr_E = np.empty((self.nr_bins * (self.nr_blocks - 1), eegs.shape[1], T.shape[2])) * np.nan
+							bin_tr_T = np.empty((self.nr_bins * (self.nr_blocks - 1), eegs.shape[1], T.shape[2])) * np.nan	
+						
+						bin_cntr = 0
+						for b in range(self.nr_bins):
+							bin_te_E[b] = abs(np.mean(E[ctf_info[cnd]['te'][itr][b]], axis = 0))**2
+							bin_te_T[b] = np.mean(T[ctf_info[cnd]['te'][itr][b]], axis = 0)
+							if method == 'fold':
+								bin_tr_E[b] = abs(np.mean(E[tr_idx[b]], axis = 0))**2
+								bin_tr_T[b] = np.mean(T[tr_idx[b]], axis = 0)	
+							elif method == 'Foster':
+								for j in range(self.nr_blocks - 1):
+									bin_tr_E[bin_cntr] = abs(np.mean(E[tr_idx[b][j]], axis = 0))**2
+									bin_tr_T[bin_cntr] = np.mean(T[tr_idx[b][j]], axis = 0)
+									C1[bin_cntr] = self.basisset[b]
+									bin_cntr += 1
+															
+						# Loop over all samples CHECK WHETHER THIS LOOP CAN BE PARALLIZED 
+						for smpl in range(nr_samples):
 
-						###### ANALYSIS ON EVOKED POWER ######
-						c2, c2s, w = self.forwardModel(bin_tr_E[:,:,smpl], bin_te_E[:,:,smpl], C1)
-						ctf[cnd]['C2_E'][fr,itr,smpl] = c2							# save the unshifted channel response
-						ctf[cnd]['tf_E'][fr,itr, smpl] = np.mean(c2s,0)				# save average of shifted channel response
-						ctf[cnd]['W_E'][fr, itr, smpl] = w 							# save estimated weights per channel and electrode
+							###### ANALYSIS ON EVOKED POWER ######
+							c2, c2s, w = self.forwardModel(bin_tr_E[:,:,smpl], bin_te_E[:,:,smpl], C1)
+							ctf[cnd]['C2_E'][p,fr,itr,smpl] = c2							# save the unshifted channel response
+							ctf[cnd]['tf_E'][p,fr,itr, smpl] = np.mean(c2s,0)				# save average of shifted channel response
+							ctf[cnd]['W_E'][p,fr, itr, smpl] = w 							# save estimated weights per channel and electrode
 
-						###### ANALYSIS ON TOTAL POWER ######
-						c2, c2s, w = self.forwardModel(bin_tr_T[:,:,smpl], bin_te_T[:,:,smpl], C1)
-						ctf[cnd]['C2_T'][fr, itr, smpl] = c2 						# save the unshifted channel response
-						ctf[cnd]['tf_T'][fr,itr, smpl] = np.mean(c2s,0)				# save average of shifted channel response
-						ctf[cnd]['W_T'][fr, itr, smpl] = w 							# save estimated weights per channel and electrode 
-			
-		# calculate slopes
+							###### ANALYSIS ON TOTAL POWER ######
+							c2, c2s, w = self.forwardModel(bin_tr_T[:,:,smpl], bin_te_T[:,:,smpl], C1)
+							ctf[cnd]['C2_T'][p,fr, itr, smpl] = c2 							# save the unshifted channel response
+							ctf[cnd]['tf_T'][p,fr,itr, smpl] = np.mean(c2s,0)				# save average of shifted channel response
+							ctf[cnd]['W_T'][p,fr, itr, smpl] = w 							# save estimated weights per channel and electrode 
+
+		# calculate slopese
 		slopes = {}
 		for cnd in ctf.keys():
+			e_slopes = np.zeros((nr_perm,nr_freqs, nr_samples))
+			t_slopes = np.zeros((nr_perm,nr_freqs, nr_samples))
 			slopes.update({cnd:{}})
-			slopes[cnd]['T_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_T'], axis = 1),nr_freqs,nr_samples) 
-			slopes[cnd]['E_slopes'] = self.calculateSlopes(np.mean(ctf[cnd]['tf_E'], axis = 1),nr_freqs,nr_samples)
+			for p_ in range(nr_perm):
+				e_slopes[p_,:,:] = self.calculateSlopes(np.mean(ctf[cnd]['tf_E'][p_], axis = 1),nr_freqs,nr_samples)
+				t_slopes[p_,:,:] = self.calculateSlopes(np.mean(ctf[cnd]['tf_T'][p_], axis = 1),nr_freqs,nr_samples)
+			
+			if nr_perm == 1:
+				slopes[cnd]['T_slopes'] = e_slopes[0]
+				slopes[cnd]['E_slopes'] = t_slopes[0]
+			else:
+				slopes[cnd] = {'T_slopes_p': t_slopes[1:], 'T_slopes': t_slopes[0], 
+							   'E_slopes_p': e_slopes[1:], 'E_slopes': e_slopes[0]}
+
 			if plot:
-				plt.plot(ctf_info['times'], slopes[cnd]['E_slopes'].T, label = cnd)
+				plt.plot(ctf_info['times'], slopes[cnd]['T_slopes'].T, label = cnd)
+		
 		plt.legend(loc = 'best')
 		plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding, 'figs'], filename = '{}_slopes_{}.pdf'.format(sj, freqs.keys()[0])))		
 		plt.close()
-
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_ctf_{}.pickle'.format(cnd_name,str(sj),freqs.keys()[0])),'wb') as handle:
-			print('saving CTF dict')
-			pickle.dump(ctf, handle)
 
 		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
 			print('saving slopes dict')

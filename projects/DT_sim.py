@@ -308,11 +308,15 @@ class DT_sim(FolderStructure):
 	def plotTF(self, c_elec, i_elec, method = 'hilbert'):
 
 
-		with open(self.FolderTracker(['tf'], filename = 'plot_dict.pickle') ,'rb') as handle:
+		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
 
 		times = info['times']	
-		files = glob.glob(self.FolderTracker(['tf', method], filename = '*-tf.pickle'))
+
+		time = (-0.05, 0)
+		s, e = [np.argmin(abs(info['times'] - t)) for t in time]
+		files = glob.glob(self.FolderTracker(['tf', method], filename = '*-tf-mne.pickle'))
+		print files
 		tf = []
 		for file in files:
 			with open(file ,'rb') as handle:
@@ -329,14 +333,20 @@ class DT_sim(FolderStructure):
 			X = contra - ipsi
 			#sig = clusterBasedPermutation(X,0)
 			X = X.mean(axis = 0)
+			#print X[:,s:e].mean(axis = 1)
 			#X[sig == 1] = 0
 			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
-							   origin = 'lower', extent=[times[0],times[-1],5,40])
+							   origin = 'lower', extent=[times[0],times[-1],5,40],
+							   vmin = -0.1, vmax = 0.1)
+			
+			plt.yticks(info['frex'][::3])
 			plt.colorbar()
 
 		plt.tight_layout()			
-		plt.savefig(self.FolderTracker(['tf','figs'], filename = 'tf-main-base.pdf'))
+		plt.savefig(self.FolderTracker(['tf','figs'], filename = 'tf-main-basetest.pdf'))
 		plt.close()	
+
+		embed()
 
 if __name__ == '__main__':
 
@@ -361,22 +371,22 @@ if __name__ == '__main__':
 	#PO.plotERP()
 	#PO.plotBDM(header = 'target')
 	#PO.plotBDM(header = 'dist')
-	PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'hilbert')
+	#PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
 
 
 	# run preprocessing
 	for sj in [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]:
-		pass
+	
 	# 	preprocessing(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
 	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
 	# 			  trigger = trigger, project_param = project_param, 
 	# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
-	# # 	#TF analysis
+	#  	#TF analysis
 	# 	tf = TF()
 	# 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
-	# 				  cnd_header ='block_type', base_period = (-0.8,-0.6), 
-	# 				  time_period = (-0.6,0), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
+	# 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
+	# 			  time_period = (-0.6,0), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
 
 	# 	# ERP analysis
 	# 	erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
@@ -386,12 +396,16 @@ if __name__ == '__main__':
 	# 	erp.topoFlip(left = [2])
 	# 	erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
 
-	# 	# # BDM analysis
+	# 	# BDM analysis
+	# 	# feature decoding (dist)
 	# 	bdm = BDM('all_channels', 'dist_type', nr_folds = 10, eye = False)
 	# 	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 
+	# 	# feature decoding (target)
 	# 	bdm = BDM('all_channels', 'target_type', nr_folds = 10, eye = False)
 	# 	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 	
-
-
+	#	# location decoding (dist_loc)
+		bdm = BDM('dist_loc', nr_folds = 10, eye = False, elec_oi = 'all', downsample = 128, bdm_filter = None)
+		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', 
+					bdm_labels = ['0','1','2','3','4','5'], time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)

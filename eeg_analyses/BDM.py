@@ -26,7 +26,7 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, decoding, nr_folds, eye, elec_oi = 'all'):
+	def __init__(self, decoding, nr_folds, eye, elec_oi = 'all', downsample = 128, bdm_filter = None):
 		''' 
 
 		Arguments
@@ -42,8 +42,15 @@ class BDM(FolderStructure):
 		self.nr_folds = nr_folds
 		self.eye = eye
 		self.elec_oi = elec_oi
+		self.downsample = downsample
+		self.bdm_filter = bdm_filter
+		if bdm_filter != None:
+			self.bdm_type = bdm_filter.keys()[0]
+			self.bdm_band = bdm_filter[self.bdm_type]
+		else:	 
+			self.bdm_type = 'broad'
 
-	def selectBDMData(self, sj, time = (-0.3, 0.8), thresh_bin = 1, downsample = 128):
+	def selectBDMData(self, sj, time = (-0.3, 0.8), thresh_bin = 1):
 		''' 
 
 		Arguments
@@ -53,6 +60,7 @@ class BDM(FolderStructure):
 		time (tuple | list): time samples (start to end) for decoding
 		thresh_bin (int): exclude trials with a deviation larger than 1. If 0 all trials are use for decoding analysis
 		downsample (int): downsample the data to this sampling range (save computational time)
+		filter (dict): filter data in specified frequency band
 
 
 		Returns
@@ -69,9 +77,15 @@ class BDM(FolderStructure):
 
 		# read in eeg data 
 		EEG = mne.read_epochs(self.FolderTracker(extension = ['processed'], filename = 'subject-{}_all-epo.fif'.format(sj)))
-		if downsample != int(EEG.info['sfreq']):
+
+		# apply filtering and downsampling (if specified)
+		if self.bdm_type != 'broad':
+			 EEG = EEG.filter(h_freq=self.bdm_band[0], l_freq=self.bdm_band[1],
+                      		  method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))
+
+		if self.downsample != int(EEG.info['sfreq']):
 			print 'downsampling data'
-			EEG.resample(downsample)
+			EEG.resample(self.downsample)
 
 		# select time window and EEG electrodes
 		s, e = [np.argmin(abs(EEG.times - t)) for t in time]
@@ -105,7 +119,7 @@ class BDM(FolderStructure):
 		return 	eegs, beh
 
 
-	def Classify(self,sj, cnds, cnd_header, subset = None, time = (-0.3, 0.8), nr_perm = 0, bdm_matrix = False):
+	def Classify(self,sj, cnds, cnd_header, bdm_labels = 'all', factor = None, time = (-0.3, 0.8), nr_perm = 0, bdm_matrix = False):
 		''' 
 
 		Arguments
@@ -114,7 +128,9 @@ class BDM(FolderStructure):
 		sj(int): subject number
 		cnds (list): list of condition labels (as stored in beh dict). 
 		cnd_header (str): variable name containing conditions of interest
-		subset (list | None): Specifies whether all labels or only a subset of labels should be decoded
+		bdm_labels (list | str): Specifies whether all labels or only a subset of labels should be decoded
+		factor (dict | None): if a dictionary only uses trials where a specific condition is met. 
+							Key in dict specifies column header, all values in dict are included in decoding  
 		time (tuple | list): time samples (start to end) for decoding
 		nr_perm (int): If perm = 0, run standard decoding analysis. 
 					If perm > 0, the decoding is performed on permuted labels. 
@@ -135,7 +151,7 @@ class BDM(FolderStructure):
 		max_tr = self.selectMaxTrials(beh, cnds, cnd_header)
 
 		# create dictionary to save classification accuracy
-		classification = {}
+		classification = {'info': {'elec': self.elec_oi}}
 
 		if cnds == 'all':
 			cnds = [cnds]
@@ -146,23 +162,27 @@ class BDM(FolderStructure):
 			# reset selected trials
 			bdm_info = {}
 
-			# initiate decoding array
-			if bdm_matrix:
-				class_acc = np.empty((nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
-			else:	
-				class_acc = np.empty((nr_perm, eegs.shape[2])) * np.nan	
-
 			if cnd != 'all':
 				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
 				cnd_labels = beh[self.decoding][cnd_idx]
 			else:
 				cnd_idx = np.arange(beh[cnd_header].size)
-				cnd_labels = beh[self.decoding]	
+				cnd_labels = beh[self.decoding]
 
-			if subset != None:
-				sub_idx =  [i for i,l in enumerate(cnd_labels) if l in subset]	
+			if bdm_labels != 'all':
+				sub_idx = [i for i,l in enumerate(cnd_labels) if l in bdm_labels]	
 				cnd_idx = cnd_idx[sub_idx]
 				cnd_labels = cnd_labels[sub_idx]
+
+			nr_unique = np.unique(cnd_labels).size	
+			
+			# initiate decoding array
+			if bdm_matrix:
+				class_acc = np.empty((nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
+				label_info = np.empty((nr_perm, eegs.shape[2], eegs.shape[2], nr_unique)) * np.nan
+			else:	
+				class_acc = np.empty((nr_perm, eegs.shape[2])) * np.nan	
+				label_info = np.empty((nr_perm, eegs.shape[2], nr_unique)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -174,14 +194,14 @@ class BDM(FolderStructure):
 				train_tr, test_tr, bdm_info = self.bdmTrialSelection(cnd_idx, cnd_labels, max_tr, bdm_info)
 
 				# do actual classification
-				class_acc[p,:] = self.linearClassification(eegs, train_tr, test_tr, max_tr, cnd_labels, bdm_matrix)
-
+				class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, max_tr, cnd_labels, bdm_matrix)
+				
 			classification.update({cnd:{'standard': class_acc[0]}, 'info': bdm_info})
 			if nr_perm > 1:
 				classification[cnd].update({'perm': class_acc[1:]})
-
+	
 		# store classification dict	
-		with open(self.FolderTracker(['bdm',self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.elec_oi)) ,'wb') as handle:
+		with open(self.FolderTracker(['bdm',self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.bdm_type)) ,'wb') as handle:
 			pickle.dump(classification, handle)
 
 	def selectMaxTrials(self,beh, cnds, cnds_header = 'condition'):
@@ -319,6 +339,7 @@ class BDM(FolderStructure):
 		Yte = np.hstack([[i] * (steps) for i in np.unique(labels)])
 
 		class_acc = np.zeros((N,nr_time, nr_test_time))
+		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
 			print ('Fold {} out of {} folds'.format(n + 1,N))
@@ -333,18 +354,19 @@ class BDM(FolderStructure):
 
 					lda.fit(Xtr,Ytr)
 					predict = lda.predict(Xte)
-
+					
 					if not bdm_matrix:
 						class_acc[n,tr_t, :] = sum(predict == Yte)/float(Yte.size)
+						label_info[n, tr_t, :] = [sum(predict == l) for l in np.unique(labels)]	
 					else:
-						class_acc[n,tr_t, te_t] = sum(predict == Yte)/float(Yte.size)	
+						class_acc[n,tr_t, te_t] = sum(predict == Yte)/float(Yte.size)
+						label_info[n, tr_t, te_t] = [sum(predict == l) for l in np.unique(labels)]	
 						#class_acc[n,t] = clf.fit(X = Xtr, y = Ytr).score(Xte,Yte)
 
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
+		label_info = np.squeeze(np.mean(label_info, axis = 0))
 
-		return class_acc
-
-
+		return class_acc, label_info
 
 	def mneClassify(self, sj, to_decode, conditions, time = [-0.3, 0.8]):
 		'''

@@ -9,6 +9,7 @@ import cv2
 
 import numpy as np
 
+from math import sqrt
 from scipy.stats import ttest_rel, ttest_ind, wilcoxon
 from IPython import embed 
 
@@ -188,6 +189,57 @@ def computeClusterSizes(X1, X2, p_val, paired, tail, mask, conn):
 		neg_sizes = 0
 
 	return pos_sizes, neg_sizes, pos_labels, neg_labels, p_vals	
+
+
+def permTTest(X_real, X_perm, p_thresh = 0.05):
+	'''
+	permTTest calculates p-values for the one-sample t-stat for each sample point across frequencies 
+	using a surrogate distribution generated with permuted data. The p-value is calculated by comparing 
+	the t distribution of the real and the permuted slope data across sample points. 
+	The t-stats for both distribution is calculated with
+
+	t = (m - 0)/SEm
+
+	, where m is the sample mean slope and SEm is the standard error of the mean slope (i.e. stddev/sqrt(n)). 
+	The p value is then derived by dividing the number of instances where the surrogate T value across permutations 
+	is larger then the real T value by the number of permutations.  
+
+	Arguments
+	- - - - - 
+	X_real(array): subject X dim1 X dim2 (optional), where dim1 and dim2 can be any type of dimension 
+				(time, frequency, electrode, etc). Values in array represent some dependent measure 
+				(e.g classification accuracy or power)
+	X_perm(array): subject X nr_permutation X dim1 X dim2 (optional)
+	p_thresh (float): threshold for significance. All p values below this value are considered to be significant
+
+	Returns
+	- - - -
+	p_val (array): array with p_values across frequencies and sample points
+	sig (array): array with significance indices (i.e. 0 or 1) across frequencies and sample points
+	'''
+
+	# FUNCTION DOES NOT YET SUPPORT ONE DIMENSIONAL DATA
+
+	# preallocate arrays
+	nr_perm = X_perm.shape [1]
+	nr_obs = X_real.shape[0]
+	p_val = np.zeros(X_real.shape[1:])
+	sig = np.zeros(X_real.shape[1:])		# will be filled with 0s (non-significant) and 1s (significant)
+
+	# calculate the real and the surrogate one-sample t-stats
+	r_M = np.mean(X_real, axis = 0); p_M = np.mean(X_perm, axis = 0)
+	r_SE = np.std(X_real, axis = 0)/sqrt(nr_obs); p_SE = np.std(X_perm, axis = 0)/sqrt(nr_obs)
+	r_T = r_M/r_SE; p_T = p_M/p_SE
+
+	# calculate p-values
+	for f in range(X_real.shape[1]):
+		for s in range(X_real.shape[2]):
+			surr_T = p_T[f,s,:]
+			p_val[f,s] = len(surr_T[surr_T>r_T[f,s]])/float(nr_perm)
+			if p_val[f,s] < p_thresh:
+				sig[f,s] = 1
+
+	return p_val, sig
 
 def FDR(p_vals, q = 0.05, method = 'pdep', adjust_p = False, report = True):
 	'''

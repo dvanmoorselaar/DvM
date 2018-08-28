@@ -14,6 +14,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from mne.filter import filter_data
+from mne.time_frequency import tfr_array_morlet
+from mne.baseline import rescale
 from scipy.signal import hilbert
 from scipy.fftpack import fft, ifft
 from FolderStructure import FolderStructure
@@ -141,6 +143,91 @@ class TF(FolderStructure):
 
 		return X
 
+	def TFanalysisMNE(self, sj, cnds, cnd_header, base_period, time_period, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
+		'''
+		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decomposition
+
+		Add option to subtract ERP to get evoked power
+		Add option to match trial number
+
+		Arguments
+		- - - - - 
+		sj (int): subject number
+		cnds (list): list of conditions as stored in behavior file
+		cnd_header (str): key in behavior file that contains condition info
+		base_period (tuple | list): time window used for baseline correction
+		time_period (tuple | list): time window of interest
+		method (str): specifies whether hilbert or wavelet convolution is used for time-frequency decomposition
+		flip (dict): flips a subset of trials. Key of dictionary specifies header in beh that contains flip info 
+		List in dict contains variables that need to be flipped. Note: flipping is done from right to left hemifield
+		base_type (str): specifies whether DB conversion is condition specific ('conspec') or averaged across conditions ('conavg')
+		downsample (int): factor used for downsampling (aplied after filtering). Default is no downsampling
+		min_freq (int): minimum frequency for TF analysis
+		max_freq (int): maximum frequency for TF analysis
+		num_frex (int): number of frequencies in TF analysis
+		cycle_range (tuple): number of cycles increases in the same number of steps used for scaling
+		freq_scaling (str): specify whether frequencies are linearly or logarithmically spaced. 
+							If main results are expected in lower frequency bands logarithmic scale 
+							is adviced, whereas linear scale is advised for expected results in higher
+							frequency bands
+		Returns
+		- - - 
+		
+		wavelets(array): 
+
+
+	
+		'''
+
+		# read in data
+		eegs, beh, times, s_freq, ch_names = self.selectTFData(sj)
+
+		# flip subset of trials (allows for lateralization indices)
+		if flip != None:
+			key = flip.keys()[0]
+			eegs = self.topoFlip(eegs, beh[key], ch_names, left = [flip.get(key)])
+
+		# get parameters
+		nr_time = eegs.shape[-1]
+		nr_chan = eegs.shape[1]
+		
+		freqs = np.logspace(np.log10(min_freq), np.log10(max_freq), num_frex)
+		nr_cycles = np.logspace(np.log10(cycle_range[0]), np.log10(cycle_range[1]),num_frex)
+
+		base_s, base_e = [np.argmin(abs(times - b)) for b in base_period]
+		idx_time = np.where((times >= time_period[0]) * (times <= time_period[1]))[0]  
+		idx_2_save = np.array([idx for i, idx in enumerate(idx_time) if i % downsample == 0])
+
+		# initiate dict
+		tf = {}
+		base = {}
+
+		# loop over conditions
+		for c, cnd in enumerate(cnds):
+			tf.update({cnd: {}})
+			base.update({cnd: np.zeros((num_frex, nr_chan))})
+
+			cnd_idx = np.where(beh['block_type'] == cnd)[0]
+
+			power = tfr_array_morlet(eegs[cnd_idx], sfreq= s_freq,
+					freqs=freqs, n_cycles=nr_cycles,
+					output='avg_power')		
+
+			# update cnd dict with power values
+			tf[cnd]['power'] = np.swapaxes(power, 0,1)
+			tf[cnd]['base_power'] = rescale(np.swapaxes(power, 0,1), times, base_period, mode = 'logratio')
+			tf[cnd]['phase'] = '?'
+
+		# save TF matrices
+		with open(self.FolderTracker(['tf',method],'{}-tf-mne.pickle'.format(sj)) ,'wb') as handle:
+			pickle.dump(tf, handle)		
+
+		# store dictionary with variables for plotting
+		plot_dict = {'ch_names': ch_names, 'times':times[idx_2_save], 'frex': freqs}
+
+		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
+			pickle.dump(plot_dict, handle)		
+
 	def TFanalysis(self, sj, cnds, cnd_header, base_period, time_period, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
 		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decomposition
@@ -180,6 +267,7 @@ class TF(FolderStructure):
 		# read in data
 		eegs, beh, times, s_freq, ch_names = self.selectTFData(sj)
 
+		embed()
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = flip.keys()[0]
