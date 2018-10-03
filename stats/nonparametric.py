@@ -13,6 +13,36 @@ from math import sqrt
 from scipy.stats import ttest_rel, ttest_ind, wilcoxon
 from IPython import embed 
 
+def permutationTTest(X1, X2, nr_perm):
+	'''
+
+	'''
+
+	# check whether X2 is a chance variable or a data array
+	if isinstance(X2, (float, int)):
+		X2 = np.tile(X2, X1.shape)
+	X = X1 - X2
+
+	# calculate T statistic
+	nr_obs = X.shape[0]
+	nr_test = X.shape[1:]
+	T_0 = X.mean(axis = 0)/(X.std(axis = 0)/sqrt(nr_obs))
+
+	# calculate surrogate T distribution
+	surr = np.copy(X)
+	T_p = np.stack([np.zeros(nr_test) for i in range(nr_perm)], axis = 0) 
+	for p in range(nr_perm):
+		perms = np.array(np.random.randint(2,size = X.shape), dtype = bool)
+		surr[perms] *= -1
+		T_p[p] = surr.mean(axis = 0)/(surr.std(axis = 0)/sqrt(nr_obs))
+
+	# check how often surrogate T exceeds real T value
+	thresh = np.sum(np.array((T_p > T_0),dtype = float), axis = 0)
+	p_value = thresh/nr_perm
+		
+	return p_value, T_0
+
+
 def clusterBasedPermutation(X1, X2, p_val = 0.05, cl_p_val = 0.05, paired = True, tail = 'both', nr_perm = 1000, mask = None, conn = None):
 
 	'''
@@ -457,7 +487,7 @@ def jackknife(X1, X2, times, peak_window, percent_amp = 50, timing = 'onset'):
 	- - - -
 
 	onset (float): onset differnce between grand waveform of X1 and X2
-	t_value (float): orresponding to the null hypothesis of no differences in onset latencies
+	t_value (float): corresponding to the null hypothesis of no differences in onset latencies
 	'''	
 
 	# set number of observations 

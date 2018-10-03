@@ -81,7 +81,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
                     # print('Electrode {0} replaced by
                     # {1}'.format(e,replace[sj][session][e]))
 
-    def reReference(self, ref_channels=['EXG5', 'EXG6'], vEOG=['EXG1', 'EXG2'], hEOG=['EXG3', 'EXG4'], changevoltage=True, to_remove = ['EXG1','EXG2','EXG3','EXG4','EXG5','EXG6','EXG7','EXG8']):
+    def reReference(self, ref_channels=['EXG5', 'EXG6'], vEOG=['EXG1', 'EXG2'], hEOG=['EXG3', 'EXG4'], changevoltage=True, to_remove = ['EXG2','EXG3','EXG4','EXG6','EXG7','EXG8']):
         '''
         Rereference raw data to reference channels. By default data is rereferenced to the mastoids.
         Also EOG data is rerefenced. Subtraction of VEOG and HEOG results in a VEOG and an HEOG channel.
@@ -188,7 +188,6 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         events(array): numpy array with trigger events (first column contains the event time in samples and the third column contains the event id)
         '''
 
-
         self._data[-1, :] -= binary # Make universal
    
         events = mne.find_events(self, stim_channel='STI 014', consecutive=consecutive, min_duration=min_duration)    
@@ -224,6 +223,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         missing (araray): array of missing trials (can be used when selecting eyetracking data)
         '''
 
+        embed()
         # read in data file
         beh_file = self.FolderTracker(extension=[
                     'beh', 'raw'], filename='subject-{}_ses_{}.csv'.format(sj, session))
@@ -299,6 +299,7 @@ class Epochs(mne.Epochs, FolderStructure):
                 extension=['preprocessing', 'subject-{}'.format(sj), self.session, 'channel_erps']))
 
         tmin, tmax = tmin - flt_pad, tmax + flt_pad
+        embed()
         
         super(Epochs, self).__init__(raw=raw, events=events, event_id=event_id, tmin=tmin, tmax=tmax,
                                      baseline=baseline, picks=picks, preload=preload, reject=reject,
@@ -783,20 +784,22 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
     EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
                                        montage=None, preload=True, eog=eog) for run in eeg_runs])
     EEG.replaceChannel(sj, session, replace)
-    #EEG.reReference(ref_channels=ref, vEOG=eog[
-    #                :2], hEOG=eog[2:], changevoltage=True)
+    EEG.reReference(ref_channels=ref, vEOG=eog[
+                    :2], hEOG=eog[2:], changevoltage=True)
     EEG.setMontage(montage='biosemi64')
 
     #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-    #EEGica = EEG.filter(h_freq=None, l_freq=1,
-    #                   fir_design='firwin', skip_by_annotation='edge')
-    #EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-    #           skip_by_annotation='edge')
+    EEGica = EEG.filter(h_freq=None, l_freq=1,
+                      fir_design='firwin', skip_by_annotation='edge')
+    EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+               skip_by_annotation='edge')
 
     # MATCH BEHAVIOR FILE
+
     events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
-    beh, missing = EEG.matchBeh(sj, session, events, trigger, 
-                                headers = project_param)
+    embed()
+    # beh, missing = EEG.matchBeh(sj, session, events, trigger, 
+    #                             headers = project_param)
 
     # EPOCH DATA
     epochs = Epochs(sj, session, EEG, events, event_id=trigger,
@@ -808,7 +811,7 @@ def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_inf
     # else:
     #     epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = None)    
     epochs.artifactDetection(inspect=inspect)
-    embed()
+
     # ICA
     #epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
 
@@ -874,6 +877,7 @@ if __name__ == '__main__':
                                          'dist_loc', 'target_high','target_type', 
                                          'target_loc'])
 
+    embed()
     # EPOCH DATA
     epochs = Epochs(subject, session, EEG, events, event_id=trigger,
             tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 

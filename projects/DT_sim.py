@@ -125,7 +125,8 @@ class DT_sim(FolderStructure):
 		# plot the seperate conditions (3 X 1 plot design)
 		f = plt.figure(figsize = (30,10))
 
-		levels = np.unique(pivot.keys().get_level_values('block_type'))
+		#levels = np.unique(pivot.keys().get_level_values('block_type'))
+		levels = ['DTsim','DTdisDP','DTdisP']
 		for idx, block in enumerate(levels):
 			
 			# get effect and p-value
@@ -133,7 +134,7 @@ class DT_sim(FolderStructure):
 			t, p = ttest_rel(pivot[block]['yes'], pivot[block]['no'])
 
 			ax = plt.subplot(1,3, idx + 1, title = '{0}: \ndiff = {1:.0f}, p = {2:.3f}'.format(block, diff, p), ylabel = 'RT (ms)', ylim = ylim)
-			df =pd.melt(pivot[block], value_name = 'RT (ms)')
+			df = pd.melt(pivot[block], value_name = 'RT (ms)')
 			df['sj'] = range(pivot.index.size) * 2
 			ax = sns.stripplot(x = column, y = 'RT (ms)', data = df, hue = 'sj', size = 10, jitter = True)
 			ax.legend_.remove()
@@ -145,6 +146,70 @@ class DT_sim(FolderStructure):
 		plt.tight_layout()
 		plt.savefig(self.FolderTracker([exp,'figs'], filename = 'block_effect_{}.pdf'.format(column)))		
 		plt.close()	
+
+	def singleTarget(self):
+		'''
+
+		'''
+
+		file = self.FolderTracker(['beh','analysis'], filename = 'preprocessed.csv')
+		DF = pd.read_csv(file)
+
+		# creat pivot (with RT filtered data) 
+		DF = DF.query("RT_filter == True")
+		DF = DF[DF['dist_loc'] == 'None']
+
+		# read in single target data
+		T_pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','target_high'], aggfunc = 'mean')
+		T_error = pd.Series(confidence_int(T_pivot.values), index = T_pivot.keys())
+
+		# read in distractor data
+		DF = pd.read_csv(file)
+		DF = DF.query("RT_filter == True")
+		DF = DF[DF['target_high'] == 'no']
+		D_pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','dist_high'], aggfunc = 'mean')
+		D_error = pd.Series(confidence_int(D_pivot.values), index = D_pivot.keys())
+
+		# create line plot (DTsim, DTdisDP, DTdisP)
+		blocks = ['DTsim','DTdisP']
+
+		# show effects
+		f = plt.figure(figsize = (20,10))
+		
+		# plot 
+		ax =  plt.subplot(1,2, 2, title = 'Single target trials', ylabel = 'RT (ms)', ylim = (390,430),xlim = (-0.25,1.25))
+		plt.xticks((0,1), blocks)
+		plt.plot((0,1),[T_pivot.mean()[bl]['no'] for bl in blocks], color = 'green')
+		plt.plot((0,1),[T_pivot.mean()[bl]['yes'] for bl in blocks], color = 'red')
+		plt.errorbar((0,1),[T_pivot.mean()[bl]['no'] for bl in blocks], 
+							yerr = [T_error[bl]['no'] for bl in blocks], 
+							fmt = 'o', label = 'single target - low', color = 'green')
+		plt.errorbar((0,1),[T_pivot.mean()[bl]['yes'] for bl in blocks], 
+							yerr = [T_error[bl]['yes'] for bl in blocks], 
+							fmt = 's', label = 'single target - high', color = 'red')
+
+		plt.legend(loc = 'best')
+		sns.despine(offset=50, trim = False)
+
+		ax =  plt.subplot(1,2, 1, title = 'Distractor trials', ylabel = 'RT (ms)', ylim = (410,470),xlim = (-0.25,1.25))
+		plt.xticks((0,1), blocks)
+		plt.plot((0,1),[D_pivot.mean()[bl]['no'] for bl in blocks], color = 'green')
+		plt.plot((0,1),[D_pivot.mean()[bl]['yes'] for bl in blocks], color = 'red')
+		plt.errorbar((0,1),[D_pivot.mean()[bl]['no'] for bl in blocks], 
+							yerr = [D_error[bl]['no'] for bl in blocks], 
+							fmt = 'o', label = 'dist - low', color = 'green')
+		plt.errorbar((0,1),[D_pivot.mean()[bl]['yes'] for bl in blocks], 
+							yerr = [D_error[bl]['yes'] for bl in blocks], 
+							fmt = 's', label = 'dist - high', color = 'red')
+
+		plt.legend(loc = 'best')
+		sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()
+		f.subplots_adjust(wspace=0.5)
+		plt.savefig(self.FolderTracker(['beh','figs'], filename = 'single-target.pdf'))		
+		plt.close()
+
 
 	def beautifyPlot(self, y = 0, xlabel = 'Time (ms)', ylabel = 'Mv'):
 		'''
@@ -315,7 +380,7 @@ class DT_sim(FolderStructure):
 
 		time = (-0.05, 0)
 		s, e = [np.argmin(abs(info['times'] - t)) for t in time]
-		files = glob.glob(self.FolderTracker(['tf', method], filename = '*-tf-mne.pickle'))
+		files = glob.glob(self.FolderTracker(['tf', method], filename = '*-tf.pickle'))
 		print files
 		tf = []
 		for file in files:
@@ -363,7 +428,8 @@ if __name__ == '__main__':
 
 	# analyze behavior
 	#PO.prepareBEH(project, part, factors, labels, project_param)
-	#PO.mainBEH(exp = 'exp_2', column = 'dist_high',  ylim = (300,800))
+	#PO.mainBEH(exp = 'beh', column = 'dist_high',  ylim = (200,600))
+	#PO.singleTarget()
 	#PO.mainBEH(exp = 'exp_2', column = 'target_high',  ylim = (350,900))
 
 	# analyze eeg
@@ -383,10 +449,10 @@ if __name__ == '__main__':
 	# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 	#  	#TF analysis
-	# 	tf = TF()
-	# 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
-	# 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
-	# 			  time_period = (-0.6,0), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
+	 	tf = TF()
+	 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
+	 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
+	 			  time_period = (-0.6,0), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
 
 	# 	# ERP analysis
 	# 	erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
@@ -406,6 +472,6 @@ if __name__ == '__main__':
 	# 	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
 	
 	#	# location decoding (dist_loc)
-		bdm = BDM('dist_loc', nr_folds = 10, eye = False, elec_oi = 'all', downsample = 128, bdm_filter = None)
-		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', 
-					bdm_labels = ['0','1','2','3','4','5'], time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+	#	bdm = BDM('dist_loc', nr_folds = 10, eye = False, elec_oi = 'all', downsample = 128, bdm_filter = None)
+	#	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', 
+	#				bdm_labels = ['0','1','2','3','4','5'], time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)

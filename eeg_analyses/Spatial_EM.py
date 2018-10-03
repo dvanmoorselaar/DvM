@@ -478,7 +478,7 @@ class SpatialEM(FolderStructure):
 			self.CTF = CTF
 			pickle.dump(CTF, handle)
 
-	def spatialCTF(self, subject_id, interval, filt_art, conditions = ['single'], freqs = dict(alpha = [8,12]), downsample = 1):
+	def spatialCTF(self, subject_id, interval, filt_art, conditions = ['single'], freqs = dict(alpha = [8,12]), downsample = 1, plot = False):
 		'''
 		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
 
@@ -503,7 +503,7 @@ class SpatialEM(FolderStructure):
 		self.subject_id = subject_id
 		CTF = {'all':{}} 							# initialize dict to save CTFs
 		for cond in conditions:													
-			CTF.update({cond:{}})			# update CTF dict such that condition data can be saved later
+			CTF.update({cond:{}})					# update CTF dict such that condition data can be saved later
 			
 		# Extra parameters for inverted encoding model
 		stime = 1000.0/self.sfreq						
@@ -528,7 +528,7 @@ class SpatialEM(FolderStructure):
 		idx_channel, nr_selected, nr_total, all_channels = np.arange(64), 64, 64, EEG.ch_names[:64]
 
 		nr_electrodes = eegs.shape[1]
-		
+
 		if isinstance(filt_art,int):
 			time_filt = np.arange(interval[0] - filt_art,interval[1] + filt_art,stime)
 			tois_art = np.logical_and(EEG.times*1000 >= interval[0] -filt_art, EEG.times*1000 <= interval[1] + filt_art) 
@@ -607,6 +607,7 @@ class SpatialEM(FolderStructure):
 					bin_cntr = 0
 					for i in range(self.nr_bins):
 						for j in range(self.nr_blocks):
+							embed()
 							idx = np.logical_and(pos_bin == all_bins[i],blocks == j)
 							evoked_2_mean = filt_data_evoked[idx,:,:][:,:,:] 										
 							block_data_evoked[bin_cntr,:,:] = abs(np.mean(evoked_2_mean,axis = 0))**2	# evoked power is averaged over trials before calculating power
@@ -647,30 +648,34 @@ class SpatialEM(FolderStructure):
 			#CTF[curr_cond]['W'] = {}
 			#CTF[curr_cond]['W'] = {'evoked': W_evoked,'total': W_total}
 
-		embed()
 		# calculate slopes
 		slopes = {}
 		for cnd in conditions:
+			embed()
 			slopes.update({cnd:{}})
 			slopes[cnd]['T_slopes'] = self.calculateSlopes(np.mean(CTF[cnd]['ctf']['total'], axis = (1,3)),nr_freqs,nr_samps) 
 			slopes[cnd]['E_slopes'] = self.calculateSlopes(np.mean(CTF[cnd]['ctf']['evoked'], axis = (1,3)),nr_freqs,nr_samps)
-			if plot:
-				plt.plot(mne.filter.resample(time, down = downsample, npad = 'auto'),slopes[cnd]['T_slopes'].T, label = cnd)
-		plt.legend(loc = 'best')
-		plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding, 'figs'], filename = '{}_slopes-old_{}.pdf'.format(sj, 'alpha')))		
-		plt.close()
+			# if plot:
+			# 	plt.plot(mne.filter.resample(time, down = downsample, npad = 'auto'),slopes[cnd]['T_slopes'].T, label = cnd)
+			# plt.legend(loc = 'best')
+			# plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding, 'figs'], filename = '{}_slopes-old_{}.pdf'.format(sj, 'alpha')))		
+			# plt.close()
 		# save data
 		if len(conditions) == 1:
 			cnd_name = conditions[0]
 		else:
 			cnd_name = 'cnds'	
 
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_ctfslopesold_{}.pickle'.format(cnd_name,str(subject_id),self.ctf_name)),'wb') as handle:
+			print('saving slopes dict')
+			pickle.dump(slopes, handle)
+
 		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_ctf_{}.pickle'.format(cnd_name,str(subject_id),self.ctf_name)),'wb') as handle:
 			print('saving CTF dict')
 			self.CTF = CTF
 			pickle.dump(CTF, handle)
 	
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_info.pickle'.format(self.ctf_name)),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_info-old.pickle'.format(self.ctf_name)),'wb') as handle:
 			print('saving info dict')
 			pickle.dump(self.info, handle)
 

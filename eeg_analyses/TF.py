@@ -17,7 +17,7 @@ from mne.filter import filter_data
 from mne.time_frequency import tfr_array_morlet
 from mne.baseline import rescale
 from scipy.signal import hilbert
-from scipy.fftpack import fft, ifft
+from numpy.fft import fft, ifft,rfft, irfft
 from FolderStructure import FolderStructure
 from IPython import embed
 
@@ -267,7 +267,6 @@ class TF(FolderStructure):
 		# read in data
 		eegs, beh, times, s_freq, ch_names = self.selectTFData(sj)
 
-		embed()
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = flip.keys()[0]
@@ -300,26 +299,25 @@ class TF(FolderStructure):
 
 			cnd_idx = np.where(beh['block_type'] == cnd)[0]
 			l_conv = 2**self.nextpow2(nr_time * cnd_idx.size + nr_time - 1)
-			raw_conv = np.zeros((cnd_idx.size, num_frex, nr_chan, idx_2_save.size)) 
+			raw_conv = np.zeros((cnd_idx.size, num_frex, nr_chan, idx_2_save.size), dtype = complex) 
 			
 			# loop over channels
 			for ch in range(nr_chan):
-				print '\r{0:.0f}% of channels ({1} out {2} conditions)'.format((float(ch)/nr_chan)*100, c + 1, len(cnds)),
+				print '\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(ch)/nr_chan)*100, c + 1, len(cnds)),
 
 				# fft decomposition
 				if method == 'wavelet':
-					eeg_fft = fft(eegs[cnd_idx,ch].T.ravel(), l_conv)    # eeg is time by trial after transpose
-
+					eeg_fft = fft(eegs[cnd_idx,ch].ravel(), l_conv)    # eeg is concatenation of trials after ravel
 
 				# loop over frequencies
 				for f in range(num_frex):
 
 					if method == 'wavelet':
-						# convolve and get analytic signal
+						# convolve and get analytic signal (OUTPUT DIFFERS SLIGHTLY FROM MATLAB!!! DOUBLE CHECK)
 						m = ifft(eeg_fft * fft(wavelets[f], l_conv), l_conv)
 						m = m[:nr_time * cnd_idx.size + nr_time - 1]
 						m = np.reshape(m[(nr_time-1)/2 - 1:-(nr_time-1)/2-1], (nr_time, -1), order = 'F').T 
-					elif method == 'hilbert':
+					elif method == 'hilbert': # NEEDS EXTRA CHECK
 						X = eegs[cnd_idx,ch].ravel()
 						m = self.hilbertMethod(X, frex[f][0], frex[f][1], s_freq)
 						m = np.reshape(m, (-1, times.size))	
@@ -332,7 +330,7 @@ class TF(FolderStructure):
 
 			# update cnd dict with power values
 			tf[cnd]['power'] = np.mean(abs(raw_conv)**2, axis = 0) 
-			tf[cnd]['phase'] = '?'
+			tf[cnd]['phase'] = abs(np.mean(np.exp(np.angle(raw_conv) * 1j), axis = 0))
 
 		# baseline normalization
 		for cnd in cnds:

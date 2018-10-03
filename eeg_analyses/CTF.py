@@ -580,20 +580,14 @@ class CTF(BDM):
 			for c, cnd in enumerate(conditions):
 
 				# update CTF dict with preallocated arrays such that condition data can be saved later 
-				ctf_info.update({cnd:{}})
-				# ctf.update({cnd: {'tf_E': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
-				# 				 'C2_E': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
-				# 				 'W_E':	np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan,
-				# 				 'tf_T': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)) * np.nan,
-				# 				 'C2_T': np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)) * np.nan,
-				# 				 'W_T':	np.empty((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) * np.nan	}})	
-
-				ctf.update({cnd: {'tf_E': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)),
-								 'C2_E': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)),
-								 'W_E':	np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])),
-								 'tf_T': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)),
-								 'C2_T': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)),
-								 'W_T':	np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) }})	
+				if cnd not in ctf_info.keys():
+					ctf_info.update({cnd:{}})
+					ctf.update({cnd: {'tf_E': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)),
+									 'C2_E': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)),
+									 'W_E':	np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])),
+									 'tf_T': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans)),
+									 'C2_T': np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_bins, self.nr_chans)),
+									 'W_T':	np.zeros((nr_perm,nr_freqs,self.nr_iter * self.nr_blocks,nr_samples, self.nr_chans, eegs.shape[1])) }})	
 
 				# select data and create training and test sets across folds for each condition
 				# this is done only on the first frequency loop to ensure that datasets are identical across frequencies
@@ -676,18 +670,11 @@ class CTF(BDM):
 				t_slopes[p_,:,:] = self.calculateSlopes(np.mean(ctf[cnd]['tf_T'][p_], axis = 1),nr_freqs,nr_samples)
 			
 			if nr_perm == 1:
-				slopes[cnd]['T_slopes'] = e_slopes[0]
-				slopes[cnd]['E_slopes'] = t_slopes[0]
+				slopes[cnd]['T_slopes'] = t_slopes[0]
+				slopes[cnd]['E_slopes'] = e_slopes[0]
 			else:
 				slopes[cnd] = {'T_slopes_p': t_slopes[1:], 'T_slopes': t_slopes[0], 
 							   'E_slopes_p': e_slopes[1:], 'E_slopes': e_slopes[0]}
-
-			if plot:
-				plt.plot(ctf_info['times'], slopes[cnd]['T_slopes'].T, label = cnd)
-		
-		plt.legend(loc = 'best')
-		plt.savefig(self.FolderTracker(['ctf',self.channel_folder,self.decoding, 'figs'], filename = '{}_slopes_{}.pdf'.format(sj, freqs.keys()[0])))		
-		plt.close()
 
 		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
 			print('saving slopes dict')
