@@ -155,7 +155,7 @@ class BDM(FolderStructure):
 
 		if cnds == 'all':
 			cnds = [cnds]
-
+	
 		# loop over conditions
 		for cnd in cnds:
 
@@ -175,7 +175,7 @@ class BDM(FolderStructure):
 				cnd_labels = cnd_labels[sub_idx]
 
 			nr_unique = np.unique(cnd_labels).size	
-			
+			embed()
 			# initiate decoding array
 			if bdm_matrix:
 				class_acc = np.empty((nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan

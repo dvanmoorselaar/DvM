@@ -223,7 +223,6 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         missing (araray): array of missing trials (can be used when selecting eyetracking data)
         '''
 
-        embed()
         # read in data file
         beh_file = self.FolderTracker(extension=[
                     'beh', 'raw'], filename='subject-{}_ses_{}.csv'.format(sj, session))
@@ -299,7 +298,6 @@ class Epochs(mne.Epochs, FolderStructure):
                 extension=['preprocessing', 'subject-{}'.format(sj), self.session, 'channel_erps']))
 
         tmin, tmax = tmin - flt_pad, tmax + flt_pad
-        embed()
         
         super(Epochs, self).__init__(raw=raw, events=events, event_id=event_id, tmin=tmin, tmax=tmax,
                                      baseline=baseline, picks=picks, preload=preload, reject=reject,
@@ -352,7 +350,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
 
         if inspect:
-
+            embed()
             self.plot(block=True, n_epochs=n_epochs,
                       n_channels=n_channels, picks=picks, scalings='auto')
 
@@ -529,7 +527,7 @@ class Epochs(mne.Epochs, FolderStructure):
         - - - -
 
         '''
-
+        
         sac_epochs = []
 
         # CODE FOR HEOG DATA
@@ -566,9 +564,12 @@ class Epochs(mne.Epochs, FolderStructure):
                                 filename='noise_epochs.txt'))
 
         # do binning based on eye-tracking data
-        eye_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
-                            int((self.tmin + self.flt_pad + tracker_shift)*1000), int((self.tmax - self.flt_pad + tracker_shift)*1000),
-                            drift_correct = (-200,0), start_event = start_event, extension = extension)
+        if tracker:
+            eye_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
+                                int((self.tmin + self.flt_pad + tracker_shift)*1000), int((self.tmax - self.flt_pad + tracker_shift)*1000),
+                                drift_correct = (-200,0), start_event = start_event, extension = extension)
+        else:
+            eye_bins = np.array([])    
 
         # correct for missing data (if eye recording is stopped during experiment)
         if eye_bins.size > 0 and eye_bins.size < self.nr_events:

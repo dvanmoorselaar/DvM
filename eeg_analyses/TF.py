@@ -333,6 +333,7 @@ class TF(FolderStructure):
 			tf[cnd]['phase'] = abs(np.mean(np.exp(np.angle(raw_conv) * 1j), axis = 0))
 
 		# baseline normalization
+		embed()
 		for cnd in cnds:
 			if base_type == 'conspec': #db convert: condition specific baseline
 				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(base[cnd][:,:,np.newaxis],idx_2_save.size,axis = 2))

@@ -497,7 +497,7 @@ class DT_reps(FolderStructure):
 				plt.savefig(self.FolderTracker(['erp','MS-plots'], filename = 'main-latnew_{}.pdf'.format(['target','dist'][a])))
 				plt.close()		
 
-	def frontalBias(self, erp_name = 'topo_lat-down1-mid', elec = ['AF3','Fz','AFz','AF4','F3','F1','F2','F4']):
+	def frontalBias(self, erp_name = 'topo_frontal-bias', elec = ['AF3','Fz','AFz','AF4','F3','F1','F2','F4']):
 		'''
 
 		'''
@@ -956,7 +956,7 @@ if __name__ == '__main__':
 	#preprocessing and main analysis
 	for sj in range(1,25):
 
-		for header in ['dist_loc']:
+		for header in ['target_loc']:
 
 			if header == 'target_loc':
 				midline = {'dist_loc': [0,3]}
@@ -1005,7 +1005,7 @@ if __name__ == '__main__':
 	#PO.erpSelection(header = 'dist_loc', topo_name = 'main', elec = ['PO3','PO7','O1'])
 	#PO.erpSelection(header = 'target_loc', topo_name = 'main', elec = ['PO3','PO7','O1'])
 	#PO.erpContrast(erp_name = 'lat-down1-mid', elec = ['PO7','PO3','O1'])
-	#PO.frontalBias()
+	PO.frontalBias()
 
 	# PO.componentSelection(header = 'dist_loc', erp_name = 'lat-down1-mid', elec = ['PO7','PO3','O1'], 
 	# 						cmpnts = dict(N2pc = (0.2, 0.3), Pd = (0.25, 0.4)))

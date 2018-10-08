@@ -1,5 +1,5 @@
-import matplotlib
-matplotlib.use('agg') # now it works via ssh connection
+#import matplotlib
+#matplotlib.use('agg') # now it works via ssh connection
 
 import os
 import mne
@@ -29,7 +29,8 @@ from stats.nonparametric import *
 
 # subject specific info
 sj_info = {'1': {'tracker': (False, '', '','',''),  'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
-			}
+		   '2': {'tracker': (False, '', '','',''),  'replace':{}},
+		   }
 
 # project specific info
 project = 'Josipa'
@@ -44,9 +45,9 @@ project_param = ['nr_trials','trigger','condition','trialtype', 'subjects',
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['EXG1','EXG2','EXG5','EXG6']
 ref =  ['EXG3','EXG4']
-trigger = [51]
-t_min = -3.4
-t_max = 0
+trigger = [2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18]
+t_min = -0.2
+t_max = 0.6
 flt_pad = 0.5
 eeg_runs = [1]
 binary =  61440
@@ -85,29 +86,87 @@ class Josipa(FolderStructure):
 		beh.to_csv(self.FolderTracker(extension=[
                     'beh', 'raw'], filename='subject-{}_ses_1-upd.csv'.format(sj)))
 
+	def tempBeh(self, sj, events, trigger):
+		'''
+
+		'''
+
+		idx_trigger = np.sort(np.hstack([np.where(events[:,2] == i)[0] for i in trigger]))
+		triggers = events[idx_trigger,2]
+		beh = pd.DataFrame(index = range(triggers.size),columns=['condition', 'nr_trials', 'label'])
+		beh['digit'] = 0
+		beh['digit'][triggers < 10] = triggers[triggers < 10]
+		beh['letter'] = 0
+		beh['letter'][triggers > 10] = triggers[triggers > 10]
+		beh['condition'] = 'digit'
+		beh['condition'][triggers > 10] = 'letter'
+		beh['nr_trials'] = range(triggers.size)
+		missing = np.array([])
+
+		embed()
+		print 'detected {} epochs'.format(triggers.size)
+
+		return beh, missing
+
 	def matchBeh(self, sj, events, trigger, headers):
 		'''
 		make sure info in behavior files lines up with detected events
 		'''
 
+		embed()
 		# read in data file
 		beh_file = self.FolderTracker(extension=[
 		            'beh', 'raw'], filename='subject-{}_ses_1-upd.csv'.format(sj))
 
-		embed()
         # get triggers logged in beh file
 		beh = pd.read_csv(beh_file)
 		beh = beh[headers]
+		beh['timing'] = None
 
 		# make sure trigger info between beh and bdf data matches
-		idx_trigger = [idx for idx, tr in enumerate(events[:,2]) if tr in trigger] 
-		nr_miss = beh.shape[0] - len(idx_trigger)
-		missing_trials = []
+		idx_trigger = np.array([idx for idx, tr in enumerate(events[:,2]) if tr in trigger]) 
+		nr_miss = beh.shape[0] - idx_trigger.size
+		missing_trials = np.array([])
+
+		# store timing info for each condition (now only logs pos 5 - 9)
+		t_factor = 1000/512.0
+		for i, idx in enumerate(idx_trigger):
+			print "\r{0}% of trial timings updated".format((float(i)/idx_trigger.size)*100),
+			beh['timing'][i] = {'p5':(events[idx,0] - events[idx-14,0]) * t_factor,
+					  'p6':(events[idx,0] - events[idx-13,0]) * t_factor,
+					  'p7':(events[idx,0] - events[idx-12,0]) * t_factor,
+					  'p8':(events[idx,0] - events[idx-11,0]) * t_factor,
+					  'p9':(events[idx,0] - events[idx-10,0]) * t_factor}
 		
-
-
+		print 'The number of missing trials is {}'.format(nr_miss)
 
 		return beh, missing
+
+	def splitEpochs(self):
+		'''
+
+		'''
+
+		pass
+
+	def plotBDM(self, header):
+		'''
+
+		'''
+
+		embed()
+
+		with open(self.FolderTracker(['bdm',header], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times']	
+
+		with open(self.FolderTracker(['bdm',header], filename = 'class_1_perm-False-broad.pickle') ,'rb') as handle:
+			bdm = pickle.load(handle)
+
+		plt.imshow(bdm[header]['standard'], aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]])
+		plt.colorbar()
+		plt.savefig(self.FolderTracker(['bdm',header], filename = '{}.pdf'.format(header)))
+		plt.close()
 
 	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
 		'''
@@ -143,8 +202,9 @@ class Josipa(FolderStructure):
 
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
-		beh, missing = self.matchBeh(sj, events, trigger, 
-		                             headers = project_param)
+		#beh, missing = self.matchBeh(sj, events, trigger, 
+		#                             headers = project_param)
+		beh, missing = self.tempBeh(sj, events, trigger)
 
 		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
@@ -191,12 +251,19 @@ if __name__ == '__main__':
 
 	# initiate current project
 	PO = Josipa()
+	#PO.plotBDM('digit')
 
 	# run preprocessing
 	for sj in [1]:
 	
-		PO.updateBeh(sj = sj)
-		PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-				  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-				  trigger = trigger, project_param = project_param, 
-				  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+		# for session in range(1,3):
+		# 	# PO.updateBeh(sj = sj)
+		# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		# 			  trigger = trigger, project_param = project_param, 
+		# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+
+		bdm = BDM('digit', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = 'digit'), time = (-0.2, 0.8), nr_perm = 0, bdm_matrix = True)
+		bdm = BDM('letter', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = ['letter'], cnd_header = 'condition', bdm_labels = [11,12,13,14,15,16,17,18], factor = dict(condition = 'letter'), time = (-0.2, 0.8), nr_perm = 0, bdm_matrix = True)

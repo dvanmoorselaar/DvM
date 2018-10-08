@@ -437,7 +437,7 @@ if __name__ == '__main__':
 	#PO.plotERP()
 	#PO.plotBDM(header = 'target')
 	#PO.plotBDM(header = 'dist')
-	#PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
+	PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
 
 
 	# run preprocessing
@@ -452,7 +452,7 @@ if __name__ == '__main__':
 	 	tf = TF()
 	 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
 	 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
-	 			  time_period = (-0.6,0), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
+	 			  time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
 
 	# 	# ERP analysis
 	# 	erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
