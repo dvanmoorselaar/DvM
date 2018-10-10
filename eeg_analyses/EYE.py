@@ -159,7 +159,7 @@ class EYE(FolderStructure):
 
 		return x, y, times	
 
-	def setXY(self, x, y, times, drift_correct = None, fix_range = 75):	
+	def setXY(self, x, y, times, drift_correct = None, fix_range = 125):	
 		''' 
 		setXY modifies x and y coordinates based on SaccadeGlissadeDetection algorhytm.
 		Noise and blink segments are set to nan.
@@ -205,7 +205,7 @@ class EYE(FolderStructure):
 
 				# only corrrect if fixation period contains no missing data,
 				# is within a specific range from fixation and has no saccades
-				if not np.isnan(x_d).any() and fix_d < fix_range:  
+				if not np.isnan(x_d).any():# and fix_d < fix_range: THIS NEEDS TO FIXED 
 					nr_sac = SD.detectEvents(x_d, y_d)
 
 					if nr_sac == 0: 

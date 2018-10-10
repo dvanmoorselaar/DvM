@@ -30,7 +30,9 @@ from stats.nonparametric import *
 # subject specific info
 sj_info = {'1': {'tracker': (False, '', '','',''),  'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
 		   '2': {'tracker': (False, '', '','',''),  'replace':{}},
-		   }
+		   '3': {'tracker': (False, '', '','',''),  'replace':{}},
+		   '4': {'tracker': (False, '', '','',''),  'replace':{}},
+		     }
 
 # project specific info
 project = 'Josipa'
@@ -45,11 +47,14 @@ project_param = ['nr_trials','trigger','condition','trialtype', 'subjects',
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['EXG1','EXG2','EXG5','EXG6']
 ref =  ['EXG3','EXG4']
-trigger = [2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18]
-t_min = -0.2
-t_max = 0.6
+#trigger = [2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18] # for localizer
+trigger = [1002,1003,1004,1005,1006,1007,1008,1009] # for AB (start response interval)
+#t_min = -0.2 # for localizer
+#t_max = 1 # for localizer
+t_min = -0.4   # for AB
+t_max = 1.2
 flt_pad = 0.5
-eeg_runs = [1]
+eeg_runs = [2]
 binary =  61440
 
 # set general plotting parameters
@@ -86,25 +91,77 @@ class Josipa(FolderStructure):
 		beh.to_csv(self.FolderTracker(extension=[
                     'beh', 'raw'], filename='subject-{}_ses_1-upd.csv'.format(sj)))
 
-	def tempBeh(self, sj, events, trigger):
+	def matchBehnew(self, sj, events, trigger, task):
 		'''
 
 		'''
 
-		idx_trigger = np.sort(np.hstack([np.where(events[:,2] == i)[0] for i in trigger]))
-		triggers = events[idx_trigger,2]
-		beh = pd.DataFrame(index = range(triggers.size),columns=['condition', 'nr_trials', 'label'])
-		beh['digit'] = 0
-		beh['digit'][triggers < 10] = triggers[triggers < 10]
-		beh['letter'] = 0
-		beh['letter'][triggers > 10] = triggers[triggers > 10]
-		beh['condition'] = 'digit'
-		beh['condition'][triggers > 10] = 'letter'
-		beh['nr_trials'] = range(triggers.size)
 		missing = np.array([])
+		if task == 'localizer':
 
-		embed()
-		print 'detected {} epochs'.format(triggers.size)
+			idx_trigger = np.sort(np.hstack([np.where(events[:,2] == i)[0] for i in trigger]))
+			triggers = events[idx_trigger,2]
+			beh = pd.DataFrame(index = range(triggers.size),columns=['condition', 'nr_trials', 'label'])
+			beh['digit'] = 0
+			beh['digit'][triggers < 10] = triggers[triggers < 10]
+			beh['letter'] = 0
+			beh['letter'][triggers > 10] = triggers[triggers > 10]
+			beh['condition'] = 'digit'
+			beh['condition'][triggers > 10] = 'letter'
+			beh['nr_trials'] = range(triggers.size)
+
+			print 'detected {} epochs'.format(triggers.size)
+			
+		elif task == 'AB':
+			# find indices of beginning of fixation and change T1 triggers
+			idx_end = np.where(events[:,2] == 51)[0]
+			events[idx_end - 14,2] += 1000
+			beh = pd.DataFrame(index = range(idx_end.size),columns=['condition', 'nr_trials', 'T1','T2','T3','D1','D2','D3'])
+
+			cnd_idx = np.where((events[:,2] > 60) *( events[:,2] < 70))[0]
+			cnds = events[cnd_idx,2]
+			# save condition info
+			beh['nr_trials'] = range(1,cnd_idx.size + 1) 
+			beh['condition'][cnds == 61] = 'T..DDDT'
+			beh['condition'][cnds == 62] = 'TTDDD'
+			beh['condition'][cnds == 63] = 'TDTDD'
+			beh['condition'][cnds == 64] = 'TDDTD'
+			beh['condition'][cnds == 65] = 'TTTDD'
+			beh['condition'][cnds == 66] = 'TTDTD'
+			beh['condition'][cnds == 67] = 'TDTTD'
+			# save T1 info per trial
+			beh['T1'] = events[idx_end - 14,2] - 1000
+			# save T2 info per trial (61 missing)
+			beh['T2'][cnds == 62] = events[np.where(events[:,2] == 62)[0] + 7,2]
+			beh['T2'][cnds == 63] = events[np.where(events[:,2] == 63)[0] + 8,2]
+			beh['T2'][cnds == 64] = events[np.where(events[:,2] == 64)[0] + 9,2]
+			beh['T2'][cnds == 65] = events[np.where(events[:,2] == 65)[0] + 7,2]
+			beh['T2'][cnds == 66] = events[np.where(events[:,2] == 66)[0] + 7,2]
+			beh['T2'][cnds == 67] = events[np.where(events[:,2] == 67)[0] + 8,2]
+
+			# save T3 info per trial
+			beh['T3'][cnds == 65] = events[np.where(events[:,2] == 65)[0] + 8,2]
+			beh['T3'][cnds == 66] = events[np.where(events[:,2] == 66)[0] + 9,2]
+			beh['T3'][cnds == 67] = events[np.where(events[:,2] == 67)[0] + 9,2]
+
+			# save D1,D2,D3 info (61 missing)
+			beh['D1'][cnds == 62] = events[np.where(events[:,2] == 62)[0] + 8,2]
+			beh['D2'][cnds == 62] = events[np.where(events[:,2] == 62)[0] + 9,2]
+			beh['D3'][cnds == 62] = events[np.where(events[:,2] == 62)[0] + 10,2]
+			beh['D1'][cnds == 63] = events[np.where(events[:,2] == 63)[0] + 7,2]
+			beh['D2'][cnds == 63] = events[np.where(events[:,2] == 63)[0] + 9,2]
+			beh['D3'][cnds == 63] = events[np.where(events[:,2] == 63)[0] + 10,2]
+			beh['D1'][cnds == 64] = events[np.where(events[:,2] == 64)[0] + 7,2]
+			beh['D2'][cnds == 64] = events[np.where(events[:,2] == 64)[0] + 8,2]
+			beh['D3'][cnds == 64] = events[np.where(events[:,2] == 64)[0] + 10,2]
+			beh['D1'][cnds == 65] = events[np.where(events[:,2] == 65)[0] + 9,2]
+			beh['D2'][cnds == 65] = events[np.where(events[:,2] == 65)[0] + 10,2]
+			beh['D1'][cnds == 66] = events[np.where(events[:,2] == 66)[0] + 8,2]
+			beh['D2'][cnds == 66] = events[np.where(events[:,2] == 66)[0] + 10,2]
+			beh['D1'][cnds == 67] = events[np.where(events[:,2] == 67)[0] + 7,2]
+			beh['D2'][cnds == 67] = events[np.where(events[:,2] == 67)[0] + 10,2]			
+
+			print 'detected {} epochs'.format(idx_end.size)
 
 		return beh, missing
 
@@ -149,23 +206,48 @@ class Josipa(FolderStructure):
 
 		pass
 
-	def plotBDM(self, header):
+	def plotBDM(self):
+		'''
+		Plots GAT matrix and diagonal for digits (top) and letters (bottom)
+
 		'''
 
-		'''
-
-		embed()
-
-		with open(self.FolderTracker(['bdm',header], filename = 'plot_dict.pickle') ,'rb') as handle:
+		with open(self.FolderTracker(['bdm','digit'], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
 		times = info['times']	
+ 
+		# plot conditions
+		plt.figure(figsize = (30,20))
+		norm = MidpointNormalize(midpoint=1/8.0)
+		for idx, header in enumerate(['digit','letter']):
+			bdm = []
+			files = glob.glob(self.FolderTracker(['bdm',header], filename = 'class_*_perm-False-broad.pickle'))
+			for file in files:
+				print file
+				with open(file ,'rb') as handle:
+					bdm.append(pickle.load(handle))
 
-		with open(self.FolderTracker(['bdm',header], filename = 'class_1_perm-False-broad.pickle') ,'rb') as handle:
-			bdm = pickle.load(handle)
+			
+			X = np.stack([bdm[i][header]['standard'] for i in range(len(bdm))])
+			print X.shape
+			X = X.mean(axis = 0)
+			
+			# plot diagonal
+			ax = plt.subplot(2,2, idx + 3, title = 'Diagonal-{}'.format(header), ylabel = 'dec acc (%)', xlabel = 'time (ms)')
+			plt.plot(times, np.diag(X))
+			plt.axhline(y = 1/8.0, color = 'black', ls = '--')
+			sns.despine(offset=50, trim = False)
 
-		plt.imshow(bdm[header]['standard'], aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]])
-		plt.colorbar()
-		plt.savefig(self.FolderTracker(['bdm',header], filename = '{}.pdf'.format(header)))
+			# plot GAT
+			X[X <1/8.0] = 1/8.0
+			ax = plt.subplot(2,2, idx + 1, title = 'GAT-{}'.format(header), ylabel = 'train time (ms)', xlabel = 'test time (ms)')
+			plt.imshow(X, norm = norm, aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]], 
+						cmap = cm.bwr, interpolation = None, vmin = 1/8.0, vmax = 0.16)
+			plt.colorbar()
+			sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()	
+		plt.savefig(self.FolderTracker(['bdm'], filename = 'localizer.pdf'))
 		plt.close()
 
 	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
@@ -204,7 +286,7 @@ class Josipa(FolderStructure):
 		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
 		#beh, missing = self.matchBeh(sj, events, trigger, 
 		#                             headers = project_param)
-		beh, missing = self.tempBeh(sj, events, trigger)
+		beh, missing = self.matchBehnew(sj, events, trigger, task = 'AB')
 
 		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
@@ -251,19 +333,19 @@ if __name__ == '__main__':
 
 	# initiate current project
 	PO = Josipa()
-	#PO.plotBDM('digit')
+	#PO.plotBDM()
 
 	# run preprocessing
-	for sj in [1]:
+	for sj in [1,2,3,4]:
 	
-		# for session in range(1,3):
-		# 	# PO.updateBeh(sj = sj)
-		# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		# 			  trigger = trigger, project_param = project_param, 
-		# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+		for session in range(1,2):
+		   	# PO.updateBeh(sj = sj)
+			PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+					  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+					  trigger = trigger, project_param = project_param, 
+					  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
 
-		bdm = BDM('digit', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = 'digit'), time = (-0.2, 0.8), nr_perm = 0, bdm_matrix = True)
-		bdm = BDM('letter', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['letter'], cnd_header = 'condition', bdm_labels = [11,12,13,14,15,16,17,18], factor = dict(condition = 'letter'), time = (-0.2, 0.8), nr_perm = 0, bdm_matrix = True)
+		#bdm = BDM('digit', nr_folds = 10, eye = False)
+		#bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = 'digit'), time = (-0.2, 1.2), nr_perm = 0, bdm_matrix = True)
+		#bdm = BDM('letter', nr_folds = 10, eye = False)
+		#bdm.Classify(sj, cnds = ['letter'], cnd_header = 'condition', bdm_labels = [11,12,13,14,15,16,17,18], factor = dict(condition = 'letter'), time = (-0.2, 1.2), nr_perm = 0, bdm_matrix = True)

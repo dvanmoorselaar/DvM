@@ -273,7 +273,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
       
         # keep track of missing trials to allign eye tracking data (if available)   
         missing = np.array(missing_trials)      
-        # log number of matches between beh and bdf      
+        # log number of matches between beh and bdf    
         logging.info('{} matches between beh and epoched data out of {}'.
             format(sum(beh['trigger'].values == bdf_triggers), bdf_triggers.size))           
 
@@ -350,7 +350,6 @@ class Epochs(mne.Epochs, FolderStructure):
 
 
         if inspect:
-            embed()
             self.plot(block=True, n_epochs=n_epochs,
                       n_channels=n_channels, picks=picks, scalings='auto')
 
@@ -459,13 +458,20 @@ class Epochs(mne.Epochs, FolderStructure):
                     self.sj), self.session], filename='automatic_artdetect.pdf'))
                 plt.close()
 
+        bad_epochs = np.array(bad_epochs)        
         if inspect:
-
-            # ADD LINES ALLOWING TO COUNTERACT AUTOMATIC DETECTION
-            self[bad_epochs].plot(
-                n_epochs=10, n_channels=picks.size, picks=picks, scalings='auto')
+            print 'You can now overwrite automatic artifact detection by clicking on epochs selected as bad'
+            bad_eegs = self[bad_epochs]
+            idx_bads = bad_eegs.selection
+            
+            bad_eegs.plot(
+                n_epochs=5, n_channels=picks.size/2, picks=picks, scalings='auto')
             plt.show()
             plt.close()
+            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection])
+            logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
+                            missing.size, bad_epochs.size,100 * round(missing.size / float(bad_epochs.size), 2)))
+            bad_epochs = np.delete(bad_epochs, missing)
 
         # drop bad epochs and save list of dropped epochs
         np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
@@ -559,9 +565,15 @@ class Epochs(mne.Epochs, FolderStructure):
         # CODE FOR EYETRACKER DATA 
         EO = EYE(sfreq = eye_freq)
         # read in epochs removed via artifact detection
-        noise_epochs = np.loadtxt(self.FolderTracker(extension=[
+
+        if os.path.exists(self.FolderTracker(extension=[
+                                'preprocessing', 'subject-{}'.format(self.sj), self.session], 
+                                filename='noise_epochs.txt')):
+            noise_epochs = np.loadtxt(self.FolderTracker(extension=[
                                 'preprocessing', 'subject-{}'.format(self.sj), self.session], 
                                 filename='noise_epochs.txt'))
+        else:
+            noise_epochs = np.array([])    
 
         # do binning based on eye-tracking data
         if tracker:
@@ -763,138 +775,5 @@ class Epochs(mne.Epochs, FolderStructure):
 
             logging.info('EEG sessions combined')
 
-def preprocessing(sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
-    '''
-    Standard preprocessing pipeline
-    '''
-
-    # set subject specific parameters
-    file = 'subject_{}_session_{}_'.format(sj, session)
-    replace = sj_info[str(sj)]['replace']
-    tracker, ext, t_freq, start_event, shift = sj_info[str(sj)]['tracker']
-
-    # start logging
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                        datefmt='%m-%d %H:%M',
-                        filename='processed/info/preprocess_sj{}_ses{}.log'.format(
-                            sj, session),
-                        filemode='w')
-
-    # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
-    EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
-                                       montage=None, preload=True, eog=eog) for run in eeg_runs])
-    EEG.replaceChannel(sj, session, replace)
-    EEG.reReference(ref_channels=ref, vEOG=eog[
-                    :2], hEOG=eog[2:], changevoltage=True)
-    EEG.setMontage(montage='biosemi64')
-
-    #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-    EEGica = EEG.filter(h_freq=None, l_freq=1,
-                      fir_design='firwin', skip_by_annotation='edge')
-    EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-               skip_by_annotation='edge')
-
-    # MATCH BEHAVIOR FILE
-
-    events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
-    embed()
-    # beh, missing = EEG.matchBeh(sj, session, events, trigger, 
-    #                             headers = project_param)
-
-    # EPOCH DATA
-    epochs = Epochs(sj, session, EEG, events, event_id=trigger,
-            tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
-
-    # ARTIFACT DETECTION
-    # if 'RT' in beh.keys():
-    #     epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = beh['RT']/1000)
-    # else:
-    #     epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = None)    
-    epochs.artifactDetection(inspect=inspect)
-
-    # ICA
-    #epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
-
-    # EYE MOVEMENTS
-    epochs.detectEye(missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
-
-    # INTERPOLATE BADS
-    epochs.interpolate_bads(reset_bads=True, mode='accurate')
-
-    embed()
-    # LINK BEHAVIOR
-    epochs.linkBeh(beh, events, trigger)
-
-
 if __name__ == '__main__':
-
-    # Specify project parameters
-    project_folder = '/home/dvmoors1/BB/DT_sim'
-    os.chdir(project_folder)
-    montage = mne.channels.read_montage(kind='biosemi64')
-    subject = 3
-    session = 1
-    tracker = True
-    data_file = 'subject_{}_session_{}_'.format(subject, session)
-    eeg_runs = [1]
-    eog =  ['V_up','V_do','H_r','H_l']
-    ref =  ['Ref_r','Ref_l']
-    trigger = [12,13,14,15,16,21,23,24,25,26,31,32,34,35,36,41,42,43,45,46,51,52,53,54,56,61,62,63,64,65,101,102,103,104,105,106]
-    t_min = -0.5
-    t_max = 0.6
-    flt_pad = 0.5
-
-    #replace = {'15': {'session_1': {'B1': 'EXG7'}}}
-    replace = {}
-
-    # start logging
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                        datefmt='%m-%d %H:%M',
-                        filename='processed/info/preprocess_sj{}_ses{}.log'.format(
-                            subject, session),
-                        filemode='w')
-
-    # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
-    EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', data_file + '{}.bdf'.format(run)),
-                                       montage=None, preload=True, eog=eog) for run in eeg_runs])
-    EEG.replaceChannel(subject, session, replace)
-    EEG.reReference(ref_channels=ref, vEOG=eog[
-                    :2], hEOG=eog[2:], changevoltage=True)
-    EEG.setMontage(montage='biosemi64')
-
-    # FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-    EEGica = EEG.filter(h_freq=None, l_freq=1,
-                       fir_design='firwin', skip_by_annotation='edge')
-    EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-               skip_by_annotation='edge')
-
-    # MATCH BEHAVIOR FILE
-    events = EEG.eventSelection(trigger, binary=True, min_duration=0)
-    beh, missing = EEG.matchBeh(subject, session,events, trigger, 
-                                headers=['block_type', 'trigger','nr_trials',
-                                         'practice','dist_high','dist_type', 
-                                         'dist_loc', 'target_high','target_type', 
-                                         'target_loc'])
-
-    embed()
-    # EPOCH DATA
-    epochs = Epochs(subject, session, EEG, events, event_id=trigger,
-            tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
-
-    # ARTIFACT DETECTION
-    #epochs.selectBadChannels(channel_plots = True, inspect=True)
-    #epochs.artifactDetection(inspect=False)
-
-    # ICA
-    #epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
-
-    # EYE MOVEMENTS
-    epochs.detectEye(missing, time_window=(t_min, t_max), tracker = tracker, extension = 'tsv', eye_freq = 30)
-
-    # INTERPOLATE BADS
-    epochs.interpolate_bads(reset_bads=True, mode='accurate')
-
-    # LINK BEHAVIOR
-    epochs.linkBeh(beh, events, trigger)
+    print 'Please run preprocessing via a project script'
