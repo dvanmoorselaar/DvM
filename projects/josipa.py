@@ -1,5 +1,5 @@
-#import matplotlib
-#matplotlib.use('agg') # now it works via ssh connection
+import matplotlib
+matplotlib.use('agg') # now it works via ssh connection
 
 import os
 import mne
@@ -16,6 +16,7 @@ from scipy import stats
 from scipy.signal import argrelextrema
 from IPython import embed
 from beh_analyses.PreProcessing import *
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from eeg_analyses.TF import * 
 from eeg_analyses.EEG import * 
 from eeg_analyses.ERP import * 
@@ -113,12 +114,13 @@ class Josipa(FolderStructure):
 			print 'detected {} epochs'.format(triggers.size)
 			
 		elif task == 'AB':
+
 			# find indices of beginning of fixation and change T1 triggers
 			idx_end = np.where(events[:,2] == 51)[0]
 			events[idx_end - 14,2] += 1000
-			beh = pd.DataFrame(index = range(idx_end.size),columns=['condition', 'nr_trials', 'T1','T2','T3','D1','D2','D3'])
-
-			cnd_idx = np.where((events[:,2] > 60) *( events[:,2] < 70))[0]
+			#beh = pd.DataFrame(index = range(idx_end.size),columns=['condition', 'nr_trials', 'T1','T2','T3','D1','D2','D3'])
+			cnd_idx = np.where((events[:,2] > 60) *( events[:,2] < 68))[0]
+			beh = pd.DataFrame(index = range(cnd_idx.size),columns=['condition', 'nr_trials', 'T1','T2','T3','D1','D2','D3'])
 			cnds = events[cnd_idx,2]
 			# save condition info
 			beh['nr_trials'] = range(1,cnd_idx.size + 1) 
@@ -130,7 +132,10 @@ class Josipa(FolderStructure):
 			beh['condition'][cnds == 66] = 'TTDTD'
 			beh['condition'][cnds == 67] = 'TDTTD'
 			# save T1 info per trial
-			beh['T1'] = events[idx_end - 14,2] - 1000
+			#beh['T1'] = events[idx_end - 14,2] - 1000
+			t1 = events[idx_end - 14,2] - 1000
+			beh['T1'] = t1[t1 < 10]
+
 			# save T2 info per trial (61 missing)
 			beh['T2'][cnds == 62] = events[np.where(events[:,2] == 62)[0] + 7,2]
 			beh['T2'][cnds == 63] = events[np.where(events[:,2] == 63)[0] + 8,2]
@@ -199,6 +204,138 @@ class Josipa(FolderStructure):
 
 		return beh, missing
 
+	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
+		'''
+		EEG preprocessing
+		'''
+
+		# set subject specific parameters
+		file = 'subject_{}_session_{}_'.format(sj, session)
+		replace = sj_info[str(sj)]['replace']
+		tracker, ext, t_freq, start_event, shift = sj_info[str(sj)]['tracker']
+
+		# start logging
+		logging.basicConfig(level=logging.DEBUG,
+		                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+		                    datefmt='%m-%d %H:%M',
+		                    filename='processed/info/preprocess_sj{}_ses{}.log'.format(
+		                        sj, session),
+		                    filemode='w')
+
+		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
+		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
+		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
+		EEG.replaceChannel(sj, session, replace)
+		EEG.reReference(ref_channels=ref, vEOG=eog[
+		                :2], hEOG=eog[2:], changevoltage=True)
+		EEG.setMontage(montage='biosemi64')
+
+		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+		EEGica = EEG.filter(h_freq=None, l_freq=1,
+		                  fir_design='firwin', skip_by_annotation='edge')
+		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+		           skip_by_annotation='edge')
+
+		# MATCH BEHAVIOR FILE
+		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
+		#beh, missing = self.matchBeh(sj, events, trigger, 
+		#                             headers = project_param)
+		beh, missing = self.matchBehnew(sj, events, trigger, task = 'AB')
+
+		# EPOCH DATA
+		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
+		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
+
+		# ARTIFACT DETECTION
+		epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
+		epochs.artifactDetection(inspect=False)
+
+		# ICA
+		#epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
+
+		# EYE MOVEMENTS
+		epochs.detectEye(missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
+
+		# INTERPOLATE BADS
+		epochs.interpolate_bads(reset_bads=True, mode='accurate')
+
+		# LINK BEHAVIOR
+		epochs.linkBeh(beh, events, trigger)
+
+	def crossTaskBDM(self, sj, window = (-0.2,0.8), to_decode = 'digit', bdm_matrix = True):
+		'''
+		function that decoding across localizer and AB task
+		'''
+
+		# STEP 1: reading data from localizer task and AB task (EEG and behavior)
+		locEEG = mne.read_epochs(self.FolderTracker(extension = ['processed','localizer'], filename = 'subject-{}_all-epo.fif'.format(sj)))
+		abEEG = mne.read_epochs(self.FolderTracker(extension = ['processed','AB'], filename = 'subject-{}_all-epo.fif'.format(sj)))
+		with open(self.FolderTracker(extension = ['beh','processed','localizer'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
+			beh_loc = pickle.load(handle)
+		with open(self.FolderTracker(extension = ['beh','processed','AB'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
+			beh_ab = pickle.load(handle)
+
+		# STEP 2: downsample data
+		locEEG.resample(128)
+		abEEG.resample(128)
+
+		# set general parameters
+		s_loc, e_loc = [np.argmin(abs(locEEG.times - t)) for t in window]
+		s_ab, e_ab = [np.argmin(abs(abEEG.times - t)) for t in window]
+		picks = mne.pick_types(abEEG.info, eeg=True, exclude='bads') # 64 good electrodes in both tasks (interpolation)
+		eegs_loc = locEEG._data[:,picks,s_loc:e_loc]
+		eegs_ab = abEEG._data[:,picks,s_ab:e_ab]
+		nr_time = eegs_loc.shape[-1]
+		if bdm_matrix:
+			nr_test_time = eegs_loc.shape[-1]
+		else:
+			nr_test_time = 1
+
+		cnd = 'T..DDDT'
+
+		# STEP 3: get training and test info
+		digit_idx = np.where(beh_loc[to_decode] > 0)[0]
+		all_labels = beh_loc[to_decode][digit_idx]
+		nr_labels = np.unique(all_labels).size 
+		min_nr = min(np.unique(all_labels, return_counts= True)[1])
+		train_idx = np.sort(np.hstack([random.sample(np.where(beh_loc[to_decode] == l)[0],min_nr) for l in np.unique(all_labels)]))
+
+		# set test labels
+		test_idx = np.where(beh_ab['condition'] == cnd)[0] # number test labels is not yet counterbalanced
+
+		# STEP 4: do classification
+		lda = LinearDiscriminantAnalysis()
+
+		# set training and test labels
+		Ytr = beh_loc[to_decode][train_idx]
+		Yte = beh_ab['T1'][test_idx]
+
+		class_acc = np.zeros((nr_time, nr_test_time))
+		label_info = np.zeros((nr_time, nr_test_time, nr_labels))
+	
+		for tr_t in range(nr_time):
+			print tr_t
+			for te_t in range(nr_test_time):
+				if not bdm_matrix:
+					te_t = tr_t
+
+				Xtr = eegs_loc[train_idx,:,tr_t].reshape(-1, picks.size)
+				Xte = eegs_ab[test_idx,:,te_t].reshape(-1, picks.size)
+
+				lda.fit(Xtr,Ytr)
+				predict = lda.predict(Xte)
+				
+				if not bdm_matrix:
+					class_acc[tr_t, :] = sum(predict == Yte)/float(Yte.size)
+					label_info[tr_t, :] = [sum(predict == l) for l in np.unique(all_labels)]	
+				else:
+					class_acc[tr_t, te_t] = sum(predict == Yte)/float(Yte.size)
+					label_info[tr_t, te_t] = [sum(predict == l) for l in np.unique(all_labels)]	
+						
+		embed()
+
+
+
 	def splitEpochs(self):
 		'''
 
@@ -250,76 +387,7 @@ class Josipa(FolderStructure):
 		plt.savefig(self.FolderTracker(['bdm'], filename = 'localizer.pdf'))
 		plt.close()
 
-	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
-		'''
-		EEG preprocessing
-		'''
 
-		# set subject specific parameters
-		file = 'subject_{}_session_{}_'.format(sj, session)
-		replace = sj_info[str(sj)]['replace']
-		tracker, ext, t_freq, start_event, shift = sj_info[str(sj)]['tracker']
-
-		# start logging
-		logging.basicConfig(level=logging.DEBUG,
-		                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-		                    datefmt='%m-%d %H:%M',
-		                    filename='processed/info/preprocess_sj{}_ses{}.log'.format(
-		                        sj, session),
-		                    filemode='w')
-
-		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
-		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
-		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
-		EEG.replaceChannel(sj, session, replace)
-		EEG.reReference(ref_channels=ref, vEOG=eog[
-		                :2], hEOG=eog[2:], changevoltage=True)
-		EEG.setMontage(montage='biosemi64')
-
-		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-		EEGica = EEG.filter(h_freq=None, l_freq=1,
-		                  fir_design='firwin', skip_by_annotation='edge')
-		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-		           skip_by_annotation='edge')
-
-		# MATCH BEHAVIOR FILE
-		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
-		#beh, missing = self.matchBeh(sj, events, trigger, 
-		#                             headers = project_param)
-		beh, missing = self.matchBehnew(sj, events, trigger, task = 'AB')
-
-		# EPOCH DATA
-		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
-		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
-
-		# ARTIFACT DETECTION
-		epochs.selectBadChannels(channel_plots = channel_plots, inspect=inspect, RT = None)    
-		epochs.artifactDetection(inspect=inspect)
-
-		# ICA
-		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
-
-		# EYE MOVEMENTS
-		epochs.detectEye(missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
-
-		# INTERPOLATE BADS
-		epochs.interpolate_bads(reset_bads=True, mode='accurate')
-
-		# LINK BEHAVIOR
-		epochs.linkBeh(beh, events, trigger)
-
-	def prepareBEH(self, project, part, factors, labels, project_param):
-		'''
-		standard Behavior processing
-		'''
-		PP = PreProcessing(project = project, part = part, factor_headers = factors, factor_labels = labels)
-		PP.create_folder_structure()
-		PP.combine_single_subject_files(save = False)
-		PP.select_data(project_parameters = project_param, save = False)
-		PP.filter_data(to_filter = to_filter, filter_crit = ' and correct == 1', cnd_sel = False, save = True)
-		PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
-		PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
-		PP.save_data_file()
 
 if __name__ == '__main__':
 
@@ -338,12 +406,15 @@ if __name__ == '__main__':
 	# run preprocessing
 	for sj in [1,2,3,4]:
 	
-		for session in range(1,2):
+		for session in range(1,3):
 		   	# PO.updateBeh(sj = sj)
-			PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-					  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-					  trigger = trigger, project_param = project_param, 
-					  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
+		   	pass
+			# PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+			# 		  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+			# 		  trigger = trigger, project_param = project_param, 
+			# 		  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
+
+		PO.crossTaskBDM(sj)
 
 		#bdm = BDM('digit', nr_folds = 10, eye = False)
 		#bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = 'digit'), time = (-0.2, 1.2), nr_perm = 0, bdm_matrix = True)
