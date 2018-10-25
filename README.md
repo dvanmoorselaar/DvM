@@ -1,4 +1,4 @@
-## DvM
+# DvM
 
 Analysis scripts for EEG, eye tracking and behaviour.
 EEG analysis scripts are based on MNE (www.martinos.org/mne/stable/index.html) with added functionality.
@@ -12,7 +12,7 @@ EEG analysis includes
 
 Especially suited to integrate EEG data with behavioural and/or eye tracking experiments s using OpenSesame  
 
-# Installation
+## Installation
 
 To make use of this toolbox you have to set up a virtual python environment. 
 The necessary steps are outlined below:
@@ -28,7 +28,7 @@ The necessary steps are outlined below:
 9. Within the virtual environment install pygazeanalyser by copying it into the following folder (ananconda2/envs/mne/lib/python2.7/site-packages).
 pygazeanalyser can be downloaded here: https://github.com/esdalmaijer/PyGazeAnalyser 
 
-#Folderstructure
+## Folderstructure
 
 Analysis are run from specfic project scripts (e.g. Wholevspartial.py). To make sure this setup works
 on your own computer within this script you have to make sure that the project folder is specified.
