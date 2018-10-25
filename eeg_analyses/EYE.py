@@ -25,7 +25,7 @@ from copy import copy
 from matplotlib.patches import Ellipse, Circle
 from matplotlib.collections import PatchCollection
 from scipy.signal import savgol_filter
-from FolderStructure import FolderStructure
+from support.FolderStructure import *
 from pygazeanalyser.edfreader import *
 from pygazeanalyser.eyetribereader import *
 from pygazeanalyser.detectors import *

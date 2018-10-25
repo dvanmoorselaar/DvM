@@ -30,7 +30,7 @@ from termios import tcflush, TCIFLUSH
 from EYE import *
 from math import sqrt
 from IPython import embed
-from FolderStructure import FolderStructure
+from support.FolderStructure import *
 from scipy.stats.stats import pearsonr
 from mne.viz.epochs import plot_epochs_image
 from mne.filter import filter_data

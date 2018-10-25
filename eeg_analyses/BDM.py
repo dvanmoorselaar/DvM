@@ -10,7 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from helperFunctions import *
-from FolderStructure import FolderStructure
+from support.FolderStructure import *
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from mne.decoding import (SlidingEstimator, GeneralizingEstimator,
                           cross_val_multiscore, LinearModel, get_coef)

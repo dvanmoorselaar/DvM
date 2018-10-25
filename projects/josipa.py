@@ -218,8 +218,9 @@ class Josipa(FolderStructure):
 		logging.basicConfig(level=logging.DEBUG,
 		                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
 		                    datefmt='%m-%d %H:%M',
-		                    filename='processed/info/preprocess_sj{}_ses{}.log'.format(
-		                        sj, session),
+		                    filename=self.FolderTracker(extension=['processed', 'info'], 
+                        filename='preprocess_sj{}_ses{}.log'.format(
+                        sj, session), overwrite = False),
 		                    filemode='w')
 
 		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME

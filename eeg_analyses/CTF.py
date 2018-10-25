@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 from helperFunctions import *
 from BDM import BDM
-from FolderStructure import FolderStructure
+from support.FolderStructure import *
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from math import pi, sqrt

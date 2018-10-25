@@ -19,7 +19,7 @@ from helperFunctions import *
 from IPython import embed
 from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
-from FolderStructure import FolderStructure
+from support.FolderStructure import *
 from eeg_support import *
 
 class ERP(FolderStructure):

@@ -18,7 +18,7 @@ from mne.time_frequency import tfr_array_morlet
 from mne.baseline import rescale
 from scipy.signal import hilbert
 from numpy.fft import fft, ifft,rfft, irfft
-from FolderStructure import FolderStructure
+from support.FolderStructure import *
 from IPython import embed
 
 class TF(FolderStructure):

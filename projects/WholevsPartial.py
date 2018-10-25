@@ -99,12 +99,13 @@ class WholevsPartial(FolderStructure):
 
 		# start logging
 		logging.basicConfig(level=logging.DEBUG,
-		                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-		                    datefmt='%m-%d %H:%M',
-		                    filename='processed/info/preprocess_sj{}_ses{}.log'.format(
-		                        sj, session),
-		                    filemode='w')
- 
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    filename= self.FolderTracker(extension=['processed', 'info'], 
+                        filename='preprocess_sj{}_ses{}.log'.format(
+                        sj, session), overwrite = False),
+                    filemode='w')
+
 		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
 		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
 		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
@@ -584,7 +585,7 @@ if __name__ == '__main__':
 	PO =  WholevsPartial()
 	PO.prepareBEH(project, 'beh-exp1', ['condition','cue','set_size'], [['whole','partial'],['cue','no'],[3,5]], project_param + ['set_size'])
 
-	for sj in [13,14,23]:
+	for sj in [23]:
 		pass
 		
 		# PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
@@ -609,8 +610,8 @@ if __name__ == '__main__':
 		#bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['cue']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
 
 		# no-cue trials (whole vs partial)
-		#bdm = BDM('block_type', nr_folds = 10, eye = False)
-		#bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['no']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
+		bdm = BDM('block_type', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['no']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
 		
 		# TF analysis
 		# tf = TF()
