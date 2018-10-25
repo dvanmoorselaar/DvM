@@ -536,6 +536,7 @@ class DT_reps(FolderStructure):
 				elif a == 1:
 					erp = D_erp
 					colors = ['blue'] * 2 + ['red'] * 2	
+				embed()
 				X = np.mean(np.stack([erp[key][cnd] for key in erp.keys()])[:,elec_idx], axis = 1)
 				data.append(X[:,s_:e_].mean(axis = 1))
 				diff.append(X)
@@ -967,14 +968,14 @@ if __name__ == '__main__':
 	
 			# ERP analysis
 			erp = ERP(header = header, baseline = [-0.3, 0], eye = True)
-			erp.selectERPData(sj = sj, time = [-0.3, 0.8], l_filter = 30) 
+			#erp.selectERPData(sj = sj, time = [-0.3, 0.8], l_filter = 30) 
 			# erp.ipsiContra(sj = sj, left = [2,3], right = [4,5], l_elec = ['PO7','PO3','O1','P3','P5','P7'], 
 			# 				r_elec = ['PO8','PO4','O2','P4','P6','P8'], midline = midline, balance = False, erp_name = 'main-unbalanced')
 			# erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1','P3','P5','P7'], 
 			# 				r_elec = ['PO8','PO4','O2','P4','P6','P8'], midline = midline, balance = True, erp_name = 'main-low')
 			# erp.topoFlip(left = [1, 2])
 			# erp.topoSelection(sj = sj, loc = [2,4], midline = midline, topo_name = 'main', balance = True)
-			erp.topoSelection(sj = sj, loc = [0,1,2,3,4,5], topo_name = 'frontal-bias', balance = True)
+			#erp.topoSelection(sj = sj, loc = [0,1,2,3,4,5], topo_name = 'frontal-bias', balance = True)
 
 			# BDM analysis
 			#bdm = BDM(decoding = header, nr_folds = 10, eye = True, elec_oi = 'post', downsample = 128, bdm_filter = dict(alpha = (8,12)))

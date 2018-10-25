@@ -9,7 +9,6 @@ import mne
 import os
 import logging
 import itertools
-import h5py
 import pickle
 import copy
 import glob
@@ -372,7 +371,7 @@ class Epochs(mne.Epochs, FolderStructure):
         logging.info('{} channels marked as bad: {}'.format(
             len(self.info['bads']), self.info['bads']))
 
-    def artifactDetection(self, z_cutoff=4, band_pass=[110, 140], plot=True, inspect=True):
+    def artifactDetection(self, z_cutoff=4, band_pass=[110, 140], run = True, plot=True, inspect=True):
         '''
         Detect artifacts based on FieldTrip's automatic artifact detection. 
         Artifacts are detected in three steps:
@@ -386,10 +385,11 @@ class Epochs(mne.Epochs, FolderStructure):
         z_cutoff (int): Value that is added to difference between median 
                         and min value of accumulated z-score to obtain z-threshold
         band_pass (list): Low and High frequency cutoff for band_pass filter
+        run (bool): specifies whether analysis is run a new or whether bad epochs are read in from memory
         plot (bool): If True save detection plots (overview of z scores across epochs, 
                     raw signal of channel with highest z score, z distributions, 
                     raw signal of all electrodes)
-
+        inspect (bool): If True gives the opportunity to overwrite selected components
 
         Returns
         - - - -
@@ -405,60 +405,66 @@ class Epochs(mne.Epochs, FolderStructure):
         # control for filter padding
         if self.flt_pad > 0:
             idx_ep = self.time_as_index([self.tmin + self.flt_pad, self.tmax - self.flt_pad])
-
-        print('Started artifact detection')
-        logging.info('Started artifact detection')
         ep_data = []
 
         # STEP 1: filter each epoch data, apply hilbert transform and boxsmooth
         # the resulting data before removing filter padds
-        for epoch, X in enumerate(self):
+        if run:
+            print('Started artifact detection')
+            logging.info('Started artifact detection')
+            for epoch, X in enumerate(self):
 
-            # CHECK IF THIS IS CORRECT ORDER IN FIELDTRIP CODE / ALSO CHANGE
-            # FILTER TO MNE 0.14 STANDARD
-            X = filter_data(X[picks, :], sfreq, band_pass[0], band_pass[
-                            1], method='iir', iir_params=dict(order=9, ftype='butter'))
-            X = np.abs(sp.signal.hilbert(X))
-            X = self.boxSmoothing(X)
+                # CHECK IF THIS IS CORRECT ORDER IN FIELDTRIP CODE / ALSO CHANGE
+                # FILTER TO MNE 0.14 STANDARD
+                X = filter_data(X[picks, :], sfreq, band_pass[0], band_pass[
+                                1], method='iir', iir_params=dict(order=9, ftype='butter'))
+                X = np.abs(sp.signal.hilbert(X))
+                X = self.boxSmoothing(X)
 
-            X = X[:, idx_ep[0]:idx_ep[1]]
-            ep_data.append(X)
+                X = X[:, idx_ep[0]:idx_ep[1]]
+                ep_data.append(X)
 
-        # STEP 2: Z-transform data
-        epoch = np.hstack(ep_data)
-        avg_data = epoch.mean(axis=1).reshape(-1, 1)
-        std_data = epoch.std(axis=1).reshape(-1, 1)
-        z_data = [(ep - avg_data) / std_data for ep in ep_data]
+            # STEP 2: Z-transform data
+            epoch = np.hstack(ep_data)
+            avg_data = epoch.mean(axis=1).reshape(-1, 1)
+            std_data = epoch.std(axis=1).reshape(-1, 1)
+            z_data = [(ep - avg_data) / std_data for ep in ep_data]
 
-        # STEP 3 threshold z-score per epoch
-        z_accumel = np.hstack(z_data).sum(axis=0) / sqrt(nr_channels)
-        z_accumel_ep = [np.array(z.sum(axis=0) / sqrt(nr_channels))
-                        for z in z_data]
-        z_thresh = np.median(
-            z_accumel) + abs(z_accumel.min() - np.median(z_accumel)) + z_cutoff
+            # STEP 3 threshold z-score per epoch
+            z_accumel = np.hstack(z_data).sum(axis=0) / sqrt(nr_channels)
+            z_accumel_ep = [np.array(z.sum(axis=0) / sqrt(nr_channels))
+                            for z in z_data]
+            z_thresh = np.median(
+                z_accumel) + abs(z_accumel.min() - np.median(z_accumel)) + z_cutoff
 
-        bad_epochs = []
-        for ep, X in enumerate(z_accumel_ep):
-            # ADD LINES SPECIFYING THE MIN LENGTH OF A NOISE SEGMENT
-            if (X > z_thresh).sum() > 0:
-                bad_epochs.append(ep)
+            bad_epochs = []
+            for ep, X in enumerate(z_accumel_ep):
+                # ADD LINES SPECIFYING THE MIN LENGTH OF A NOISE SEGMENT
+                if (X > z_thresh).sum() > 0:
+                    bad_epochs.append(ep)
 
-        if plot:
-            plt.figure(figsize=(10, 10))
-            with sns.axes_style('dark'):
+            if plot:
+                plt.figure(figsize=(10, 10))
+                with sns.axes_style('dark'):
 
-                plt.subplot(111, xlabel='samples', ylabel='z_value',
-                            xlim=(0, z_accumel.size), ylim=(-20, 40))
-                plt.plot(np.arange(0, z_accumel.size), z_accumel, color='b')
-                plt.plot(np.arange(0, z_accumel.size),
-                         np.ma.masked_less(z_accumel, z_thresh), color='r')
-                plt.axhline(z_thresh, color='r', ls='--')
+                    plt.subplot(111, xlabel='samples', ylabel='z_value',
+                                xlim=(0, z_accumel.size), ylim=(-20, 40))
+                    plt.plot(np.arange(0, z_accumel.size), z_accumel, color='b')
+                    plt.plot(np.arange(0, z_accumel.size),
+                             np.ma.masked_less(z_accumel, z_thresh), color='r')
+                    plt.axhline(z_thresh, color='r', ls='--')
 
-                plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-                    self.sj), self.session], filename='automatic_artdetect.pdf'))
-                plt.close()
+                    plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                        self.sj), self.session], filename='automatic_artdetect.pdf'))
+                    plt.close()
 
-        bad_epochs = np.array(bad_epochs)        
+            bad_epochs = np.array(bad_epochs)
+        else:
+            logging.info('Bad epochs read in from file')
+            bad_epochs = np.loadtxt(self.FolderTracker(extension=[
+                                'preprocessing', 'subject-{}'.format(self.sj), self.session], 
+                                filename='noise_epochs.txt'))    
+
         if inspect:
             print 'You can now overwrite automatic artifact detection by clicking on epochs selected as bad'
             bad_eegs = self[bad_epochs]
@@ -483,7 +489,8 @@ class Epochs(mne.Epochs, FolderStructure):
         self.drop(np.array(bad_epochs), reason='art detection ecg')
         logging.info('{} epochs left after artifact detection'.format(len(self)))
 
-        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
+        if run:
+            np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
                    ['Artifact detection z threshold set to {}. \n{} epochs dropped ({}%)'.
                     format(round(z_thresh, 1), len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2))], fmt='%.100s')
 

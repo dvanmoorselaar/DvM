@@ -10,7 +10,6 @@ import json
 import time
 import glob
 import os
-import h5py
 import pickle
 import mne
 import warnings

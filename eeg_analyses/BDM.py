@@ -147,6 +147,16 @@ class BDM(FolderStructure):
 		# read in data 
 		eegs, beh = self.selectBDMData(sj, time = time)
 
+		# limit trials to factors of interest
+		if factor != None:
+			mask = [beh[key] == f for  key in factor.keys() for f in factor[key]]
+			for m in mask: # check whether this works with multiple masks
+				mask[0] = m * mask[0]
+			eegs = eegs[mask[0]]
+			beh = pd.DataFrame.from_dict(beh)	
+			beh.drop(np.where(~mask[0])[0], inplace = True)
+			beh.reset_index(inplace = True)
+		
 		# select minumum number of trials given the specified conditions
 		max_tr = self.selectMaxTrials(beh, cnds, cnd_header)
 
@@ -300,6 +310,13 @@ class BDM(FolderStructure):
 				test_tr[i,j,:] = np.sort(bdm_info[key][idx_test])
 
 		return train_tr, test_tr, bdm_info	
+
+	def ROCcurve(self, ):
+		'''
+
+		'''	
+
+		pass 
 
 	def linearClassification(self, X, train_tr, test_tr, max_tr, labels, bdm_matrix = False):
 		''' 

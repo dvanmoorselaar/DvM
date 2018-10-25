@@ -1,5 +1,5 @@
-#import matplotlib          # run these lines only when running sript via ssh connection
-#matplotlib.use('agg')
+import matplotlib          # run these lines only when running sript via ssh connection
+matplotlib.use('agg')
 
 import sys
 sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM')
@@ -11,6 +11,7 @@ from beh_analyses.PreProcessing import *
 from eeg_analyses.EEG import * 
 from eeg_analyses.ERP import * 
 from eeg_analyses.BDM import * 
+from eeg_analyses.TF import * 
 from support.FolderStructure import *
 from support.support import *
 from stats.nonparametric import *
@@ -20,10 +21,12 @@ from visuals.visuals import MidpointNormalize
 sj_info = {'1': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 		  	'2': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 		  	'3': {'tracker': (False, '', None, '',0), 'replace':{}},
+		  	'4': {'tracker': (False, '', None, '',0), 'replace':{}}, # 2 sessions
 		  	'5': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'6': {'tracker': (False, '', None, '',0), 'replace':{}}, #  first trial is spoke trigger, because wrong experiment was started
 		  	'7': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'8': {'tracker': (False, '', None, '',0), 'replace':{}},
+		  	'9': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'10': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'11': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'12': {'tracker': (False, '', None, '',0), 'replace':{}},
@@ -56,7 +59,7 @@ project_param = ['practice','nr_trials','trigger','condition',
 # EEG
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
-trigger = [10,11,12,19, 20,21,22,29]
+trigger = [10,11,12,19,20,21,22,29]
 t_min = -0.5
 t_max = 0.85
 flt_pad = 0.5
@@ -81,7 +84,7 @@ class WholevsPartial(FolderStructure):
 		PP.select_data(project_parameters = project_param, save = False)
 		#PP.filter_data(to_filter = to_filter, filter_crit = ' and correct == 1', cnd_sel = False, save = True)
 		#PP.exclude_outliers(criteria = dict(dev_0 = ''))
-		PP.prep_JASP(agg_func = 'mean', voi = 'dev_0', data_filter = "", save = True)
+		#PP.prep_JASP(agg_func = 'mean', voi = 'dev_0', data_filter = "", save = True)
 		PP.save_data_file()
 
 	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
@@ -120,7 +123,7 @@ class WholevsPartial(FolderStructure):
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
 		if sj == 6:
-			embed()
+			events = np.delete(events,3,0) # delete spoke trigger
 		beh, missing = EEG.matchBeh(sj, session, events, trigger, 
 		                             headers = project_param)
 
@@ -129,8 +132,8 @@ class WholevsPartial(FolderStructure):
 		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
 		# ARTIFACT DETECTION
-		epochs.selectBadChannels(channel_plots = True, inspect=True, RT = None)    
-		epochs.artifactDetection(inspect=True)
+		epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
+		epochs.artifactDetection(inspect=False, run = False)
 
 		# ICA
 		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
@@ -143,6 +146,49 @@ class WholevsPartial(FolderStructure):
 
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, trigger)
+
+	def anticipatoryEye(self, sj_info):
+		'''
+
+		'''
+		
+		# initiate SGD class and EYE class
+		SD = SaccadeGlissadeDetection(500.0)
+		EO = EYE(sfreq = 500.0)
+		for sj in sj_info.keys():
+			if  sj_info[sj]['tracker'][0]: continue
+
+			eye_file = self.FolderTracker(extension = ['eye','raw'], \
+					filename = 'sub_{}_session_1.asc'.format(sj))
+			beh_file = self.FolderTracker(extension = ['beh','raw'], \
+										filename = 'subject-{}_ses_1.csv'.format(sj))
+
+			eye, beh = EO.readEyeData(sj, [eye_file], [beh_file])
+			x, y, times = EO.getXY(eye, start = -500, end = 850, start_event = sj_info[sj]['tracker'][3])	
+			x, y = EO.setXY(x,y, times, (-200,0))
+			# loop over all trials
+			for i, (x_, y_) in enumerate(zip(x,y)):
+				info = SD.detectEvents(x_, y_, output = 'dict')
+				if info[0] != {}:
+					embed()
+
+
+		# only run eye analysis if data is available for this session
+		if eye_file == []: 
+			bins = np.array([])
+			trial_nrs = [] # CHECK THIS
+		else:	
+			# read eye and beh file (with removed practice trials from .asc file)
+			beh_file = self.FolderTracker(extension = ['beh','raw'], \
+										filename = 'subject-{}_ses_{}.csv'.format(sj,session))
+			eye, beh = self.readEyeData(sj, eye_file, [beh_file])
+
+			# collect x, y data 
+			x, y, times = self.getXY(eye, start = start, end = end, start_event = start_event)	
+
+			# create deviation bins for for each trial(after correction for drifts in fixation period)	
+			x, y = self.setXY(x,y, times, drift_correct)
+
 
 	def binEye(self, EEG, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True, tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500):
 		'''
@@ -251,6 +297,49 @@ class WholevsPartial(FolderStructure):
 		np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
 		    EEG.sj), EEG.session], filename='eye_bins.txt'), eye_bins)	
 
+	# analyze BEHAVIOR
+	def behExp1(self):
+		'''
+
+		'''
+
+		# read in data
+		file = self.FolderTracker(['beh-exp1','analysis'], filename = 'preprocessed.csv')
+		data = pd.read_csv(file)
+		data['dev_1'][data['dev_1'] == 'None'] = np.nan
+		data['dev_1'] = data.dev_1.astype(float) 
+		data['dev_2'][data['dev_2'] == 'None'] = np.nan
+		data['dev_2'] = data.dev_2.astype(float)        
+
+		# create pivot (main analysis)
+		pivot = data.pivot_table(values = 'dev_0', index = 'subject_nr', columns = ['condition','set_size','cue'], aggfunc = 'mean')
+		pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+
+		# plot whole and partial in seperate plots
+		plt.figure(figsize = (30,10))
+		ax = plt.subplot(1,2, 1, title = 'Response 1', ylabel = 'raw error (deg.)', ylim = (25,70))
+		for i, load in enumerate([3,5]):
+			for idx, cnd in enumerate(['partial', 'whole']):
+				pivot[cnd][load].mean().plot(color = ['red','green'][i], 
+					ls = ['-','--'][idx],label = '{}-{}'.format(cnd,load), yerr = pivot_error[cnd][load])
+			sns.despine(offset=50, trim = False)	
+			plt.legend(loc = 'best')
+		
+		ax = plt.subplot(1,2, 2, title = 'Response 2-3', ylabel = 'raw error (deg.)', ylim = (45,90))
+		for r, resp in enumerate(['dev_1', 'dev_2']):
+			pivot = data.pivot_table(values = resp, index = 'subject_nr', columns = ['condition','set_size','cue'], aggfunc = 'mean')
+			pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+			for i, load in enumerate([3,5]):
+				pivot['whole'][load].mean().plot(color = ['red','green'][r], 
+						ls = ['-','--'][i],label = '{}-{}'.format(['R1','R2'][r],load), yerr = pivot_error['whole'][load])
+		sns.despine(offset=50, trim = False)	
+		plt.legend(loc = 'best')
+
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['beh-exp1','analysis'], filename = 'beh-main.pdf'))
+		plt.close()
+
+
 	def cdaTopo(self):
 		'''
 
@@ -289,7 +378,7 @@ class WholevsPartial(FolderStructure):
 			err_i, ipsi  = bootstrap(ipsi)	
 			err_c, contra  = bootstrap(contra)	
 
-			plt.ylim(-8,8)
+			plt.ylim(-6,6)
 			plt.axhline(y = 0, color = 'black')
 			plt.plot(info['times'], ipsi, label = 'ipsi', color = 'red')
 			plt.plot(info['times'], contra, label = 'contra', color = 'green')
@@ -300,23 +389,15 @@ class WholevsPartial(FolderStructure):
 			sns.despine(offset=50, trim = False)
 
 		ax =  plt.subplot(1,3, 3, title = 'cda', ylabel = 'mV', xlabel = 'time (ms)')
-		err_p, partial  = bootstrap(diff[0])
-		err_w, whole  = bootstrap(diff[1])
+		for i, cnd in enumerate(['partial','whole']):
+			err, x  = bootstrap(diff[i])
+			plt.plot(info['times'], x, label = cnd, color = ['red','green'][i])
+			plt.fill_between(info['times'], x + err, x - err, alpha = 0.2, color = ['red','green'][i])
+			self.clusterPlot(diff[i], 0, 0.05, info['times'], ax.get_ylim()[0] + 0.05*(i+1), color = ['red','green'][i])
 		plt.axhline(y = 0, color = 'black')
-		plt.ylim(-1,1)
-		plt.plot(info['times'], partial, label = 'partial', color = 'red')
-		plt.plot(info['times'], whole, label = 'whole', color = 'green')
-
-		# indicate significant clusters of individual timecourses
-		# stat = Permutation()
-		# sig_cl = stat.clusterBasedPermutation(diff[1], diff[0], p_val = 0.05)
-		# mask = np.where(sig_cl < 1)[0]
-		# sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
-		# for cl in sig_cl:
-		# 	plt.plot(info['times'][cl], np.ones(cl.size) * -1.75, color = 'black')
 
 		plt.legend(loc = 'best')
-		sns.despine(offset=50, trim = False)
+		sns.despine(offset=50, trim = False)	
 
 		plt.tight_layout()
 		plt.savefig(self.FolderTracker(['erp','cue_loc'], filename = 'cda.pdf'))
@@ -333,6 +414,107 @@ class WholevsPartial(FolderStructure):
 		sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
 		for cl in sig_cl:
 			plt.plot(times[cl], np.ones(cl.size) * y, color = color, ls = ls)
+
+	def plotTF(self):
+		'''
+
+		'''
+
+		with open(self.FolderTracker(['tf','wavelet'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times']	
+
+		files = glob.glob(self.FolderTracker(['tf','wavelet'], filename = '*-tf.pickle'))
+		tf = []
+		for file in files:
+			with open(file ,'rb') as handle:
+				tf.append(pickle.load(handle))
+
+		contra_idx = info['ch_names'].index('PO7')	
+		ipsi_idx = info['ch_names'].index('PO8')
+
+		# plot conditions
+		plt.figure(figsize = (30,10))
+		alpha = {'partial':[],'whole':[]}
+		for idx, cnd in enumerate(['partial','whole']):
+			X = np.stack([tf[i][cnd]['base_power'][:,contra_idx,:] for i in range(len(tf))]) - \
+				 np.stack([tf[i][cnd]['base_power'][:,ipsi_idx,:] for i in range(len(tf))])	 
+			alpha[cnd] = X[:,6:12,:].mean(axis = 1)
+			#cl_p_vals = clusterBasedPermutation(X,0)
+			X = X.mean(axis = 0)
+			#X[cl_p_vals == 1] = 0
+			ax = plt.subplot(2,2, idx + 1, title = 'TF-{}'.format(cnd), ylabel = 'freq', xlabel = 'Time (ms)')
+			plt.imshow(X, aspect = 'auto', origin = 'lower', 
+						cmap = cm.jet, interpolation = None, vmin = -1, vmax = 1, extent = [times[0], times[-1],0,40])
+			plt.yticks(info['frex'][::4])
+			plt.colorbar()
+			sns.despine(offset=50, trim = False)
+
+		ax = plt.subplot(2,1, 2, title = 'alpha suppression', ylim = (-1,0),ylabel = 'mV', xlabel = 'Time (ms)')
+		for i, cnd in enumerate(['partial','whole']):
+			err, x = bootstrap(alpha[cnd])
+			plt.plot(times, x, label = cnd, color = ['red','green'][i])
+			plt.fill_between(times, x + err, x - err, alpha = 0.2, color = ['red','green'][i])
+			self.clusterPlot(alpha[cnd], 0, 0.05, times, ax.get_ylim()[0] + 0.05*(i+1), color = ['red','green'][i])
+		plt.legend(loc = 'best')
+		sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()	
+		plt.savefig(self.FolderTracker(['tf','wavelet'], filename = 'tf.pdf'))
+		plt.close()
+
+	def bdmBlock(self):
+		'''
+
+		'''
+
+		with open(self.FolderTracker(['bdm','block_type'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times']	
+
+
+		# plot conditions
+		plt.figure(figsize = (30,20))
+		norm = MidpointNormalize(midpoint=1/2.0)
+
+		diag = {'no-cue':[],'cue':[]}
+		for idx, cue in enumerate(['no-cue','cue']):
+
+			files = glob.glob(self.FolderTracker(['bdm','block_type',cue], filename = 'class_*_perm-False-broad.pickle'))
+			bdm = []
+			for file in files:
+				with open(file ,'rb') as handle:
+					bdm.append(pickle.load(handle))
+
+			X = np.stack([bdm[i]['all']['standard'] for i in range(len(bdm))])
+			diag[cue] = np.vstack([np.diag(x) for x in X]) 
+			cl_p_vals = clusterBasedPermutation(X,1/2.0)
+			X = X.mean(axis = 0)
+			X[cl_p_vals == 1] = 1/2.0
+	
+			# plot GAT
+			ax = plt.subplot(2,2, idx +1, title = 'GAT-{}'.format(cue), ylabel = 'train time (ms)', xlabel = 'test time (ms)')
+			plt.imshow(X, norm = norm, aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]], 
+						cmap = cm.bwr, interpolation = None, vmin = 0.45, vmax = 0.6)
+			plt.colorbar()
+			sns.despine(offset=50, trim = False)
+
+		ax = plt.subplot(2,1, 2, title = 'Diagonal', ylabel = 'dec acc (%)', xlabel = 'time (ms)', ylim = (0.45,0.6), xlim = (times[0],times[-1]))
+		for i, key in enumerate(diag.keys()):
+			err, x = bootstrap(diag[key])
+			plt.plot(times, x, color = ['red','green'][i], label = key)
+			plt.fill_between(times, x + err, x - err, alpha = 0.2, color = ['red','green'][i])
+			self.clusterPlot(diag[key], 1/2.0, 0.05, times, ax.get_ylim()[0] + 0.01*(i+1), color = ['red','green'][i])
+		
+		self.clusterPlot(diag['cue'], diag['no-cue'], 0.05, times, ax.get_ylim()[0] + 0.01*(3), color = 'black')
+
+		plt.axhline(y = 1/2.0, color = 'black', ls = '--')
+		sns.despine(offset=50, trim = False)
+		plt.legend(loc = 'best')
+
+		plt.tight_layout()	
+		plt.savefig(self.FolderTracker(['bdm'], filename = 'block_type-decoding.pdf'))
+		plt.close()	
 
 	def bdmCue(self):
 		'''
@@ -377,15 +559,19 @@ class WholevsPartial(FolderStructure):
 			sns.despine(offset=50, trim = False)
 
 		ax = plt.subplot(2,1, 2, title = 'Diagonal', ylabel = 'dec acc (%)', xlabel = 'time (ms)')
-		for cnd in ['partial', 'whole']:
-			plt.plot(times, diag[cnd].mean(axis = 0), label = cnd)
+		for i, cnd in enumerate(['partial', 'whole']):
+				err, x = bootstrap(diag[cnd])
+				plt.plot(times, x, label = cnd, color = ['red','green'][i])
+				plt.fill_between(times, x + err, x - err, alpha = 0.2, color = ['red','green'][i])
+				self.clusterPlot(diag[cnd], 1/3.0, 0.05, times, ax.get_ylim()[0] + 0.01*(i+1), color = ['red','green'][i])
+				
 		self.clusterPlot(diag['partial'], diag['whole'], 0.05, times, 0.3,'black', '--')
 		plt.axhline(y = 1/3.0, color = 'black', ls = '--')
 		sns.despine(offset=50, trim = False)
 		plt.legend(loc = 'best')
 
 		plt.tight_layout()	
-		plt.savefig(self.FolderTracker(['bdm'], filename = 'cue-loc-decoding1.pdf'))
+		plt.savefig(self.FolderTracker(['bdm'], filename = 'cue_loc-decoding.pdf'))
 		plt.close()
 
 if __name__ == '__main__':
@@ -396,9 +582,9 @@ if __name__ == '__main__':
 
 	# behavior analysis
 	PO =  WholevsPartial()
-	#PO.prepareBEH(project, part, factors, labels, project_param)
+	PO.prepareBEH(project, 'beh-exp1', ['condition','cue','set_size'], [['whole','partial'],['cue','no'],[3,5]], project_param + ['set_size'])
 
-	for sj in [12]:
+	for sj in [13,14,23]:
 		pass
 		
 		# PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
@@ -406,20 +592,38 @@ if __name__ == '__main__':
 		#   trigger = trigger, project_param = project_param, 
 		#   project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
-		# CDA analysis
-		erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
-		erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = 40) 
-		erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7','PO3','O1'], 
-										r_elec = ['PO8','PO4','O2'], midline = None, balance = False, erp_name = 'cda')
-		erp.topoFlip(left = [1])
-		erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
+		# # CDA analysis
+		# erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
+		# erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = 40) 
+		# erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7','PO3','O1'], 
+		# 								r_elec = ['PO8','PO4','O2'], midline = None, balance = False, erp_name = 'cda')
+		# erp.topoFlip(left = [1])
+		# erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
 
-		# BDM analysis
-		bdm = BDM('cue_loc', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['partial','whole'], cnd_header = 'block_type', bdm_labels = ['0','1','2'], factor = dict(cue = 'cue'), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
+		# # BDM analysis
+		# bdm = BDM('cue_loc', nr_folds = 10, eye = False)
+		# bdm.Classify(sj, cnds = ['partial','whole'], cnd_header = 'block_type', bdm_labels = ['0','1','2'], time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
 
-	PO.plotCDA()
-	PO.bdmCue()
+		# cue trials (whole vs partial)
+		#bdm = BDM('block_type', nr_folds = 10, eye = False)
+		#bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['cue']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
+
+		# no-cue trials (whole vs partial)
+		#bdm = BDM('block_type', nr_folds = 10, eye = False)
+		#bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['no']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
+		
+		# TF analysis
+		# tf = TF()
+		# tf.TFanalysis(sj = sj, cnds = ['partial','whole'], 
+	 #  			  cnd_header ='block_type', base_period = (-0.2,0), 
+		# 		  time_period = (0,0.85), method = 'wavelet', flip = dict(cue_loc = '1'), downsample = 4)
+
+	#PO.anticipatoryEye()
+	PO.behExp1() 
+	#PO.plotCDA()
+	#PO.bdmBlock()
+	#PO.bdmCue()
+	#PO.plotTF()
 
 
 

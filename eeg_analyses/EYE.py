@@ -715,7 +715,7 @@ class SaccadeGlissadeDetection(object):
 		
 		self.sfreq = sfreq
 		self.min_sac = 0.01
-		self.sfreq = 500.0 # needs to be a float!!!!
+		self.sfreq = float(sfreq) 
 
 	def detectEvents(self, x, y, output = 'mask'):
 		'''

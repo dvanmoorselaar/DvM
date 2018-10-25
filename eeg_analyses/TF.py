@@ -83,6 +83,9 @@ class TF(FolderStructure):
 
 		Arguments
 		- - - - - 
+		eegs(array): eeg data
+		var (array|list): location info per trial
+		ch_names (list): list of channel names
 		left (list): list containing stimulus labels indicating spatial position 
 
 		Returns
@@ -103,7 +106,6 @@ class TF(FolderStructure):
 					'C6':'C5','C4':'C3','C2':'C1','TP7':'TP8','CP5':'CP6','CP3':'CP4',\
 					'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4','P1':'P2','PO8':'PO7',\
 					'PO4':'PO3','O2':'O1'}
-
 
 		idx_l = np.sort(np.hstack([np.where(var == l)[0] for l in left]))
 
@@ -333,7 +335,6 @@ class TF(FolderStructure):
 			tf[cnd]['phase'] = abs(np.mean(np.exp(np.angle(raw_conv) * 1j), axis = 0))
 
 		# baseline normalization
-		embed()
 		for cnd in cnds:
 			if base_type == 'conspec': #db convert: condition specific baseline
 				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(base[cnd][:,:,np.newaxis],idx_2_save.size,axis = 2))

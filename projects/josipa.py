@@ -1,5 +1,5 @@
-import matplotlib
-matplotlib.use('agg') # now it works via ssh connection
+#import matplotlib
+#matplotlib.use('agg') # now it works via ssh connection
 
 import os
 import mne
@@ -247,7 +247,7 @@ class Josipa(FolderStructure):
 		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
 		# ARTIFACT DETECTION
-		epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
+		epochs.selectBadChannels(channel_plots = False, inspect=True, RT = None)    
 		epochs.artifactDetection(inspect=False)
 
 		# ICA
@@ -270,10 +270,8 @@ class Josipa(FolderStructure):
 		# STEP 1: reading data from localizer task and AB task (EEG and behavior)
 		locEEG = mne.read_epochs(self.FolderTracker(extension = ['processed','localizer'], filename = 'subject-{}_all-epo.fif'.format(sj)))
 		abEEG = mne.read_epochs(self.FolderTracker(extension = ['processed','AB'], filename = 'subject-{}_all-epo.fif'.format(sj)))
-		with open(self.FolderTracker(extension = ['beh','processed','localizer'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
-			beh_loc = pickle.load(handle)
-		with open(self.FolderTracker(extension = ['beh','processed','AB'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
-			beh_ab = pickle.load(handle)
+		beh_loc = pickle.load(open(self.FolderTracker(extension = ['beh','processed','localizer'], filename = 'subject-{}_all.pickle'.format(sj)),'rb'))
+		beh_ab = pickle.load(open(self.FolderTracker(extension = ['beh','processed','AB'], filename = 'subject-{}_all.pickle'.format(sj)),'rb'))
 
 		# STEP 2: downsample data
 		locEEG.resample(128)
@@ -301,14 +299,15 @@ class Josipa(FolderStructure):
 		train_idx = np.sort(np.hstack([random.sample(np.where(beh_loc[to_decode] == l)[0],min_nr) for l in np.unique(all_labels)]))
 
 		# set test labels
-		test_idx = np.where(beh_ab['condition'] == cnd)[0] # number test labels is not yet counterbalanced
+		#test_idx = np.where(np.array(beh_ab['condition']) == cnd)[0] # number test labels is not yet counterbalanced
+		test_idx = range(np.array(beh_ab['T1']).size)
 
 		# STEP 4: do classification
 		lda = LinearDiscriminantAnalysis()
 
 		# set training and test labels
 		Ytr = beh_loc[to_decode][train_idx]
-		Yte = beh_ab['T1'][test_idx]
+		Yte = np.array(beh_ab['T1']) #[test_idx]
 
 		class_acc = np.zeros((nr_time, nr_test_time))
 		label_info = np.zeros((nr_time, nr_test_time, nr_labels))
@@ -326,15 +325,47 @@ class Josipa(FolderStructure):
 				predict = lda.predict(Xte)
 				
 				if not bdm_matrix:
-					class_acc[tr_t, :] = sum(predict == Yte)/float(Yte.size)
+					#class_acc[tr_t, :] = sum(predict == Yte)/float(Yte.size)
+					class_acc[tr_t, :] = np.mean([sum(predict[Yte == y] == y)/ float(sum(Yte == y)) for y in np.unique(Yte)])
 					label_info[tr_t, :] = [sum(predict == l) for l in np.unique(all_labels)]	
 				else:
-					class_acc[tr_t, te_t] = sum(predict == Yte)/float(Yte.size)
+					#class_acc[tr_t, te_t] = sum(predict == Yte)/float(Yte.size)
+					class_acc[tr_t, te_t] = np.mean([sum(predict[Yte == y] == y)/ float(sum(Yte == y)) for y in np.unique(Yte)])
 					label_info[tr_t, te_t] = [sum(predict == l) for l in np.unique(all_labels)]	
 						
+
+		pickle.dump(class_acc, open(self.FolderTracker(extension = ['bdm'], filename = 'subject-{}_bdm.pickle'.format(sj)),'wb'))
+
+	
+	def plotcrossBDM(self):
+		'''
+
+		'''
+
 		embed()
+		files = glob.glob(self.FolderTracker(['bdm'], filename = 'subject-*_bdm.pickle'))
+		bdm = [pickle.load(open(file,'rb')) for file in files]
+		times = np.linspace(-0.2,0.8,bdm[0].size)
+		plt.figure(figsize = (20,20))
+		for i in range(4):
+			ax =  plt.subplot(2,2, i +1, ylabel = 'acc', xlabel = 'time (ms)', ylim = (0.1,0.15))
+			plt.plot(times,bdm[i])
+			plt.axhline(y = 1/8.0)
+			sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()	
+		plt.savefig(self.FolderTracker(['bdm'], filename = 'cross-taskind.pdf'))
+		plt.close()
 
 
+		plt.figure(figsize = (20,20))
+		plt.plot(times, np.mean(bdm, axis = 0))
+		plt.axhline(y = 1/8.0)
+		sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()	
+		plt.savefig(self.FolderTracker(['bdm'], filename = 'cross-tasktest-mean.pdf'))
+		plt.close()		
 
 	def splitEpochs(self):
 		'''
@@ -401,7 +432,7 @@ if __name__ == '__main__':
 
 	# initiate current project
 	PO = Josipa()
-	#PO.plotBDM()
+	PO.plotcrossBDM()
 
 	# run preprocessing
 	for sj in [1,2,3,4]:
@@ -409,12 +440,12 @@ if __name__ == '__main__':
 		for session in range(1,3):
 		   	# PO.updateBeh(sj = sj)
 		   	pass
-			# PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-			# 		  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-			# 		  trigger = trigger, project_param = project_param, 
-			# 		  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
+			PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+					  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+					  trigger = trigger, project_param = project_param, 
+					  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
 
-		PO.crossTaskBDM(sj)
+		PO.crossTaskBDM(sj, bdm_matrix = False)
 
 		#bdm = BDM('digit', nr_folds = 10, eye = False)
 		#bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = 'digit'), time = (-0.2, 1.2), nr_perm = 0, bdm_matrix = True)
