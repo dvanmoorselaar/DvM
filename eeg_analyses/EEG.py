@@ -471,7 +471,7 @@ class Epochs(mne.Epochs, FolderStructure):
             idx_bads = bad_eegs.selection
             
             bad_eegs.plot(
-                n_epochs=5, n_channels=picks.size/2, picks=picks, scalings='auto')
+                n_epochs=5, n_channels=picks.size, picks=picks, scalings='auto')
             plt.show()
             plt.close()
             missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection])

@@ -2,6 +2,7 @@ import os
 import mne
 import pickle
 import random
+import copy
 #import matplotlib
 #matplotlib.use('agg') # now it works via ssh connection
 
@@ -95,20 +96,20 @@ class BDM(FolderStructure):
 		times = EEG.times[s:e]
 
 		# exclude trials contaminated by unstable eye position
-		nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
-		heog = EEG._data[:,EEG.ch_names.index('HEOG'),s:e]
+		# nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
+		# heog = EEG._data[:,EEG.ch_names.index('HEOG'),s:e]
 
-		eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
-		beh['eye_bins'][eye_trials] = 99
+		# eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
+		# beh['eye_bins'][eye_trials] = 99
 	
-		# use mask to select conditions and position bins (flip array for nans)
-		eye_mask = ~(beh['eye_bins'] > thresh_bin)	
-		if self.eye:
-			eegs = eegs[eye_mask,:,:]
+		# # use mask to select conditions and position bins (flip array for nans)
+		# eye_mask = ~(beh['eye_bins'] > thresh_bin)	
+		# if self.eye:
+		# 	eegs = eegs[eye_mask,:,:]
 
-			for key in beh.keys():
-				if key not in ['clean_idx']:
-					beh[key] = beh[key][eye_mask]
+		# 	for key in beh.keys():
+		# 		if key not in ['clean_idx']:
+		# 			beh[key] = beh[key][eye_mask]
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
@@ -119,7 +120,7 @@ class BDM(FolderStructure):
 		return 	eegs, beh
 
 
-	def Classify(self,sj, cnds, cnd_header, bdm_labels = 'all', factor = None, time = (-0.3, 0.8), nr_perm = 0, bdm_matrix = False):
+	def Classify(self,sj, cnds, cnd_header, bdm_labels = 'all', factor = None, time = (-0.3, 0.8), nr_perm = 0, gat_matrix = False, downscale = False):
 		''' 
 
 		Arguments
@@ -135,7 +136,9 @@ class BDM(FolderStructure):
 		nr_perm (int): If perm = 0, run standard decoding analysis. 
 					If perm > 0, the decoding is performed on permuted labels. 
 					The number sets the number of permutations
-		bdm_matrix (bool): If True, train X test decoding analysis is performed
+		gat_matrix (bool): If True, train X test decoding analysis is performed
+		downscale (bool): If True, decoding is repeated with increasingly less trials. Set to True if you are 
+						interested in the minumum number of trials that support classification	
 
 		Returns
 		- - - -
@@ -145,7 +148,7 @@ class BDM(FolderStructure):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh = self.selectBDMData(sj, time = time)
+		eegs, beh = self.selectBDMData(sj, time = time)	
 
 		# limit trials to factors of interest
 		if factor != None:
@@ -158,7 +161,9 @@ class BDM(FolderStructure):
 			beh.reset_index(inplace = True)
 		
 		# select minumum number of trials given the specified conditions
-		max_tr = self.selectMaxTrials(beh, cnds, cnd_header)
+		max_tr = [self.selectMaxTrials(beh, cnds, cnd_header)]
+		if downscale:
+			max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
 
 		# create dictionary to save classification accuracy
 		classification = {'info': {'elec': self.elec_oi}}
@@ -185,8 +190,9 @@ class BDM(FolderStructure):
 				cnd_labels = cnd_labels[sub_idx]
 
 			nr_unique = np.unique(cnd_labels).size	
+			
 			# initiate decoding array
-			if bdm_matrix:
+			if gat_matrix:
 				class_acc = np.empty((nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
 				label_info = np.empty((nr_perm, eegs.shape[2], eegs.shape[2], nr_unique)) * np.nan
 			else:	
@@ -199,13 +205,22 @@ class BDM(FolderStructure):
 				if p > 0: # shuffle condition labels
 					np.random.shuffle(cnd_labels)
 			
-				# select train and test trials 	
-				train_tr, test_tr, bdm_info = self.bdmTrialSelection(cnd_idx, cnd_labels, max_tr, bdm_info)
+				for i, n in enumerate(max_tr):
+					if i > 0:
+						print('Minimum condition label downsampled to {}'.format(n))
+						bdm_info = {}
 
-				# do actual classification
-				class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, max_tr, cnd_labels, bdm_matrix)
+					# select train and test trials 	
+					train_tr, test_tr, bdm_info = self.bdmTrialSelection(cnd_idx, cnd_labels, n, bdm_info)
+
+					# do actual classification
+					class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
 				
-			classification.update({cnd:{'standard': class_acc[0]}, 'info': bdm_info})
+					if i == 0:
+						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'info': bdm_info})
+					else:
+						classification[cnd]['{}-nrlabels'.format(n)] = copy.copy(class_acc[0])
+								
 			if nr_perm > 1:
 				classification[cnd].update({'perm': class_acc[1:]})
 	

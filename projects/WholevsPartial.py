@@ -21,12 +21,12 @@ from visuals.visuals import MidpointNormalize
 sj_info = {'1': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 		  	'2': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 		  	'3': {'tracker': (False, '', None, '',0), 'replace':{}},
-		  	'4': {'tracker': (False, '', None, '',0), 'replace':{}}, # 2 sessions
+		  	'4': {'tracker': (False, '', None, '',0), 'replace':{}}, # 2 sessions (headache during recording in session 1)
 		  	'5': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'6': {'tracker': (False, '', None, '',0), 'replace':{}}, #  first trial is spoke trigger, because wrong experiment was started
 		  	'7': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'8': {'tracker': (False, '', None, '',0), 'replace':{}},
-		  	'9': {'tracker': (False, '', None, '',0), 'replace':{}},
+		  	'9': {'tracker': (False, '', None, '',0), 'replace':{}}, # recodring started late (missing trials are removed from behavior file)
 		  	'10': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'11': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'12': {'tracker': (False, '', None, '',0), 'replace':{}},
@@ -148,7 +148,7 @@ class WholevsPartial(FolderStructure):
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, trigger)
 
-	def anticipatoryEye(self, sj_info):
+	def anticipatoryEye(self, sj_info, nr_bins, start, end):
 		'''
 
 		'''
@@ -156,8 +156,15 @@ class WholevsPartial(FolderStructure):
 		# initiate SGD class and EYE class
 		SD = SaccadeGlissadeDetection(500.0)
 		EO = EYE(sfreq = 500.0)
+		# create timing bins
+		bins = np.linspace(start,end, nr_bins)
+
+		sac_info = {'cue':[],'no':[]}
+		beh_info = {'cue':[],'no':[]}
+
 		for sj in sj_info.keys():
-			if  sj_info[sj]['tracker'][0]: continue
+			
+			if not sj_info[sj]['tracker'][0] or not sj_info[sj]['tracker'][3] == 'Onset cue': continue
 
 			eye_file = self.FolderTracker(extension = ['eye','raw'], \
 					filename = 'sub_{}_session_1.asc'.format(sj))
@@ -165,30 +172,45 @@ class WholevsPartial(FolderStructure):
 										filename = 'subject-{}_ses_1.csv'.format(sj))
 
 			eye, beh = EO.readEyeData(sj, [eye_file], [beh_file])
-			x, y, times = EO.getXY(eye, start = -500, end = 850, start_event = sj_info[sj]['tracker'][3])	
+			x, y, times = EO.getXY(eye, start = start, end = end, start_event = sj_info[sj]['tracker'][3])	
 			x, y = EO.setXY(x,y, times, (-200,0))
 			# loop over all trials
 			for i, (x_, y_) in enumerate(zip(x,y)):
 				info = SD.detectEvents(x_, y_, output = 'dict')
-				if info[0] != {}:
-					embed()
+				
+				if info[0] not in  [{},np.nan]:
+					# loop over saccades
+					for s in info[0].keys():
+						sac_info[beh['cue'].values[i]].append(times[info[0][s][0]: info[0][s][1]].mean())	
+						beh_info[beh['cue'].values[i]].append(beh['block_type'].values[i])
+		
+		# bin data for whole and partial blocks seperately
+		plt.figure(figsize = (30,10))
+		x = np.arange(bins.size)
+		width = 0.2
+		# set informative x labels
+		x_label = x[[np.argmin(abs(bins - t)) for t in (0,100)]]
+
+		for idx, cue in enumerate(['cue','no']):
+			bin_nr = np.digitize(sac_info[cue], bins)
+			binned = np.array([(sum((np.array(beh_info[cue])[bin_nr == b] == 'partial')),
+				  sum((np.array(beh_info[cue])[bin_nr == b] == 'whole'))) for b in range(bins.size)])
+			ax = plt.subplot(1,2 , idx + 1, title = cue, ylim = (0,180))
+			plt.bar(x, binned[:,0], width, color = 'green', label = 'partial')	
+			plt.bar(x +width, binned[:,1], width, color = 'red', label = 'whole')
+			ax.set_xticks(x_label)
+			ax.set_xticklabels(['cue \n on','cue \n off'])
+			sns.despine(offset=50, trim = False)	
+			plt.legend(loc = 'best')
+
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['eye','analysis'], filename = 'anticipatory1.pdf'))
+		plt.close()
+
+		
 
 
-		# only run eye analysis if data is available for this session
-		if eye_file == []: 
-			bins = np.array([])
-			trial_nrs = [] # CHECK THIS
-		else:	
-			# read eye and beh file (with removed practice trials from .asc file)
-			beh_file = self.FolderTracker(extension = ['beh','raw'], \
-										filename = 'subject-{}_ses_{}.csv'.format(sj,session))
-			eye, beh = self.readEyeData(sj, eye_file, [beh_file])
 
-			# collect x, y data 
-			x, y, times = self.getXY(eye, start = start, end = end, start_event = start_event)	
-
-			# create deviation bins for for each trial(after correction for drifts in fixation period)	
-			x, y = self.setXY(x,y, times, drift_correct)
 
 
 	def binEye(self, EEG, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True, tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500):
@@ -580,10 +602,13 @@ if __name__ == '__main__':
 	# Specify project parameters
 	project_folder = '/home/dvmoors1/BB/Cue-whole/wholevspartial'
 	os.chdir(project_folder)
+	PO =  WholevsPartial()
 
 	# behavior analysis
-	PO =  WholevsPartial()
-	PO.prepareBEH(project, 'beh-exp1', ['condition','cue','set_size'], [['whole','partial'],['cue','no'],[3,5]], project_param + ['set_size'])
+	#PO.prepareBEH(project, 'beh-exp1', ['condition','cue','set_size'], [['whole','partial'],['cue','no'],[3,5]], project_param + ['set_size'])
+
+	# eye analysis
+	#PO.anticipatoryEye(sj_info,  nr_bins = 40, start = -500, end = 850)
 
 	for sj in [23]:
 		pass
@@ -602,16 +627,16 @@ if __name__ == '__main__':
 		# erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
 
 		# # BDM analysis
-		# bdm = BDM('cue_loc', nr_folds = 10, eye = False)
-		# bdm.Classify(sj, cnds = ['partial','whole'], cnd_header = 'block_type', bdm_labels = ['0','1','2'], time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
+		bdm = BDM('cue_loc', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = ['partial','whole'], cnd_header = 'block_type', bdm_labels = ['0','1','2'], time = (-0.5, 0.85), nr_perm = 0, gat_matrix = True)
 
 		# cue trials (whole vs partial)
 		#bdm = BDM('block_type', nr_folds = 10, eye = False)
 		#bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['cue']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
 
 		# no-cue trials (whole vs partial)
-		bdm = BDM('block_type', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['no']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
+		#bdm = BDM('block_type', nr_folds = 10, eye = False)
+		#bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['no']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
 		
 		# TF analysis
 		# tf = TF()
@@ -619,7 +644,7 @@ if __name__ == '__main__':
 	 #  			  cnd_header ='block_type', base_period = (-0.2,0), 
 		# 		  time_period = (0,0.85), method = 'wavelet', flip = dict(cue_loc = '1'), downsample = 4)
 
-	#PO.anticipatoryEye()
+	
 	PO.behExp1() 
 	#PO.plotCDA()
 	#PO.bdmBlock()

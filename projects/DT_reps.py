@@ -21,7 +21,7 @@ from eeg_analyses.EEG import *
 from eeg_analyses.ERP import * 
 from eeg_analyses.BDM import * 
 from eeg_analyses.CTF import * 
-from eeg_analyses.Spatial_EM import * 
+#from eeg_analyses.Spatial_EM import * 
 from visuals.visuals import MidpointNormalize
 from support.FolderStructure import *
 from support.support import *
@@ -71,6 +71,16 @@ class DT_reps(FolderStructure):
 		PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
 		PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
 		PP.save_data_file()
+
+	def updateBEH(self, sj):
+		'''
+		Function updates the preprocessed behavior pickle file. It adds a new column 
+		that allows to test whether the anticipatory alpha as observed with target location
+		repetition should be attributed to lingering effects from the previous trial
+		'''
+
+		# read in the raw csv files
+		embed()
 
 	def BEHexp1(self):
 		'''
@@ -725,7 +735,7 @@ class DT_reps(FolderStructure):
 	
 		# plot repetition effect (first repetition on the left, final repetition on the right)
 		for a, (power, sl_name) in enumerate(zip(['total', 'evoked'],['T_slopes','E_slopes'])):
-			for b, cnds in enumerate([['DvTv_0','DvTr_0','DvTv_0','DvTr_3'],['DvTv_0','DrTv_0','DvTv_3','DrTv_3']]):
+			for b, cnds in enumerate([['DvTv_0','DvTr_0','DvTv_3','DvTr_3'],['DvTv_0','DrTv_0','DvTv_3','DrTv_3']]):
 				plt.figure(figsize = (30,10))
 				# get data to plot
 				if b == 0:
@@ -957,7 +967,11 @@ if __name__ == '__main__':
 	#preprocessing and main analysis
 	for sj in range(1,25):
 
-		for header in ['target_loc']:
+		# READ IN PREPROCESSED DATA FOR FURTHER ANALYSIS
+		beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG')
+		PO.updateBEH(sj)
+
+		for header in ['target_loc', 'dist_loc']:
 
 			if header == 'target_loc':
 				midline = {'dist_loc': [0,3]}
@@ -965,9 +979,9 @@ if __name__ == '__main__':
 			elif header == 'dist_loc':
 				midline = {'target_loc': [0,3]}
 				cnds = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']	
-	
+
 			# ERP analysis
-			erp = ERP(header = header, baseline = [-0.3, 0], eye = True)
+			#erp = ERP(header = header, baseline = [-0.3, 0], eye = True)
 			#erp.selectERPData(sj = sj, time = [-0.3, 0.8], l_filter = 30) 
 			# erp.ipsiContra(sj = sj, left = [2,3], right = [4,5], l_elec = ['PO7','PO3','O1','P3','P5','P7'], 
 			# 				r_elec = ['PO8','PO4','O2','P4','P6','P8'], midline = midline, balance = False, erp_name = 'main-unbalanced')
@@ -982,15 +996,22 @@ if __name__ == '__main__':
 			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), bdm_matrix = False)
 
 			# # CTF analysis
-			#ctf = CTF('all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+			#ctf = CTF(beh, eeg, 'all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
 			#ctf.spatialCTF(sj, [-0.3, 0.8], cnds, method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0, plot = False)
+
 			#ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DvTv_0'], test_cnds = ['DvTv_3'], 
 			#				freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 500, name = 'DvTv-perm_500')
 			# ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DrTv_0'], test_cnds = ['DrTv_3'], 
 			#  			 freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 500, name = 'DrTv-perm_500')
 			# ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DvTr_0'], test_cnds = ['DvTr_3'], 
 			#  			 freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 500, name = 'DvTr-perm_500')
-			#ctf.spatialCTF(sj, [-300, 800], 500, cnds, freqs = dict(all = [4,30]), downsample = 4)
+
+			# control analysis to check for repetition effects
+			ctf = CTF(beh, eeg, 'all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+			ctf.spatialCTF(sj, [-0.3, 0.8], ['DvTv_3'], method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0, plot = False)
+
+
+
 	# analysis manuscript
 	# BEH
 	#PO.BEHexp1()
@@ -1006,7 +1027,7 @@ if __name__ == '__main__':
 	#PO.erpSelection(header = 'dist_loc', topo_name = 'main', elec = ['PO3','PO7','O1'])
 	#PO.erpSelection(header = 'target_loc', topo_name = 'main', elec = ['PO3','PO7','O1'])
 	#PO.erpContrast(erp_name = 'lat-down1-mid', elec = ['PO7','PO3','O1'])
-	PO.frontalBias()
+	#PO.frontalBias()
 
 	# PO.componentSelection(header = 'dist_loc', erp_name = 'lat-down1-mid', elec = ['PO7','PO3','O1'], 
 	# 						cmpnts = dict(N2pc = (0.2, 0.3), Pd = (0.25, 0.4)))
@@ -1018,7 +1039,7 @@ if __name__ == '__main__':
 	#		PO.bdmSelection(header, 'Pd', (0.28,0.35))
 
 	# CTF
-	#PO.ctfSlopes()
+	PO.ctfSlopes()
 	#PO.ctfCrossTrainold()
 	#PO.ctfallFreqs()
 

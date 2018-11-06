@@ -1,5 +1,5 @@
-import matplotlib
-matplotlib.use('agg') # now it works via ssh connection
+#import matplotlib
+#matplotlib.use('agg') # now it works via ssh connection
 
 import os
 import mne
@@ -25,10 +25,8 @@ from stats.nonparametric import *
 
 # subject specific info
 sj_info = {'1': {'tracker': (False, '', ''),  'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
-			'2': {'tracker': (False,'', ''), 'replace':{}},
-			'3': {'tracker': (False, '', ''), 'replace':{}},
-			'4': {'tracker': (True, 'asc', 500,'',''), 'replace':{}},
-			'5': {'tracker': (True, 'asc', 500), 'replace':{}}}
+			'24': {'tracker': (True, 'tsv', 30,'Onset task display',0), 'replace':{}}}
+
 
 # project specific info
 
@@ -61,7 +59,7 @@ class DT_sim(FolderStructure):
 	def __init__(self): pass
 
 
-	def prepareBEH(self, project, part, factors, labels, project_param):
+	def prepareBEH(self, project, part, factors, labels, project_param, to_filter):
 		'''
 		standard Behavior processing
 		'''
@@ -73,6 +71,65 @@ class DT_sim(FolderStructure):
 		PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
 		PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
 		PP.save_data_file()
+
+	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
+		'''
+		EEG preprocessing as preregistred @ https://osf.io/b2ndy/register/5771ca429ad5a1020de2872e
+		'''
+
+		# set subject specific parameters
+		file = 'subject_{}_session_{}_'.format(sj, session)
+		replace = sj_info[str(sj)]['replace']
+		tracker, ext, t_freq, start_event, shift = sj_info[str(sj)]['tracker']
+
+		# start logging
+		logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    filename= self.FolderTracker(extension=['processed', 'info'], 
+                        filename='preprocess_sj{}_ses{}.log'.format(
+                        sj, session), overwrite = False),
+                    filemode='w')
+
+		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
+		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
+		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
+
+		#EEG.replaceChannel(sj, session, replace)
+		EEG.reReference(ref_channels=ref, vEOG=eog[
+		                :2], hEOG=eog[2:], changevoltage=True, to_remove = ['V_do','H_l','Ref_r','Ref_l','EXG7','EXG8'])
+		EEG.setMontage(montage='biosemi64')
+
+		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+		EEGica = EEG.filter(h_freq=None, l_freq=1,
+		                   fir_design='firwin', skip_by_annotation='edge')
+		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+		            skip_by_annotation='edge')
+
+		# MATCH BEHAVIOR FILE
+		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
+		beh, missing = EEG.matchBeh(sj, session, events, trigger, 
+		                             headers = project_param)
+
+		# EPOCH DATA
+		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
+		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
+
+		# ARTIFACT DETECTION
+		epochs.selectBadChannels(channel_plots = False, inspect=True, RT = None)    
+		epochs.artifactDetection(inspect=True, run = True)
+
+		# ICA
+		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+
+		# EYE MOVEMENTS
+		epochs.detectEye(epochs, missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
+
+		# INTERPOLATE BADS
+		epochs.interpolate_bads(reset_bads=True, mode='accurate')
+
+		# LINK BEHAVIOR
+		epochs.linkBeh(beh, events, trigger)
 
 	def countCndCheck(self):
 		'''
@@ -427,7 +484,7 @@ if __name__ == '__main__':
 	PO = DT_sim()
 
 	# analyze behavior
-	#PO.prepareBEH(project, part, factors, labels, project_param)
+	#PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
 	#PO.mainBEH(exp = 'beh', column = 'dist_high',  ylim = (200,600))
 	#PO.singleTarget()
 	#PO.mainBEH(exp = 'exp_2', column = 'target_high',  ylim = (350,900))
@@ -437,22 +494,25 @@ if __name__ == '__main__':
 	#PO.plotERP()
 	#PO.plotBDM(header = 'target')
 	#PO.plotBDM(header = 'dist')
-	PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
+	#PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
 
 
 	# run preprocessing
-	for sj in [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]:
-	
-	# 	preprocessing(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-	# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-	# 			  trigger = trigger, project_param = project_param, 
-	# 			  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+	for sj in [24]:
+		pass
+
+		PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		  trigger = trigger, project_param = project_param, 
+		  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+
+
 
 	#  	#TF analysis
-	 	tf = TF()
-	 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
-	 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
-	 			  time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
+	# 	tf = TF()
+	# 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
+	# 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
+	# 			  time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
 
 	# 	# ERP analysis
 	# 	erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)

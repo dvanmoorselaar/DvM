@@ -740,6 +740,10 @@ class SaccadeGlissadeDetection(object):
 		sacc = np.empty(x.shape[0], dtype = dict)
 
 		for i, (x_, y_) in enumerate(zip(x, y)):
+			# check whether trial contains missing data
+			if np.isnan(np.hstack((x_,y_))).any():
+				sacc[i] = np.nan
+				continue
 
 			V, A = self.calcVelocity(x_,y_)
 			x_, y_, V, A = self.noiseDetect(x_, y_, V, A)

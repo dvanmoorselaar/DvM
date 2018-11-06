@@ -1,5 +1,5 @@
-#import matplotlib
-#matplotlib.use('agg') # now it works via ssh connection
+import matplotlib
+matplotlib.use('agg') # now it works via ssh connection
 
 import os
 import mne
@@ -22,7 +22,7 @@ from eeg_analyses.EEG import *
 from eeg_analyses.ERP import * 
 from eeg_analyses.BDM import * 
 from eeg_analyses.CTF import * 
-from eeg_analyses.Spatial_EM import * 
+#from eeg_analyses.Spatial_EM import * 
 from visuals.visuals import MidpointNormalize
 from support.FolderStructure import *
 from support.support import *
@@ -384,42 +384,64 @@ class Josipa(FolderStructure):
 		with open(self.FolderTracker(['bdm','digit'], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
 		times = info['times']	
- 
 		# plot conditions
+		# plt.figure(figsize = (30,20))
+		# norm = MidpointNormalize(midpoint=1/8.0)
+		# for idx, header in enumerate(['digit','letter']):
+		# 	bdm = []
+		# 	files = glob.glob(self.FolderTracker(['bdm',header], filename = 'class_*_perm-False-broad.pickle'))
+		# 	for file in files:
+		# 		print file
+		# 		with open(file ,'rb') as handle:
+		# 			bdm.append(pickle.load(handle))
+
+			
+		# 	X = np.stack([bdm[i][header]['standard'] for i in range(len(bdm))])
+		# 	print X.shape
+		# 	X = X.mean(axis = 0)
+			
+		# 	# plot diagonal
+		# 	ax = plt.subplot(2,2, idx + 3, title = 'Diagonal-{}'.format(header), ylabel = 'dec acc (%)', xlabel = 'time (ms)')
+		# 	plt.plot(times, np.diag(X))
+		# 	plt.axhline(y = 1/8.0, color = 'black', ls = '--')
+		# 	sns.despine(offset=50, trim = False)
+
+		# 	# plot GAT
+		# 	X[X <1/8.0] = 1/8.0
+		# 	ax = plt.subplot(2,2, idx + 1, title = 'GAT-{}'.format(header), ylabel = 'train time (ms)', xlabel = 'test time (ms)')
+		# 	plt.imshow(X, norm = norm, aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]], 
+		# 				cmap = cm.bwr, interpolation = None, vmin = 1/8.0, vmax = 0.16)
+		# 	plt.colorbar()
+		# 	sns.despine(offset=50, trim = False)
+
+		# plt.tight_layout()	
+		# plt.savefig(self.FolderTracker(['bdm'], filename = 'localizer.pdf'))
+		# plt.close()
+
 		plt.figure(figsize = (30,20))
 		norm = MidpointNormalize(midpoint=1/8.0)
 		for idx, header in enumerate(['digit','letter']):
 			bdm = []
 			files = glob.glob(self.FolderTracker(['bdm',header], filename = 'class_*_perm-False-broad.pickle'))
 			for file in files:
-				print file
 				with open(file ,'rb') as handle:
 					bdm.append(pickle.load(handle))
-
-			
-			X = np.stack([bdm[i][header]['standard'] for i in range(len(bdm))])
-			print X.shape
-			X = X.mean(axis = 0)
 			
 			# plot diagonal
-			ax = plt.subplot(2,2, idx + 3, title = 'Diagonal-{}'.format(header), ylabel = 'dec acc (%)', xlabel = 'time (ms)')
-			plt.plot(times, np.diag(X))
+			ax = plt.subplot(1,2, idx + 1, title = 'Diagonal-{}'.format(header), ylabel = 'dec acc (%)', xlabel = 'time (ms)')
+			for label in np.sort(bdm[0][header].keys())[::3]:
+				X = np.stack([bdm[i][header][label] for i in range(len(bdm))])
+
+				x = X.mean(axis = 0)
+				plt.plot(times, x, label = label)
+			
+			plt.legend(loc = 'best')
 			plt.axhline(y = 1/8.0, color = 'black', ls = '--')
 			sns.despine(offset=50, trim = False)
 
-			# plot GAT
-			X[X <1/8.0] = 1/8.0
-			ax = plt.subplot(2,2, idx + 1, title = 'GAT-{}'.format(header), ylabel = 'train time (ms)', xlabel = 'test time (ms)')
-			plt.imshow(X, norm = norm, aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]], 
-						cmap = cm.bwr, interpolation = None, vmin = 1/8.0, vmax = 0.16)
-			plt.colorbar()
-			sns.despine(offset=50, trim = False)
-
 		plt.tight_layout()	
-		plt.savefig(self.FolderTracker(['bdm'], filename = 'localizer.pdf'))
+		plt.savefig(self.FolderTracker(['bdm'], filename = 'localizer-subsample.pdf'))
 		plt.close()
-
-
 
 if __name__ == '__main__':
 
@@ -433,22 +455,23 @@ if __name__ == '__main__':
 
 	# initiate current project
 	PO = Josipa()
-	PO.plotcrossBDM()
+	#PO.plotcrossBDM()
+	PO.plotBDM()
 
 	# run preprocessing
-	for sj in [1,2,3,4]:
+	for sj in [1,3]:
 	
-		for session in range(1,3):
+		for session in range(1):
 		   	# PO.updateBeh(sj = sj)
 		   	pass
-			PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-					  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-					  trigger = trigger, project_param = project_param, 
-					  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
+		# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		# 			  trigger = trigger, project_param = project_param, 
+		# 			  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
 
-		PO.crossTaskBDM(sj, bdm_matrix = False)
+		# PO.crossTaskBDM(sj, bdm_matrix = False)
 
-		#bdm = BDM('digit', nr_folds = 10, eye = False)
-		#bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = 'digit'), time = (-0.2, 1.2), nr_perm = 0, bdm_matrix = True)
-		#bdm = BDM('letter', nr_folds = 10, eye = False)
-		#bdm.Classify(sj, cnds = ['letter'], cnd_header = 'condition', bdm_labels = [11,12,13,14,15,16,17,18], factor = dict(condition = 'letter'), time = (-0.2, 1.2), nr_perm = 0, bdm_matrix = True)
+		bdm = BDM('digit', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = ['digit']), time = (-0.2, 1.2), nr_perm = 0, gat_matrix = False, downscale = True)
+		bdm = BDM('letter', nr_folds = 10, eye = False)
+		bdm.Classify(sj, cnds = ['letter'], cnd_header = 'condition', bdm_labels = [11,12,13,14,15,16,17,18], factor = dict(condition = ['letter']), time = (-0.2, 1.2), nr_perm = 0, gat_matrix = False, downscale = True)

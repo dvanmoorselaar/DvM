@@ -8,7 +8,7 @@ from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
-
+# functions that support reading in data
 def select_electrodes(ch_names, subset):
 	'''
 
@@ -22,6 +22,59 @@ def select_electrodes(ch_names, subset):
 	picks = mne.pick_channels(ch_names, include = elecs)
 
 	return picks	
+
+def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1):
+	'''
+
+	'''
+
+	nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
+
+	# limit step algorhytm to trials without eye tracking data
+	if nan_idx.size > 0:
+		s,e = [np.argmin(abs(eeg.times - t)) for t in eye_window]
+		eog = eeg._data[nan_idx,eeg.ch_names.index(eye_ch),s:e]
+
+		idx_eye = eog_filt(eog, sfreq = eeg.info['sfreq'])
+		beh['eye_bins'][nan_idx[idx_eye]] = 99	
+	
+	# remove trials from beh and eeg objects
+	to_drop = np.where(beh['eye_bins'] > eye_thresh)[0]	
+	beh.drop(to_drop, inplace = True)
+	beh.reset_index(inplace = True)
+	eeg.drop(to_drop, reason='eye detection')
+
+	return beh, eeg
+
+
+def eog_filt(eog, sfreq, windowsize = 50, windowstep = 25, threshold = 30):
+	'''
+	evaluate nan trials for eye movements
+
+	'''
+
+	windowstep /= 1000 / sfreq
+	windowsize /= 1000 / sfreq
+	s, e = 0, eog.shape[-1] - 1
+
+	eye_trials = []
+	for i, x in enumerate(eog):
+		
+		for j in np.arange(s, e - windowstep, windowstep):
+
+			w1 = np.mean(x[int(j):int(j + windowsize / 2) - 1])
+			w2 = np.mean(x[int(j + windowsize / 2):int(j + windowsize) - 1])
+
+			if abs(w1 - w2) > threshold:
+				eye_trials.append(i)
+				break
+
+	eye_trials = np.array(eye_trials, dtype = int)			
+
+	print 'selected {} bad trials via eyethreshold'.format(eye_trials.size)	
+
+	return eye_trials	
+
 
 def confidence_int(data, p_value = 0.05, morey = True):
 	"""

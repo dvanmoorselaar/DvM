@@ -39,11 +39,13 @@ class CTF(BDM):
 	Scipts based on Matlab scripts published on open science Framework (https://osf.io/bwzjj/) and lab visit to Chicago University (spring quarter 2016).
 	'''
 
-	def __init__(self, channel_folder, decoding, nr_iter, nr_blocks, nr_bins, nr_chans, delta):
+	def __init__(self, beh, eeg, channel_folder, decoding, nr_iter, nr_blocks, nr_bins, nr_chans, delta):
 		''' 
 		Init function needs to be adjusted to match python pipeline input. At the moment only works with preprocessed matlab data (EEG.mat)
 		Arguments
 		- - - - - 
+		beh (DataFrame): behavioral infor across epochs
+		eeg (mne object): eeg object
 		channel_folder (str): folder specifying which electrodes are used for CTF analysis (e.g. posterior channels)
 		decoding (str)| Default ('memory'): String specifying what to decode. Defaults to decoding of spatial memory location, 
 		but can be changed to different locations (e.g. decoding of the location of an intervening stimulus).
@@ -58,6 +60,8 @@ class CTF(BDM):
 		self (object): SpatialEM object
 		'''
 
+		self.beh = beh
+		self.eeg = eeg
 		self.channel_folder = channel_folder
 		self.decoding = decoding
 
@@ -70,13 +74,13 @@ class CTF(BDM):
 		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, delta = delta)		# hypothesized set tuning functions underlying power measured across electrodes
 
 
-	def readData(self, subject_id, conditions, thresh_bin = 1, eye_window = (-0.3, 0.8)):
+	def selectData(self, conditions):
 		'''
-		behaviorCTF reads in position bins and condition info from a csv file. Function assumes that memory location bins are specified in degrees.
+		
+		Selects the data of interest
 		
 		Arguments
 		- - - - - 
-		subject_id (int): subject_id
 		conditions (list): list of condition names that are specified in the pickle file with key condition
 
 		Returns
@@ -84,44 +88,24 @@ class CTF(BDM):
 		pos_bins (array): array of position bins
 		condition (array): array of conditions
 		eegs (array): array with eeg data
-		thresh_bin (int):
-		eye_window
 		'''
 
-		# read in processed behavior from pickle file
-		with open(self.FolderTracker(extension = ['beh','processed'], filename = 'subject-{}_all.pickle'.format(subject_id)),'rb') as handle:
-			beh = pickle.load(handle)
-
-		# read in eeg data 
-		EEG = mne.read_epochs(self.FolderTracker(extension = ['processed'], filename = 'subject-{}_all-epo.fif'.format(subject_id)))
-
 		# select electrodes
-		picks = self.selectChannelId(EEG, self.channel_folder)
-		eegs = EEG._data[:,picks,:]
+		picks = self.selectChannelId(self.eeg, self.channel_folder)
+		eegs = self.eeg._data[:,picks,:]
 
 		# select conditions from pickle file	
 		if conditions == 'all':
 			cnd_mask = np.ones(beh['condition'].size, dtype = bool)
 		else:	
-			cnd_mask = np.array([cnd in conditions for cnd in beh['condition']])
+			cnd_mask = np.array([cnd in conditions for cnd in self.beh['condition']])
 
-		# exclude trials contaminated by unstable eye position
-		nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
-		s,e = [np.argmin(abs(EEG.times - t)) for t in eye_window]
-		heog = EEG._data[:,EEG.ch_names.index('HEOG'),s:e]
+		cnds = self.beh['condition'][cnd_mask].values
+		pos_bins = self.beh[self.decoding][cnd_mask].values
 
-		eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
-		beh['eye_bins'][eye_trials] = 99
+		eegs = eegs[cnd_mask,:,:]
 
-		# use mask to select conditions and position bins (flip array for nans)
-		eye_mask = ~(beh['eye_bins'] > thresh_bin)
-
-		cnds = beh['condition'][cnd_mask * eye_mask] 
-		pos_bins = beh[self.decoding][cnd_mask * eye_mask]
-
-		eegs = eegs[cnd_mask * eye_mask ,:,:]
-
-		return pos_bins, cnds, eegs, EEG
+		return pos_bins, cnds, eegs
 
 
 	def calculateBasisset(self, nr_bins = 8, nr_chans = 8, sin_power = 7, delta = False):
@@ -559,10 +543,10 @@ class CTF(BDM):
 			frqs = np.vstack([[freqs[band][0],freqs[band][1]] for band in freqs.keys()])
 		nr_freqs = frqs.shape[0]
 
-		# read in all data 
-		pos_bins, cnds, eegs, EEG = self.readData(sj, conditions)
-		samples = np.logical_and(EEG.times >= window[0], EEG.times <= window[1])	
-		ctf_info['times'] = EEG.times[samples][::downsample]
+		# read in all data
+		pos_bins, cnds, eegs = self.selectData(conditions)
+		samples = np.logical_and(self.eeg.times >= window[0], self.eeg.times <= window[1])	
+		ctf_info['times'] = self.eeg.times[samples][::downsample]
 		nr_samples = ctf_info['times'].size
 		
 		# Determine the number of trials that can be used for each position bin, matched across conditions
