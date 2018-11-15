@@ -51,7 +51,7 @@ class FolderStructure(object):
 		return folder	
 
 
-	def loadData(self, sj, eye_window, eyefilter, eye_ch = 'HEOG'):
+	def loadData(self, sj, eye_window, eyefilter, eye_ch = 'HEOG', eye_thresh = 1):
 		'''
 		loads EEG and behavior data
 
@@ -61,6 +61,7 @@ class FolderStructure(object):
 		eye_window (tuple|list): timings to scan for eye movements
 		eyefilter (bool): in or exclude eye movements based on step like algorythm
 		eye_ch (str): name of channel to scan for eye movements
+		eye_thresh (int): exclude trials with an saccades exceeding threshold (in visual degrees)
 
 		Returns
 		- - - -
@@ -79,9 +80,7 @@ class FolderStructure(object):
 							filename = 'subject-{}_all-epo.fif'.format(sj)))
 
 		if eyefilter:
-			filter_eye(beh, eeg, eye_window, eye_ch)
-
-
+			filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh)
 
 		return beh, eeg
 

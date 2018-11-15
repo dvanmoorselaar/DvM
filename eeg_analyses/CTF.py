@@ -101,7 +101,7 @@ class CTF(BDM):
 			cnd_mask = np.array([cnd in conditions for cnd in self.beh['condition']])
 
 		cnds = self.beh['condition'][cnd_mask].values
-		pos_bins = self.beh[self.decoding][cnd_mask].values
+		pos_bins = np.squeeze(self.beh[self.decoding][cnd_mask].values)
 
 		eegs = eegs[cnd_mask,:,:]
 
@@ -275,7 +275,7 @@ class CTF(BDM):
 		nr_per_bin(int): maximum number of trials 
 		'''
 
-		if type(of_interest) == list and len(of_interest) > 2:
+		if type(of_interest) == list and len(of_interest) > 1:
 
 			bin_count = np.zeros((len(of_interest),self.nr_bins))
 			for i, cond in enumerate(of_interest):
@@ -287,7 +287,7 @@ class CTF(BDM):
 			_, bin_count = np.unique(pos_bins, return_counts = True)
 
 		else:
-			_, bin_count = np.unique(pos_bins[cnds == of_interest], return_counts = True)			
+			_, bin_count = np.unique(pos_bins[conditions == of_interest[0]], return_counts = True)			
 
 		min_count = np.min(bin_count)
 		if method == 'Foster':
@@ -658,6 +658,7 @@ class CTF(BDM):
 			else:
 				slopes[cnd] = {'T_slopes_p': t_slopes[1:], 'T_slopes': t_slopes[0], 
 							   'E_slopes_p': e_slopes[1:], 'E_slopes': e_slopes[0]}
+
 
 		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
 			print('saving slopes dict')

@@ -74,17 +74,17 @@ class ERP(FolderStructure):
 		nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
 		heog = EEG._data[:,ch_names.index('HEOG'),s:e]
 
-		eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
-		beh['eye_bins'][eye_trials] = 99
+		#eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
+		#beh['eye_bins'][eye_trials] = 99
 	
 		# use mask to select conditions and position bins (flip array for nans)
-		eye_mask = ~(beh['eye_bins'] > thresh_bin)	
-		if self.eye:
-			eegs = eegs[eye_mask,:,:]
+		#eye_mask = ~(beh['eye_bins'] > thresh_bin)	
+		#if self.eye:
+		#	eegs = eegs[eye_mask,:,:]
 
-			for key in beh.keys():
-				if key not in ['clean_idx']:
-					beh[key] = beh[key][eye_mask]
+		#	for key in beh.keys():
+		#		if key not in ['clean_idx']:
+		#			beh[key] = beh[key][eye_mask]
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
@@ -294,6 +294,7 @@ class ERP(FolderStructure):
 				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec,:], self.eeg[idx_c_r,:,:][:,idx_r_elec,:]))
 				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec,:], self.eeg[idx_c_r,:,:][:,idx_l_elec,:]))
 
+			embed()	
 			# baseline correct data	
 			ipsi = self.baselineCorrect(ipsi, self.times, self.baseline)
 			contra = self.baselineCorrect(contra, self.times, self.baseline)

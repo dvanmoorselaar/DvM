@@ -151,7 +151,7 @@ class BDM(FolderStructure):
 		eegs, beh = self.selectBDMData(sj, time = time)	
 
 		# limit trials to factors of interest
-		if factor != None:
+		if factor != None: # NOW ONLY SUPPORTS AND: COME UP WITH FIX
 			mask = [beh[key] == f for  key in factor.keys() for f in factor[key]]
 			for m in mask: # check whether this works with multiple masks
 				mask[0] = m * mask[0]

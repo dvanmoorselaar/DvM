@@ -261,7 +261,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
                     nr_miss -= 1
                     stop = False
                     break
-            
+                 
             # check whether there are missing trials at end of beh file        
             if beh_triggers.size > bdf_triggers.size and stop:
                 # drop the last items from the beh file
@@ -513,7 +513,7 @@ class Epochs(mne.Epochs, FolderStructure):
         data_smooth = sp.signal.convolve2d(
             data, kernel.reshape(1, kernel.shape[0]), 'same')
         data = data_smooth[:, pad:(data_smooth.shape[1] - pad)]
-
+ 
         return data
 
     def detectEye(self, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True, tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500):

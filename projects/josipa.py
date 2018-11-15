@@ -48,8 +48,9 @@ project_param = ['nr_trials','trigger','condition','trialtype', 'subjects',
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['EXG1','EXG2','EXG5','EXG6']
 ref =  ['EXG3','EXG4']
+trigger = [22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37]
 #trigger = [2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18] # for localizer
-trigger = [1002,1003,1004,1005,1006,1007,1008,1009] # for AB (start response interval)
+#trigger = [1002,1003,1004,1005,1006,1007,1008,1009] # for AB (start response interval)
 #t_min = -0.2 # for localizer
 #t_max = 1 # for localizer
 t_min = -0.4   # for AB
@@ -104,13 +105,14 @@ class Josipa(FolderStructure):
 			triggers = events[idx_trigger,2]
 			beh = pd.DataFrame(index = range(triggers.size),columns=['condition', 'nr_trials', 'label'])
 			beh['digit'] = 0
-			beh['digit'][triggers < 10] = triggers[triggers < 10]
+			beh['digit'][triggers < 30] = triggers[triggers < 30]
 			beh['letter'] = 0
-			beh['letter'][triggers > 10] = triggers[triggers > 10]
+			beh['letter'][triggers > 29] = triggers[triggers > 29]
 			beh['condition'] = 'digit'
-			beh['condition'][triggers > 10] = 'letter'
+			beh['condition'][triggers > 29] = 'letter'
 			beh['nr_trials'] = range(triggers.size)
 
+			embed()
 			print 'detected {} epochs'.format(triggers.size)
 			
 		elif task == 'AB':
@@ -241,7 +243,7 @@ class Josipa(FolderStructure):
 		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
 		#beh, missing = self.matchBeh(sj, events, trigger, 
 		#                             headers = project_param)
-		beh, missing = self.matchBehnew(sj, events, trigger, task = 'AB')
+		beh, missing = self.matchBehnew(sj, events, trigger, task = 'localizer')
 
 		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
@@ -375,6 +377,50 @@ class Josipa(FolderStructure):
 
 		pass
 
+	def plotDownscale(self, window):
+		'''
+		Inspect how downscaling affects data
+		'''	
+
+		with open(self.FolderTracker(['bdm','digit'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times']	
+		s, e = [np.argmin((abs(t - times))) for t in window]
+		plt.figure(figsize = (30,20))
+		
+		for idx, header in enumerate(['digit','letter']):
+			ax = plt.subplot(2,1, idx + 1, title = 'Diagonal-{}'.format(header), ylabel = 'dec acc (%)', xlabel = 'Nr obs per label', ylim = (0.12,0.22))
+			bdm = []
+			files = glob.glob(self.FolderTracker(['bdm',header], filename = 'class_*_perm-False-broad.pickle'))
+			for file in files:
+				with open(file ,'rb') as handle:
+					bdm.append(pickle.load(handle))
+
+			# get unique list of keys and create average per unique key
+			keys = np.unique(np.hstack([b[header].keys() for b in bdm]))
+			key_dec = [(b[header][key][s:e].mean(),key) for key in keys for b in bdm if key in b[header].keys()]
+			# create list of average decoding across labels
+			x_list = []
+			for i, key in enumerate(np.sort(keys)):
+				key_list = []
+				for x, label in key_dec:
+					if label == key:
+						key_list.append(x)
+				x_list.append(np.mean(key_list))
+				plt.text(i, 0.21, str(len(key_list)))
+
+			plt.plot(range(len(x_list)), x_list)
+			plt.xticks(range(len(x_list)), [k[:-5] for k in np.sort(keys)])
+			# set number of observations per datapoint
+
+
+			sns.despine(offset=50, trim = False)
+			
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['bdm'], filename = 'localizer-subsample-perlabel.pdf'))
+		plt.close()
+
+		
 	def plotBDM(self):
 		'''
 		Plots GAT matrix and diagonal for digits (top) and letters (bottom)
@@ -429,7 +475,7 @@ class Josipa(FolderStructure):
 			
 			# plot diagonal
 			ax = plt.subplot(1,2, idx + 1, title = 'Diagonal-{}'.format(header), ylabel = 'dec acc (%)', xlabel = 'time (ms)')
-			for label in np.sort(bdm[0][header].keys())[::3]:
+			for label in ['standard']:#np.sort(bdm[0][header].keys())[::3]:
 				X = np.stack([bdm[i][header][label] for i in range(len(bdm))])
 
 				x = X.mean(axis = 0)
@@ -456,22 +502,22 @@ if __name__ == '__main__':
 	# initiate current project
 	PO = Josipa()
 	#PO.plotcrossBDM()
-	PO.plotBDM()
+	#PO.plotBDM()
+	PO.plotDownscale(window = (0.1,0.3))
 
 	# run preprocessing
 	for sj in [1,3]:
 	
-		for session in range(1):
+		for session in range(1,2):
 		   	# PO.updateBeh(sj = sj)
 		   	pass
-		# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		# 			  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		# 			  trigger = trigger, project_param = project_param, 
-		# 			  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
+			# PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+			# 		  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+			# 		  trigger = trigger, project_param = project_param, 
+			# 		  project_folder = project_folder, binary = binary, channel_plots = False, inspect = True)
 
 		# PO.crossTaskBDM(sj, bdm_matrix = False)
-
 		bdm = BDM('digit', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [2,3,4,5,6,7,8,9], factor = dict(condition = ['digit']), time = (-0.2, 1.2), nr_perm = 0, gat_matrix = False, downscale = True)
+		bdm.Classify(sj, cnds = ['digit'], cnd_header = 'condition', bdm_labels = [22,23,24,25,26,27,28,29], factor = dict(condition = ['digit']), time = (-0.2, 1.2), nr_perm = 0, gat_matrix = True, downscale = False)
 		bdm = BDM('letter', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['letter'], cnd_header = 'condition', bdm_labels = [11,12,13,14,15,16,17,18], factor = dict(condition = ['letter']), time = (-0.2, 1.2), nr_perm = 0, gat_matrix = False, downscale = True)
+		bdm.Classify(sj, cnds = ['letter'], cnd_header = 'condition', bdm_labels = [30,31,32,33,34,35,36,37,38], factor = dict(condition = ['letter']), time = (-0.2, 1.2), nr_perm = 0, gat_matrix = True, downscale = False)

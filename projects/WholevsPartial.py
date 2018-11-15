@@ -619,16 +619,16 @@ if __name__ == '__main__':
 		#   project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 		# # CDA analysis
-		# erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
-		# erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = 40) 
-		# erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7','PO3','O1'], 
-		# 								r_elec = ['PO8','PO4','O2'], midline = None, balance = False, erp_name = 'cda')
+		erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
+		erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = False) 
+		erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7'], 
+										r_elec = ['PO8'], midline = None, balance = False, erp_name = 'cda')
 		# erp.topoFlip(left = [1])
 		# erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
 
 		# # BDM analysis
-		bdm = BDM('cue_loc', nr_folds = 10, eye = False)
-		bdm.Classify(sj, cnds = ['partial','whole'], cnd_header = 'block_type', bdm_labels = ['0','1','2'], time = (-0.5, 0.85), nr_perm = 0, gat_matrix = True)
+		#bdm = BDM('cue_loc', nr_folds = 10, eye = False)
+		#bdm.Classify(sj, cnds = ['partial','whole'], cnd_header = 'block_type', bdm_labels = ['0','1','2'], time = (-0.5, 0.85), nr_perm = 0, gat_matrix = True)
 
 		# cue trials (whole vs partial)
 		#bdm = BDM('block_type', nr_folds = 10, eye = False)

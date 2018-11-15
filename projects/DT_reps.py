@@ -28,8 +28,31 @@ from support.support import *
 from stats.nonparametric import *
 
 # subject specific info
-sj_info = {'1': {'tracker': (False, '', ''),  'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
-			}
+sj_info = {'1': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+		  	'2': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+		  	'3': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+		  	'4': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}}, 
+		  	'5': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+		  	'6': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}}, 
+		  	'7': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+		  	'8': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+		  	'9': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}}, 
+		  	'10': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+		  	'11': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+		  	'12': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+		  	'13': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+		  	'14': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'15': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'16': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}}, 
+			'17': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'18': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'19': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'20': {'tracker': (False, '', None, 'Onset placeholder',0), 'replace':{}},
+			'21': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'22': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'23': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			'24': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace':{}},
+			} 
 
 # project specific info
 project = 'DT_reps'
@@ -44,12 +67,12 @@ project_param = ['practice','nr_trials','trigger','condition','RT', 'subject_nr'
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
-trigger = []
+trigger = [3]
 t_min = 0
 t_max = 0
 flt_pad = 0.5
-eeg_runs = [1,2]
-binary =  0
+eeg_runs = [1,2,3] # 3 runs for subject 15 session 2
+binary =  3840
 
 # set general plotting parameters
 sns.set(font_scale=2.5)
@@ -72,6 +95,113 @@ class DT_reps(FolderStructure):
 		PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
 		PP.save_data_file()
 
+	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
+		'''
+		EEG preprocessing as preregistred @ https://osf.io/b2ndy/register/5771ca429ad5a1020de2872e
+		'''
+
+		# set subject specific parameters
+		file = 'subject_{}_session_{}_'.format(sj, session)
+		replace = sj_info[str(sj)]['replace']
+		tracker, ext, t_freq, start_event, shift = sj_info[str(sj)]['tracker']
+
+		# start logging
+		logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    filename= self.FolderTracker(extension=['processed', 'info'], 
+                        filename='preprocess_sj{}_ses{}.log'.format(
+                        sj, session), overwrite = False),
+                    filemode='w')
+
+		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
+		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
+		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
+
+		#EEG.replaceChannel(sj, session, replace)
+		EEG.reReference(ref_channels=ref, vEOG=eog[
+		                :2], hEOG=eog[2:], changevoltage=True, to_remove = ['V_do','H_l','Ref_r','Ref_l','EXG7','EXG8'])
+		EEG.setMontage(montage='biosemi64')
+
+		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+		# EEGica = EEG.filter(h_freq=None, l_freq=1,
+		#                    fir_design='firwin', skip_by_annotation='edge')
+		# EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+		#             skip_by_annotation='edge')
+
+		# MATCH BEHAVIOR FILE
+		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
+		beh, missing, events = self.matchBeh(sj, session, events, trigger, 
+		                             headers = project_param)
+
+		# EPOCH DATA
+		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
+		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
+
+		# ARTIFACT DETECTION
+		epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
+		epochs.artifactDetection(inspect=False, run = False)
+
+		# ICA
+		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+
+		# EYE MOVEMENTS
+		self.binEye(epochs, missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
+
+		# INTERPOLATE BADS
+		epochs.interpolate_bads(reset_bads=True, mode='accurate')
+
+		# LINK BEHAVIOR
+		epochs.linkBeh(beh, events, trigger)
+
+
+	def matchBeh(self, sj, session, events, trigger, headers, max_trigger = 66):
+		'''
+		 '''
+		 # read in data file
+		beh_file = self.FolderTracker(extension=[
+		            'beh', 'raw'], filename='subject-{}_ses_{}.csv'.format(sj, session))
+		 # get triggers logged in beh file
+		beh = pd.read_csv(beh_file)
+		beh = beh[headers]
+		beh = beh[beh['practice'] == 'no']
+		beh = beh.drop(['practice'], axis=1)
+
+		# get triggers bdf file
+		idx_trigger = np.where(events[:,2] == trigger)[0] + 1
+		trigger_bdf = events[idx_trigger,2] 
+		 # log number of unique triggers
+		unique = np.unique(trigger_bdf)
+		logging.info('{} detected unique triggers (min = {}, max = {})'.
+		                format(unique.size, unique.min(), unique.max()))
+		
+		# make sure trigger info between beh and bdf data matches
+		missing_trials = []
+		while beh.shape[0] != trigger_bdf.size:
+			 # remove spoke triggers, update events
+			if missing_trials == []:
+				logging.info('removed {} spoke triggers from bdf'.format(sum(trigger_bdf > max_trigger)))
+				# update events
+				to_remove = idx_trigger[np.where(trigger_bdf > max_trigger)[0]] -1
+				events = np.delete(events, to_remove, axis = 0)
+				trigger_bdf = trigger_bdf[trigger_bdf < max_trigger]
+			trigger_beh = beh['trigger'].values
+			if trigger_beh.size > trigger_bdf.size:
+				for i, trig in enumerate(trigger_bdf):
+					if trig != trigger_beh[i]:
+						beh.drop(beh.index[i], inplace=True)  
+						miss = beh['nr_trials'].iloc[i]
+						missing_trials.append(miss)
+						logging.info('Removed trial {} from beh file,because no matching trigger exists in bdf file'.format(miss))
+						break
+
+		missing = np.array(missing_trials)        
+		# log number of matches between beh and bdf       
+		logging.info('{} matches between beh and epoched data'.
+		    format(sum(beh['trigger'].values == trigger_bdf)))           
+
+		return beh, missing, events
+
 	def updateBEH(self, sj):
 		'''
 		Function updates the preprocessed behavior pickle file. It adds a new column 
@@ -79,8 +209,60 @@ class DT_reps(FolderStructure):
 		repetition should be attributed to lingering effects from the previous trial
 		'''
 
-		# read in the raw csv files
-		embed()
+		# read in the raw csv files and filter practice trials
+		beh_files = glob.glob(PO.FolderTracker(extension=[
+                    'beh', 'raw'], filename='subject-{}_ses_*.csv'.format(sj)))
+
+		raw_beh = pd.concat([pd.read_csv(f) for f in beh_files], ignore_index = True)
+		raw_beh = raw_beh[raw_beh['practice'] == 'no']
+
+		# shift the labels from DvTv_2 to DvTv_3
+		for loc in ['target_loc','dist_loc']:
+			upd = raw_beh[loc][raw_beh['condition'] == 'DvTv_2']
+			raw_beh[loc + '_new'] = np.nan
+			raw_beh[loc + '_new'][raw_beh['condition'] == 'DvTv_3'] = upd.values
+
+		# read in beh file after preprocessing
+		beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
+							filename = 'subject-{}_all.pickle'.format(sj)),'rb'))
+		# checks which trials from raw_beh survived preprocessing
+		sel_tr = beh['clean_idx']
+	
+		# Adjust selected trials and update raw_beh to correct for missing triggers in bdf file
+		if sj in [1,2,3,4,6,7,8,9,10,11,12,13,14,16,18,19,20,21,22,24]:
+			sel_tr[np.where(np.diff(sel_tr) <0)[0] + 1:] += 3672
+		elif sj == 5:
+			sel_tr[np.where(np.diff(sel_tr) <0)[0] + 1:] += 3168
+		elif sj == 15: # subject has missing data in bdf file in session 2 DOES NOT YET WORK
+			raw_beh['nr_trials_upd'] = range(1, 7345)
+			for i in [2277 + 3672]*27:                                        
+				raw_beh.drop(raw_beh.index[[i]], inplace = True)
+			sel_tr[np.where(np.diff(sel_tr) <0)[0] + 1:] += 3672 
+		elif sj == 17: # subject has missing data in bdf file in session 1  DOES NOT YET WORK
+			raw_beh.reset_index(inplace = True)
+			for i in [21,1062,2635,3528]:                                         
+				raw_beh.drop(raw_beh.index[[i]], inplace = True)
+			sel_tr[np.where(np.diff(sel_tr) <0)[0] + 1:] += 3668
+		elif sj == 23:
+			raw_beh['nr_trials_upd'] = range(1, 7345)
+			raw_beh = raw_beh[raw_beh['nr_trials_upd'] != 2214]
+			sel_tr[np.where(np.diff(sel_tr) <0)[0] + 1:] += 3671
+
+		raw_beh.reset_index(inplace = True)
+
+		try:
+			if sum(raw_beh['trigger'].values[sel_tr] == beh['trigger']) == beh['condition'].shape[0]:
+				print 'selection via selected trials will work for sj {}'.format(sj)
+
+				# update the target and dist postion bins for DvTv_3 based on n-1
+				for loc in ['target_loc','dist_loc']:
+					beh['{}-1'.format(loc[:-4])] = raw_beh[loc + '_new'].values[sel_tr]
+
+				# save updated pickle file
+				pickle.dump(beh, open(self.FolderTracker(extension = ['beh','processed'], 
+							filename = 'subject-{}_all.pickle'.format(sj)),'wb'))	
+		except:
+			print('what happened?')		
 
 	def BEHexp1(self):
 		'''
@@ -829,6 +1011,49 @@ class DT_reps(FolderStructure):
 			plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'cross-train_{}.pdf'.format([header])))
 			plt.close()	
 
+	def ctfrepBias(self):
+		'''
+
+		'''		
+
+		with open(self.FolderTracker(['ctf','all_channels_no-eye','target_loc'], filename = 'alpha_info.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times'] - 0.25
+
+		plt.figure(figsize = (30,10))
+		# loop over target and dist repetitions
+		for idx, loc in enumerate(['target_loc','dist_loc']):
+			ax = plt.subplot(1,2, idx + 1, title = loc, xlabel = 'Time (ms)') 
+			clust = []
+			p_values = []
+			for c, cnd in enumerate([loc, loc[:-4] + '-1']):
+				files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',cnd], filename = 'cnds_*_slopes-Foster_alpha.pickle'))
+				ctf = []
+				for file in files:
+					ctf.append(pickle.load(open(file,'rb')))
+				if cnd[-1] == '1':
+					X = np.squeeze(np.stack([ctf[i]['DvTv_3']['T_slopes'] for i in range(len(ctf))]))
+				else:
+					X = np.squeeze(np.stack([ctf[i][['DvTr_3','DrTv_3'][idx]]['T_slopes'] for i in range(len(ctf))]))	
+				clust.append(X)
+				p_values.append(np.mean(X[:,times < -0.25],1))
+
+				err, slopes = bootstrap(X)
+				plt.plot(times, slopes, label = ['repeat','variable'][c], color = ['red','green'][c])
+				plt.fill_between(times, slopes + err, slopes - err, alpha = 0.2, color = ['red','green'][c])		
+
+			print loc, stats.ttest_rel(p_values[0],p_values[1])
+			self.clusterPlot(clust[0], clust[1], 0.05, times, ax.get_ylim()[0] + 0.01, color = 'black')
+			self.beautifyPlot(y = 0, ylabel = 'CTF slope')
+			plt.legend(loc = 'best')	
+
+			sns.despine(offset=50, trim = False)
+					
+		# save figures
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'repBias.pdf'))
+		plt.close()	
+
 	def ctfallFreqs(self):
 		'''
 
@@ -951,6 +1176,53 @@ class DT_reps(FolderStructure):
 			plt.close()	
 
 
+	def plotTF(self):
+		'''
+
+		'''
+
+		# read in data
+		with open(self.FolderTracker(['tf','wavelet','target_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times'] - 0.25
+
+		contra_idx = info['ch_names'].index('PO7')	
+		ipsi_idx = info['ch_names'].index('PO8')
+
+		# read in TF data
+		tfs = {'target_loc':[],'dist_loc':[]}
+		for loc in ['target_loc', 'dist_loc']:
+			files = glob.glob(self.FolderTracker(['tf','wavelet',loc], filename = '*-tf.pickle'))
+			for file in files:
+				with open(file ,'rb') as handle:
+					tfs[loc].append(pickle.load(handle))
+		# plot 
+		norm = MidpointNormalize(midpoint=0)
+		for header in ['dist_loc','target_loc']:
+			plt.figure(figsize = (30,15))
+			if header == 'target_loc':
+				cnds = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
+			elif header == 'dist_loc':
+				cnds = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
+
+			for a, cnd in enumerate(cnds):
+				ax = plt.subplot(2,2, a + 1, title = cnd, xlabel = 'Time (ms)', ylabel = 'Freq') 
+
+				X_c = np.stack([tfs[header][i][cnd]['power'][:,contra_idx,:] for i in range(len(tfs[header]))])
+				X_i = np.stack([tfs[header][i][cnd]['power'][:,ipsi_idx,:] for i in range(len(tfs[header]))])
+				X = (X_c - X_i).mean(axis = 0)/(X_c + X_i).mean(axis = 0)
+
+				plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
+						  origin = 'lower', extent=[times[0], times[-1],0,40], vmin = -0.1, vmax = 0.1)
+				plt.yticks(info['frex'][::4])
+				plt.colorbar()
+
+				sns.despine(offset=50, trim = False)
+					
+			# save figures
+			plt.tight_layout()
+			plt.savefig(self.FolderTracker(['tf','wavelet','MS-plots'], filename = 'tf_{}no-base.pdf'.format([header])))
+			plt.close()					
 
 
 if __name__ == '__main__':
@@ -965,11 +1237,19 @@ if __name__ == '__main__':
 	PO = DT_reps()
 
 	#preprocessing and main analysis
-	for sj in range(1,25):
+	for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]: 
+
+
+		# RUN PREPROCESSING
+		# for session in range(1,3):
+		# 	PO.prepareEEG(sj = sj, session = 2, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		#   				t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		#   				trigger = trigger, project_param = project_param, 
+		#  				project_folder = project_folder, binary = binary, channel_plots = False, inspect = False)
 
 		# READ IN PREPROCESSED DATA FOR FURTHER ANALYSIS
-		beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG')
-		PO.updateBEH(sj)
+		#PO.updateBEH(sj)
+		#beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1)
 
 		for header in ['target_loc', 'dist_loc']:
 
@@ -1007,9 +1287,14 @@ if __name__ == '__main__':
 			#  			 freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 500, name = 'DvTr-perm_500')
 
 			# control analysis to check for repetition effects
-			ctf = CTF(beh, eeg, 'all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
-			ctf.spatialCTF(sj, [-0.3, 0.8], ['DvTv_3'], method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0, plot = False)
+			#ctf = CTF(beh, eeg, 'all_channels_no-eye', '{}-1'.format(header[:-4]), nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+			#ctf.spatialCTF(sj, [-0.3, 0.8], ['DvTv_3'], method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0, plot = False)
 
+			# TF analysis
+			#tf = TF(beh, eeg)
+			#tf.TFanalysis(sj = sj, cnds = cnds, 	
+			#		  	cnd_header ='condition', base_period = (-0.5,-0.3), 
+			#			time_period = (-0.3,0.8), method = 'wavelet', flip = {header: [1,2]}, factor = {header: [1,2,4,5]}, downsample = 4)
 
 
 	# analysis manuscript
@@ -1039,8 +1324,12 @@ if __name__ == '__main__':
 	#		PO.bdmSelection(header, 'Pd', (0.28,0.35))
 
 	# CTF
-	PO.ctfSlopes()
+	#PO.ctfSlopes()
 	#PO.ctfCrossTrainold()
 	#PO.ctfallFreqs()
+	#PO.ctfrepBias()
+
+	# TF.
+	PO.plotTF()
 
 

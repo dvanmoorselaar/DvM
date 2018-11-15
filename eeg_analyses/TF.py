@@ -23,7 +23,7 @@ from IPython import embed
 
 class TF(FolderStructure):
 
-	def __init__(self):
+	def __init__(self, beh, eeg):
 		''' 
 
 		Arguments
@@ -35,7 +35,8 @@ class TF(FolderStructure):
 
 		'''
 
-		pass
+		self.beh = beh
+		self.eeg = eeg
 
 	def selectTFData(self, sj):
 		''' 
@@ -230,7 +231,7 @@ class TF(FolderStructure):
 		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)		
 
-	def TFanalysis(self, sj, cnds, cnd_header, base_period, time_period, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
+	def TFanalysis(self, sj, cnds, cnd_header, base_period, time_period, factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
 		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decomposition
 
@@ -244,6 +245,7 @@ class TF(FolderStructure):
 		cnd_header (str): key in behavior file that contains condition info
 		base_period (tuple | list): time window used for baseline correction
 		time_period (tuple | list): time window of interest
+		factor (dict): limit analysis to a subset of trials. Key(s) specifies column header
 		method (str): specifies whether hilbert or wavelet convolution is used for time-frequency decomposition
 		flip (dict): flips a subset of trials. Key of dictionary specifies header in beh that contains flip info 
 		List in dict contains variables that need to be flipped. Note: flipping is done from right to left hemifield
@@ -266,13 +268,16 @@ class TF(FolderStructure):
 	
 		'''
 
-		# read in data
-		eegs, beh, times, s_freq, ch_names = self.selectTFData(sj)
+		# set parameters
+		picks = mne.pick_types(self.eeg.info, eeg=True, exclude='bads')
+		times = self.eeg.times
+		eegs = self.eeg._data[:,picks,:]
+		beh = self.beh
 
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = flip.keys()[0]
-			eegs = self.topoFlip(eegs, beh[key], ch_names, left = [flip.get(key)])
+			eegs = self.topoFlip(eegs, beh[key], self.eeg.ch_names, left = flip.get(key))
 
 		# get parameters
 		nr_time = eegs.shape[-1]
@@ -280,7 +285,7 @@ class TF(FolderStructure):
 		if method == 'wavelet':
 			wavelets, frex = self.createMorlet(min_freq = min_freq, max_freq = max_freq, num_frex = num_frex, 
 									cycle_range = cycle_range, freq_scaling = freq_scaling, 
-									nr_time = nr_time, s_freq = s_freq)
+									nr_time = nr_time, s_freq = self.eeg.info['sfreq'])
 		
 		elif method == 'hilbert':
 			frex = [(i,i + 4) for i in range(min_freq, max_freq, 2)]
@@ -299,7 +304,14 @@ class TF(FolderStructure):
 			tf.update({cnd: {}})
 			base.update({cnd: np.zeros((num_frex, nr_chan))})
 
-			cnd_idx = np.where(beh['block_type'] == cnd)[0]
+			cnd_idx = np.where(beh[cnd_header] == cnd)[0]
+			if factor != None: # NOW ONLY SUPPORTS OR: COME UP WITH FIX
+				mask = [beh[key] == f for  key in factor.keys() for f in factor[key]]
+				for m in mask: # check whether this works with multiple masks
+					mask[0] = m + mask[0].values
+				mask_idx = np.where(mask[0])[0]
+				cnd_idx = np.array([cn for cn in cnd_idx if cn in mask_idx])
+
 			l_conv = 2**self.nextpow2(nr_time * cnd_idx.size + nr_time - 1)
 			raw_conv = np.zeros((cnd_idx.size, num_frex, nr_chan, idx_2_save.size), dtype = complex) 
 			
@@ -343,13 +355,13 @@ class TF(FolderStructure):
 				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
 
 		# save TF matrices
-		with open(self.FolderTracker(['tf',method],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
+		with open(self.FolderTracker(['tf',method, factor.keys()[0]],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
 			pickle.dump(tf, handle)		
 
 		# store dictionary with variables for plotting
-		plot_dict = {'ch_names': ch_names, 'times':times[idx_2_save], 'frex': frex}
+		plot_dict = {'ch_names':self.eeg.ch_names, 'times':times[idx_2_save], 'frex': frex}
 
-		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
+		with open(self.FolderTracker(['tf', method, factor.keys()[0]], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)		
 	
 	def createMorlet(self, min_freq, max_freq, num_frex, cycle_range, freq_scaling, nr_time, s_freq):
