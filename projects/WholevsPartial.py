@@ -388,6 +388,8 @@ class WholevsPartial(FolderStructure):
 		with open(self.FolderTracker(['erp','cue_loc'], filename = 'cda.pickle') ,'rb') as handle:
 			erp = pickle.load(handle)
 
+		embed()
+
 		with open(self.FolderTracker(['erp','cue_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
 
@@ -605,6 +607,7 @@ if __name__ == '__main__':
 	PO =  WholevsPartial()
 
 	# behavior analysis
+	#PO.prepareBEH(project, 'beh', ['condition','cue'], [['whole','partial'],['cue','no']], project_param)
 	#PO.prepareBEH(project, 'beh-exp1', ['condition','cue','set_size'], [['whole','partial'],['cue','no'],[3,5]], project_param + ['set_size'])
 
 	# eye analysis
@@ -619,10 +622,10 @@ if __name__ == '__main__':
 		#   project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 		# # CDA analysis
-		erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
-		erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = False) 
-		erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7'], 
-										r_elec = ['PO8'], midline = None, balance = False, erp_name = 'cda')
+		#erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
+		#erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = False) 
+		#erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7'], 
+		#								r_elec = ['PO8'], midline = None, balance = False, erp_name = 'cda')
 		# erp.topoFlip(left = [1])
 		# erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
 
@@ -645,8 +648,8 @@ if __name__ == '__main__':
 		# 		  time_period = (0,0.85), method = 'wavelet', flip = dict(cue_loc = '1'), downsample = 4)
 
 	
-	PO.behExp1() 
-	#PO.plotCDA()
+	#PO.behExp1() 
+	PO.plotCDA()
 	#PO.bdmBlock()
 	#PO.bdmCue()
 	#PO.plotTF()

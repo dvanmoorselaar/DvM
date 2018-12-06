@@ -45,7 +45,8 @@ class FolderStructure(object):
 		if filename != '':	
 			if not overwrite:
 				while os.path.isfile(os.path.join(folder,filename)):
-					filename = filename[:-4] + '*' + filename[-4:]
+					end_idx = len(filename) - filename.index('.')
+					filename = filename[:-end_idx] + '*' + filename[-end_idx:]
 			folder = os.path.join(folder,filename)
 			
 		return folder	
@@ -80,7 +81,7 @@ class FolderStructure(object):
 							filename = 'subject-{}_all-epo.fif'.format(sj)))
 
 		if eyefilter:
-			filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh)
+			beh, eeg = filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh)
 
 		return beh, eeg
 

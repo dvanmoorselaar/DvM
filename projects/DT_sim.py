@@ -498,15 +498,23 @@ if __name__ == '__main__':
 
 
 	# run preprocessing
-	for sj in [24]:
+	for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]:
 		pass
 
-		PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		  trigger = trigger, project_param = project_param, 
-		  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+		#PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		#  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		#  trigger = trigger, project_param = project_param, 
+		#  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 
+
+		beh, eeg = PO.loadData(sj, (-0.8,0.5),False, 'HEOG', 1)
+
+		# TF analysis
+		tf = TF(beh, eeg)
+		tf.TFanalysis(sj = sj, cnds = ['DTsim-yes','DTdisP-yes','DTdisDP-yes','DTsim-no','DTdisP-no','DTdisDP-no'], 	
+				  	cnd_header ='condition', base_period = (-0.8,-0.6), 
+					time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), factor = {'dist_loc': ['1','2','4','5']}, downsample = 4)
 
 	#  	#TF analysis
 	# 	tf = TF()

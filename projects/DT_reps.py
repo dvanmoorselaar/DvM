@@ -62,7 +62,7 @@ labels = [['DrTv','DvTr','DvTv'],[1,2,3,4]]
 to_filter = ['RT'] 
 project_param = ['practice','nr_trials','trigger','condition','RT', 'subject_nr',
 				'block_type', 'correct','dist_loc','dist_orient','target_loc',
-				'target_orient','repetition','fixed_pos']
+				'target_orient','repetition','fixed_pos', 'set_size']
 
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
@@ -328,6 +328,524 @@ class DT_reps(FolderStructure):
 		# save parameters for JASP 		
 		np.savetxt(self.FolderTracker(['beh-exp1','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
 		np.savetxt(self.FolderTracker(['beh-exp1','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
+
+	def BEHexp2(self):
+		'''
+		analyzes experiment 2 as reported in the MS
+		'''
+
+		# read in data
+		file = self.FolderTracker(['beh-exp2','analysis'], filename = 'preprocessed.csv')
+		data = pd.read_csv(file)
+
+		# create pivot (main analysis)
+		data = data.query("RT_filter == True")
+		pivot = data.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','set_size','repetition'], aggfunc = 'mean')
+		pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+
+		# plot conditions
+		plt.figure(figsize = (20,10))
+
+		ax = plt.subplot(1,2, 1, title = 'Repetition effect', ylabel = 'RT (ms)', xlabel = 'repetition', ylim = (300,650), xlim = (0,11))
+		for b, bl in enumerate(['DrTv','DvTv','Tv']):
+			for s, set_size in enumerate([4,8]):
+				pivot[bl][set_size].mean().plot(yerr = pivot_error[bl][set_size], 
+											label = '{}-{}'.format(bl,set_size), 
+											ls = ['-','--'][s], color = ['red','blue','yellow'][b])
+		
+		plt.xticks([0,1,2,3,4,5,6,7,8,9,10,11])	
+		plt.legend(loc='best', shadow = True)
+		sns.despine(offset=10, trim = False)
+
+		# create pivot (normalized data)
+		norm = pivot.values
+		for i,j in [(0,12),(12,24),(24,36),(36,48),(48,60),(60,72)]:
+			norm[:,i:j] /= np.matrix(norm[:,i]).T
+
+		pivot = pd.DataFrame(norm, index = np.unique(data['subject_nr']), columns = pivot.keys())
+		pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+
+		# fit data to exponential decay function (and plot normalized data)
+		ax = plt.subplot(1,2, 2, title = 'Normalized RT', ylabel = 'au', xlabel = 'repetition', ylim = (0.5,1), xlim = (0,11))
+		alpha, delta = np.zeros((pivot.shape[0],6)),  np.zeros((pivot.shape[0],6))
+		c_idx = 0
+		headers = []
+		for b, bl in enumerate(['DrTv','DvTv','Tv']):
+			for s, set_size in enumerate([4,8]):
+				headers.append('{}_{}'.format(bl,set_size))
+				X = pivot[bl][set_size].values
+				pivot[bl][set_size].mean().plot(yerr = pivot_error[bl][set_size], 
+												label = '{0}-{1}'.format(bl,set_size),
+												ls = ['-','--'][s], color = ['red','blue','yellow'][b])
+				for i, x in enumerate(X):
+					popt, pcov = curvefitting(range(12),x,bounds=(0, [1,1])) 
+					alpha[i, c_idx] = popt[0]
+					delta[i, c_idx] = popt[1]
+				c_idx += 1
+
+		plt.xticks([0,1,2,3,4,5,6,7,8,9,10,11])	
+		plt.legend(loc='best', shadow = True)
+		sns.despine(offset=10, trim = False)
+
+		plt.savefig(self.FolderTracker(['beh-exp2','figs'], filename = 'main-ana.pdf'))		
+		plt.close()	
+
+		# save parameters for JASP 		
+		np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
+		np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
+
+
+	def ctfTemp(self):
+		'''
+		Plot as shown in MS.
+			- CTF across a range of frequencies collapsed across conditions (top left)
+			- Evoked slopes within the alpha band (top right)
+			- Total slopes within the alpha band (bottom)
+			- statistics contrast each repetition against it's baseline in the variable condition (e.g. repeat 0 vs variable 0)
+		'''
+
+		# create new figure and set plotting parameters
+		
+		#colors = ['blue', color] 
+
+		
+		# read in plotting info (and shift times such that stimulus onset is at 0ms)
+		with open(self.FolderTracker(['ctf','all_channels_no-eye','target_loc'], filename = 'all_info.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times'] - 0.25
+
+		# read in Total and Evoked slopes within alpha band
+		alpha = []
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye','target_loc'], filename = 'cnds_*_slopes-Foster_alpha1.pickle'))
+		for file in files:
+			alpha.append(pickle.load(open(file, 'rb')))
+		colors = ['grey','black','red','green']
+		for i, file in enumerate(files):
+			plt.figure(figsize = (20,20))
+			sj = file.split('_')[5]
+			for c, cnd in enumerate(['DvTv_3','DvTr_3']):
+				slope = np.squeeze(alpha[i][cnd]['T_slopes'])
+				plt.plot(times, slope, label = cnd, color = colors[c])
+			plt.legend(loc = 'best')
+			plt.tight_layout()
+			plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'test-{}.pdf'.format(sj), overwrite = False))
+			plt.close()		
+
+
+	def ctfPlot(self, repetition, color = ['red'], window = (-0.55,0)):
+		'''
+		Plot as shown in MS.
+			- CTF across a range of frequencies collapsed across conditions (top left)
+			- Evoked slopes within the alpha band (top right)
+			- Total slopes within the alpha band (bottom)
+			- statistics contrast each repetition against it's baseline in the variable condition (e.g. repeat 0 vs variable 0)
+		'''
+
+		# create new figure and set plotting parameters
+		plt.figure(figsize = (30,20))
+		colors = ['blue', color] 
+		if repetition == 'target_loc':
+			ylim = [[-0.05,0.16],[-0.05,0.1]]
+			yrange = [0.005, 0.004]
+			rep_cnds = ['DvTr_0','DvTr_3']
+		elif repetition == 'dist_loc':
+			ylim = [[-0.05,0.16],[-0.2,0.1]]
+			yrange = [0.005, 0.005]
+			rep_cnds = ['DrTv_0','DrTv_3']	
+		
+		# read in plotting info (and shift times such that stimulus onset is at 0ms)
+		with open(self.FolderTracker(['ctf','all_channels_no-eye','target_loc'], filename = 'all_info.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times'] - 0.25
+
+		# read in Total slopes collapsed across conditions
+		freqs = []
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition], filename = 'all_*_slopes-Foster_all.pickle'))
+		for file in files:
+			freqs.append(pickle.load(open(file, 'rb')))
+
+		# read in Total and Evoked slopes within alpha band
+		alpha = []
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition], filename = 'cnds_*_slopes-Foster_theta.pickle'))
+		for file in files:
+			alpha.append(pickle.load(open(file, 'rb')))
+		#self.ctfANOVAinput(times, window, alpha, ['DvTv_0','DvTv_3'] + rep_cnds, repetition )
+
+		# read in repetition effect within alpha band
+		reps = []
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition[:-4] +'-1'], filename = 'cnds_*_slopes-Foster_alpha.pickle'))
+		for file in files:
+			reps.append(pickle.load(open(file, 'rb')))
+
+		# plot total across frequencies
+		ax = plt.subplot(221, xlabel = 'Time (ms)', ylabel = 'freqs')  
+		slopes = np.stack([ctf['all']['T_slopes'] for ctf in freqs])
+		X = slopes.mean(axis = 0)
+		p_vals = signedRankArray(slopes, 0)
+		slopes[:,p_vals > 0.01] = 0
+		p_vals = clusterBasedPermutation(slopes,0)
+		X[p_vals > 0.01] = 0
+		plt.imshow(X, cmap = cm.viridis, interpolation='none', aspect='auto', 
+						  origin = 'lower', extent=[times[0],times[-1],4,34])
+		plt.colorbar()
+
+		# plot evoked and total effects
+		plt_idx = [422,424,223,224]
+		plt_cntr = 0
+		for p, power in enumerate(['E_slopes','T_slopes']):
+			perm = {}
+			for i, cnds in enumerate((['DvTv_0','DvTv_3'],rep_cnds)):
+				ax = plt.subplot(plt_idx[plt_cntr], xlabel = 'Time (ms)', ylim = ylim[p]) 
+				plt.yticks([ylim[p][0],0,ylim[p][1]])
+				for c, cnd in enumerate(cnds):
+					slopes = np.squeeze(np.stack([ctf[cnd][power] for ctf in alpha]))
+					perm.update({cnd: slopes})
+					err, X = bootstrap(slopes)
+					plt.plot(times, X, label = cnd, color = colors[i], ls = ['--','-'][c])
+					plt.fill_between(times, X + err, X - err, alpha = 0.2, color = colors[i])	
+					self.clusterPlot(perm[cnd], 0, 0.05, times, ylim[p][0] + yrange[p] * (c + 1), color = colors[i], ls = ['--','-'][c])
+				
+				if c == 1:
+					# contrast first and final repetition across conditions
+					self.beautifyPlot(y = 0, ylabel = 'CTF slope')
+					#self.clusterPlot(perm[cnds[0]], perm[cnds[1]], 0.05, times,ylim[p][0] + yrange[p] * (c + 2), color = 'black')
+					if i == 1:
+						rep_slopes = np.mean(np.squeeze(np.stack([r['DvTv_3'][power] for r in reps])), axis = 0)
+						plt.plot(times, rep_slopes, label = 'N-1', color = 'black', ls = '--')
+						self.clusterPlot(perm['DvTv_0'], perm[rep_cnds[0]], 0.05, times,ylim[p][0] + yrange[p] * (c + 2), color = 'black', ls = '--')
+						self.clusterPlot(perm['DvTv_3'], perm[rep_cnds[1]], 0.05, times,ylim[p][0] + yrange[p] * (c + 3), color = 'black', ls = '-')
+						self.clusterPlot(perm[rep_cnds[0]] - perm['DvTv_0'], perm[rep_cnds[1]] - perm['DvTv_3'],0.05, times, ylim[p][0] + yrange[p] * (c + 4), color = 'grey')
+					plt.legend(loc = 'topleft')	
+					sns.despine(offset=50, trim = False)
+				plt_cntr += 1
+						
+		# save figures
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'main-{}-theta.pdf'.format(repetition)))
+		plt.close()	
+
+	def ctfANOVAinput(self, times, window, slopes, factors, repetition ):
+		'''
+		gets the average in a predefined window which can be used as input for a repeated measures ANOVA
+		'''	
+
+		# get indices time window
+		s, e = [np.argmin(abs(t - times)) for t in window]
+		x = []
+		for factor in factors:
+			slope = np.squeeze(np.stack([ctf[factor]['T_slopes'] for ctf in slopes]))[:,s:e].mean(axis = 1)
+			x.append(slope)
+
+		X = np.vstack(x).T	
+		# save as .csv file
+		np.savetxt(self.FolderTracker(['ctf','all_channels_no-eye','anova'], filename = '{}.csv'.format(repetition)), X, delimiter = "," ,header = ",".join(factors), comments='')
+
+	def ctfCrossPlot(self, repetition ):
+		'''
+
+		'''	
+
+		plt.figure(figsize = (30,20))
+		norm = MidpointNormalize(midpoint=0)
+		#colors = ['blue', color] 
+		
+		# read in plotting info (and shift times such that stimulus onset is at 0ms)
+		with open(self.FolderTracker(['ctf','all_channels_no-eye','target_loc'], filename = 'all_info.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times'] - 0.25
+
+		# read in Cross Training repetition 0
+		rep_0 = []
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition], filename = '*_cross-training_baseline-0.pickle'))
+		for file in files:
+			rep_0.append(pickle.load(open(file, 'rb')))
+
+		rep_3 = []
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition], filename = '*_cross-training_baseline-3.pickle'))
+		for file in files:
+			rep_3.append(pickle.load(open(file, 'rb')))
+
+		plt_idx = 1
+		for r, rep in enumerate([rep_0, rep_3]):
+			for c, cnd in enumerate(['DvTr_', 'DrTv_']):
+				ax = plt.subplot(2,2,plt_idx, xlabel = 'Train ?? Time (ms)', ylabel = 'Test ?? Time (ms)', title = cnd + ['0','3'][r])
+				ctf = np.squeeze(np.stack([x[cnd + ['0','3'][r]]['slopes'] for x in rep]))  
+				X = threshArray(ctf, 0, method = 'ttest', p_value = 0.05)
+				plt.imshow(X, norm = norm, cmap = cm.bwr, interpolation='none', aspect='auto', 
+					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = -0.1, vmax = 0.1)
+				plt.colorbar()
+				plt_idx += 1
+
+		# save figures
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'cross-{}.pdf'.format(repetition)))
+		plt.close()	
+
+
+	def erpPlot(self, repetition, color = ['red']):
+		'''
+		Plot as shown in MS.
+			- IPSI (left) and CONTRA (right) plots (top 4 plots)
+			- Contra - Ipsi (bottom 2 plots)
+			- statistics contrast each repetition against it's baseline in the variable condition (e.g. repeat 0 vs variable 0)
+		'''
+
+		# create new figure and set plotting parameters
+		plt.figure(figsize = (30,20))
+		colors = ['blue', color] 
+		if repetition == 'target_loc':
+			ylim = [-8,6]
+			rep_cnds = ['DvTr_0','DvTr_3']
+			yrange = 0.5
+		elif repetition == 'dist_loc':
+			ylim = [-8,6]
+			yrange = 0.5
+			rep_cnds = ['DrTv_0','DrTv_3']	
+		
+		# read in Total slopes collapsed across conditions
+		file = self.FolderTracker(['erp',repetition], filename = 'lat-down1-mid.pickle')
+		erps = pickle.load(open(file, 'rb'))
+
+		with open(self.FolderTracker(['erp','target_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times'] - 0.25
+		elec_idx = [erps['1']['all']['elec'][0].index(e) for e in ['PO7','PO3','O1']]
+		self.erpANOVAinput(times, (0.17,0.23), erps, repetition, 'N2pc', elec_idx)
+		self.erpANOVAinput(times, (0.27,0.34), erps, repetition, 'Pd', elec_idx)
+
+		# plot ipsi and contralateral seperately
+		plt_idx = 1
+		erp_dict = {'ipsi':{},'contra':{}}
+		for l, lat in enumerate(['ipsi','contra']):
+			for i, cnds in enumerate((['DvTv_0','DvTv_3'],rep_cnds)):
+				ax = plt.subplot(4,2,plt_idx, xlabel = 'Time (ms)',ylim = ylim, title = lat) 
+				plt.yticks([ylim[0],0,ylim[1]])
+				for c, cnd in enumerate(cnds):
+					erp = np.squeeze(np.stack([erps[key][cnd][lat][elec_idx,:] for key in erps])).mean(axis = 1)
+					erp_dict[lat].update({cnd:erp})
+					err, X = bootstrap(erp)
+					plt.plot(times, X, label = cnd, color = colors[i], ls = ['--','-'][c])
+					#plt.fill_between(times, X + err, X - err, alpha = 0.2, color = colors[c])	
+				
+				if i == 1:
+					self.clusterPlot(erp_dict[lat]['DvTv_0'], erp_dict[lat][rep_cnds[0]], 0.05, times,ylim[0] + yrange * (1), color = 'black', ls = '--')
+					self.clusterPlot(erp_dict[lat]['DvTv_3'], erp_dict[lat][rep_cnds[1]], 0.05, times,ylim[0] + yrange * (2), color = 'black', ls = '-')
+
+				self.beautifyPlot(y = 0, ylabel = 'micro Volt')
+				sns.despine(offset=50, trim = False)
+				plt.legend(loc = 'topleft')	
+					
+				plt_idx += 1
+		
+		# plof difference waveforms
+		for i, cnds in enumerate((['DvTv_0','DvTv_3'],rep_cnds)):
+			ax = plt.subplot(2,2,i + 3, xlabel = 'Time (ms)', ylim = (-4,2)) 
+			plt.yticks([-4,0,2])
+			for c, cnd in enumerate(cnds):
+				erp = erp_dict['contra'][cnd] - erp_dict['ipsi'][cnd]
+				err, X = bootstrap(erp)
+				plt.plot(times, X, label = cnd, color = colors[i], ls = ['--','-'][c])
+
+			if i == 1:
+				# repetition effect	
+				self.clusterPlot(erp_dict['contra']['DvTv_0'] - erp_dict['ipsi']['DvTv_0'], 
+								erp_dict['contra'][rep_cnds[0]] - erp_dict['ipsi'][rep_cnds[0]], 0.05, times,-4 + 0.15, color = 'black', ls = '--')
+				self.clusterPlot(erp_dict['contra']['DvTv_3'] - erp_dict['ipsi']['DvTv_3'], 
+								erp_dict['contra'][rep_cnds[1]] - erp_dict['ipsi'][rep_cnds[1]], 0.05, times,-4 + 0.3, color = 'black', ls = '-')
+				# baseline correction
+				self.clusterPlot((erp_dict['contra']['DvTv_0'] - erp_dict['ipsi']['DvTv_0']) - (erp_dict['contra'][rep_cnds[0]] - erp_dict['ipsi'][rep_cnds[0]]), 
+								(erp_dict['contra']['DvTv_3'] - erp_dict['ipsi']['DvTv_3']) - (erp_dict['contra'][rep_cnds[1]] - erp_dict['ipsi'][rep_cnds[1]]),
+								 0.05, times,-4 + 0.45, color = 'grey')
+				
+			self.beautifyPlot(y = 0, ylabel = 'micro Volt')
+			sns.despine(offset=50, trim = False)
+			plt.legend(loc = 'topleft')	
+
+		# save figures
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['erp','MS-plots'], filename = 'main-{}.pdf'.format(repetition)))
+		plt.close()	
+
+	def erpANOVAinput(self, times, window, erps, repetition, component, elec_idx):
+		'''
+		gets the average in a predefined window which can be used as input for a repeated measures ANOVA
+		'''	
+
+		# get indices time window
+		s, e = [np.argmin(abs(t - times)) for t in window]
+		if repetition == 'target_loc':
+			factors = ['DvTv_0','DvTv_3'] + ['DvTr_0','DvTr_3']
+		elif repetition == 'dist_loc':
+			factors = ['DvTv_0','DvTv_3'] + ['DrTv_0','DrTv_3']
+		x = []
+		headers = []
+		for lat in ['contra', 'ipsi']:
+			for factor in factors:
+				erp = np.stack([erps[key][factor][lat][elec_idx,:] for key in erps]).mean(axis = 1)[:,s:e].mean(axis = 1)
+				x.append(erp)
+				headers.append(lat + '-' + factor)
+
+		# add difference between contra and ipsi
+		for i in range(4):
+			x.append(x[i] - x[i+4] )
+			headers.append(factors[i])
+
+		X = np.vstack(x).T	
+		# save as .csv file
+		np.savetxt(self.FolderTracker(['erp','anova'], filename = '{}-{}.csv'.format(component,repetition)), X, delimiter = "," ,header = ",".join(headers), comments='')	
+
+		# apply jackknife procedure
+		rep0 = np.stack([erps[key]['DvTr_0']['contra'][elec_idx,:] for key in erps]).mean(axis = 1) - np.stack([erps[key]['DvTr_0']['ipsi'][elec_idx,:] for key in erps]).mean(axis = 1)
+		rep3 = np.stack([erps[key]['DvTr_3']['contra'][elec_idx,:] for key in erps]).mean(axis = 1) - np.stack([erps[key]['DvTr_3']['ipsi'][elec_idx,:] for key in erps]).mean(axis = 1)
+		onset, t_value = jackknife(rep0,rep3, times, [0.17,0.23], percent_amp = 45, timing = 'offset')	
+		print 'onset ' + repetition, onset *1000, t_value
+
+
+	def bdmPlot(self, repetition, color = ['red'], window = (-0.55,0)):
+		'''
+		Plot as shown in MS.
+			- CTF across a range of frequencies collapsed across conditions (top left)
+			- Evoked slopes within the alpha band (top right)
+			- Total slopes within the alpha band (bottom)
+			- statistics contrast each repetition against it's baseline in the variable condition (e.g. repeat 0 vs variable 0)
+		'''
+
+		# create new figure and set plotting parameters
+		plt.figure(figsize = (30,20))
+		norm = MidpointNormalize(midpoint=1/6.0)
+		colors = ['blue', color] 
+		if repetition == 'target_loc':
+			ylim = [0.14,0.28]
+			yrange = 0.003
+			rep_cnds = ['DvTr_0','DvTr_3']
+		elif repetition == 'dist_loc':
+			ylim = [0.14,0.28]
+			yrange = 0.003
+			rep_cnds = ['DrTv_0','DrTv_3']	
+
+		# read in plotting info (and shift times such that stimulus onset is at 0ms)
+		with open(self.FolderTracker(['bdm',repetition], filename = 'plot_dict.pickle') ,'rb') as handle:
+			info = pickle.load(handle)
+		times = info['times'] - 0.25
+	
+		# read in broadband EEG across all electrodes
+		bdm = []
+		files = glob.glob(self.FolderTracker(['bdm',repetition], filename = 'class_*_perm-False.pickle'))
+		for file in files:
+			bdm.append(pickle.load(open(file, 'rb')))
+
+		self.bdmANOVAinput(times, (0.17,0.23), bdm, repetition, 'N2pc')
+		self.bdmANOVAinput(times, (0.27,0.34), bdm, repetition, 'Pd')
+		
+		# plot diagonal decoding
+		perm = {}
+		for i, cnds in enumerate((['DvTv_0','DvTv_3'],rep_cnds)):
+			ax = plt.subplot(2,2,i + 1, xlabel = 'Time (ms)', ylim = ylim)
+			plt.yticks([ylim[0],1/6.0,ylim[1]])
+			for c, cnd in enumerate(cnds):
+				dec =  np.stack([np.diag(b[cnd]['standard']) for b in bdm])
+				perm.update({cnd: dec})
+				err, X = bootstrap(dec)
+				plt.plot(times, X, label = cnd, color = colors[i], ls = ['--','-'][c])
+				plt.fill_between(times, X + err, X - err, alpha = 0.2, color = colors[i])	
+				self.clusterPlot(perm[cnd], 1/6.0, 0.05, times, ylim[0] + yrange * (c + 1), color = colors[i], ls = ['--','-'][c])
+			
+			if i == 1:
+				self.clusterPlot(perm['DvTv_0'], perm[rep_cnds[0]], 0.05, times,ylim[0] + yrange * (c + 2), color = 'black', ls = '--')
+				self.clusterPlot(perm['DvTv_3'], perm[rep_cnds[1]], 0.05, times,ylim[0] + yrange * (c + 3), color = 'black', ls = '-')
+				self.clusterPlot(perm[rep_cnds[0]] - perm['DvTv_0'], perm[rep_cnds[1]] - perm['DvTv_3'],0.05, times, ylim[0] + yrange * (c + 4), color = 'grey')
+			self.beautifyPlot(y = 1/6.0, ylabel = 'decoding acc')
+			plt.legend(loc = 'topleft')	
+			sns.despine(offset=50, trim = False)
+
+		# # plot GAT matrices
+		plt_idx = [9,10,13,14]
+		for c, cnd in enumerate((['DvTv_0','DvTv_3'] + rep_cnds)):
+			ax = plt.subplot(4,4,plt_idx[c], xlabel = 'Train ?? time (ms)',  ylabel = 'Test ?? time (ms)', title = cnd) 
+			dec = np.stack([b[cnd]['standard'] for b in bdm])
+			X = threshArray(dec, 1/6.0, method = 'ttest', p_value = 0.05)
+			plt.imshow(X, norm = norm, cmap = cm.bwr, interpolation='none', aspect='auto', 
+					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = 0.14, vmax = 0.28)
+			#if c in [1,3]:
+			#	plt.colorbar() 
+
+			sns.despine(offset=50, trim = False)
+
+		# read in broadband EEG across posterior electrodes
+		if repetition == 'target_loc':
+			dec_info = [('post','alpha'),('post','theta')]
+		elif repetition == 'dist_loc':
+			dec_info = [('post','alpha'),('post','theta')]
+
+		for idx, (elec, band) in enumerate(dec_info):
+			# if repetition == 'dist_loc':
+			# 	ax = plt.subplot(6,2,8 + idx*2, xlabel = 'Time (ms)', ylim = ylim, title = '{}-{}'.format(elec, band))
+			# elif repetition == 'target_loc':
+			# 	ax = plt.subplot(4,2,6 + idx*2, xlabel = 'Time (ms)', ylim = ylim, title = '{}-{}'.format(elec, band))
+			ax = plt.subplot(4,2,6 + idx*2, xlabel = 'Time (ms)', ylim = ylim, title = '{}-{}'.format(elec, band))
+			plt.yticks([ylim[0],1/6.0,ylim[1]])
+			bdm = []
+			files = glob.glob(self.FolderTracker(['bdm',elec,repetition], filename = 'class_*_perm-False-{}.pickle'.format(band)))
+			for file in files:
+				bdm.append(pickle.load(open(file, 'rb')))
+			if repetition == 'dist_loc':	
+				self.bdmANOVAinput(times, (0.27,0.34), bdm, repetition, 'Pd-{}'.format(band), diag = False)
+			color_idx = 0
+			for c, cnd in enumerate((['DvTv_0','DvTv_3'] + rep_cnds)):
+
+				dec = np.squeeze(np.stack([b[cnd]['standard'] for b in bdm]))
+				perm.update({cnd: dec})
+				err, X = bootstrap(dec)
+				if cnd in ['DvTv_3',rep_cnds[1]]:
+					plt.plot(times, X, label = cnd, color = colors[color_idx], ls = '-')
+					self.clusterPlot(perm[cnd], 1/6.0, 0.05, times, ylim[0] + yrange * (c + 1), color = colors[color_idx], ls = '-')
+					plt.fill_between(times, X + err, X - err, alpha = 0.2, color = colors[color_idx])	
+					color_idx += 1
+
+			self.clusterPlot(perm['DvTv_3'], perm[rep_cnds[1]], 0.05, times,ylim[0] + yrange * (c + 2), color = 'black', ls = '-')
+			self.clusterPlot(perm[rep_cnds[0]] - perm['DvTv_0'], perm[rep_cnds[1]] - perm['DvTv_3'], 0.05, times,ylim[0] + yrange * (c + 3), color = 'grey', ls = '-')
+			self.beautifyPlot(y = 1/6.0, ylabel = 'decoding acc')
+			if repetition == 'dist_loc':
+				plt.axvline(x = 0.27, ls = '--', color = 'grey')
+				plt.axvline(x = 0.34, ls = '--', color = 'grey')
+			plt.legend(loc = 'topleft')	
+			sns.despine(offset=50, trim = False)
+
+
+		# save figures
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['bdm','MS-plots'], filename = 'main-{}.pdf'.format(repetition)))
+		plt.close()	
+
+	def bdmANOVAinput(self, times, window, bdms, repetition, component, diag = True):
+		'''
+		gets the average in a predefined window which can be used as input for a repeated measures ANOVA
+		'''	
+
+		# get indices time window
+		s, e = [np.argmin(abs(t - times)) for t in window]
+		if repetition == 'target_loc':
+			factors = ['DvTv_0','DvTv_3'] + ['DvTr_0','DvTr_3']
+		elif repetition == 'dist_loc':
+			factors = ['DvTv_0','DvTv_3'] + ['DrTv_0','DrTv_3']
+		x = []
+		headers = []
+		for factor in factors:
+			if diag:
+				bdm = np.stack([np.diag(b[factor]['standard']) for b in bdms])[:,s:e].mean(axis = 1)
+			else:
+				bdm = np.stack([b[factor]['standard'] for b in bdms])[:,s:e].mean(axis = 1)
+			x.append(bdm)
+
+		X = np.vstack(x).T	
+		# save as .csv file
+		np.savetxt(self.FolderTracker(['bdm','anova'], filename = '{}-{}.csv'.format(component,repetition)), X, delimiter = "," ,header = ",".join(factors), comments='')	
+
+		# apply jackknife procedure
+		#rep0 = np.stack([erps[key]['DvTr_0']['contra'][elec_idx,:] for key in erps]).mean(axis = 1) - np.stack([erps[key]['DvTr_0']['ipsi'][elec_idx,:] for key in erps]).mean(axis = 1)
+		#rep3 = np.stack([erps[key]['DvTr_3']['contra'][elec_idx,:] for key in erps]).mean(axis = 1) - np.stack([erps[key]['DvTr_3']['ipsi'][elec_idx,:] for key in erps]).mean(axis = 1)
+		#onset, t_value = jackknife(rep0,rep3, times, [0.17,0.23], percent_amp = 45, timing = 'offset')
+
 
 	def clusterPlot(self, X1, X2, p_val, times, y, color, ls = '-'):
 		'''
@@ -1174,12 +1692,13 @@ class DT_reps(FolderStructure):
 			plt.tight_layout()
 			plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'cross-train_{}.pdf'.format(['target','dist'][a])))
 			plt.close()	
-
+ 
 
 	def plotTF(self):
 		'''
 
 		'''
+		norm = MidpointNormalize(midpoint=0)
 
 		# read in data
 		with open(self.FolderTracker(['tf','wavelet','target_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
@@ -1195,7 +1714,28 @@ class DT_reps(FolderStructure):
 			files = glob.glob(self.FolderTracker(['tf','wavelet',loc], filename = '*-tf.pickle'))
 			for file in files:
 				with open(file ,'rb') as handle:
-					tfs[loc].append(pickle.load(handle))
+					#tfs[loc].append(pickle.load(handle))
+					tf = pickle.load(handle)
+				if loc == 'target_loc':
+					x_i = tf['DvTr_3']['base_power'][:,ipsi_idx,:]
+					x_c = tf['DvTr_3']['base_power'][:,contra_idx,:]
+				elif loc == 'dist_loc':
+					x_i = tf['DrTv_3']['base_power'][:,ipsi_idx,:]
+					x_c = tf['DrTv_3']['base_power'][:,contra_idx,:]					
+				x = x_c - x_i
+				plt.imshow(x, cmap = cm.jet, interpolation='none', aspect='auto', 
+						  origin = 'lower', extent=[times[0], times[-1],0,40])
+				plt.yticks(info['frex'][::4])
+				plt.colorbar()
+				sj = file.split('-')[0][-2:]
+				if sj[0] == '/':
+					sj = sj[1]
+
+				plt.savefig(self.FolderTracker(['tf','wavelet','Mike-test'], filename = 'tf_{}-{}.pdf'.format(loc, sj)))
+				plt.close()			
+
+
+
 		# plot 
 		norm = MidpointNormalize(midpoint=0)
 		for header in ['dist_loc','target_loc']:
@@ -1227,14 +1767,20 @@ class DT_reps(FolderStructure):
 
 if __name__ == '__main__':
 
-	os.environ['MKL_NUM_THREADS'] = '3' 
-	os.environ['NUMEXP_NUM_THREADS'] = '3'
-	os.environ['OMP_NUM_THREADS'] = '3'
+	os.environ['MKL_NUM_THREADS'] = '5' 
+	os.environ['NUMEXP_NUM_THREADS'] = '5'
+	os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
 	project_folder = '/home/dvmoors1/BB/DT_reps'
 	os.chdir(project_folder)
 	PO = DT_reps()
+
+	# exp 1 and 2
+	#PO.prepareBEH(project, 'beh-exp1', ['block_type','set_size','repetition'], [['target','dist'],[4,8],range(12)], project_param)
+	#PO.prepareBEH(project,'beh-exp2',['block_type','set_size','repetition'], [['DvTv','DrTv','Tv'],[4,8],range(12)], project_param)
+	# exp 3 (eeg)
+	#PO.prepareBEH(project, part, factors, labels, project_param)
 
 	#preprocessing and main analysis
 	for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]: 
@@ -1249,7 +1795,9 @@ if __name__ == '__main__':
 
 		# READ IN PREPROCESSED DATA FOR FURTHER ANALYSIS
 		#PO.updateBEH(sj)
-		#beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1)
+		sj = 23
+		beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1)
+		embed()
 
 		for header in ['target_loc', 'dist_loc']:
 
@@ -1260,35 +1808,55 @@ if __name__ == '__main__':
 				midline = {'target_loc': [0,3]}
 				cnds = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']	
 
+			# CTF analysis
+			#ctf = CTF(beh, eeg, 'all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+
+			# step 1: search broad band of frequencies collapsed across all conditions
+			#ctf.spatialCTF(sj, [-0.3, 0.8], cnds, method = 'Foster', freqs = dict(all = [4,30]), downsample = 4, nr_perm = 0, collapse = True)
+			# step 2: compare conditions within the alpha band
+			#ctf.spatialCTF(sj, [-0.3, 0.8], cnds, method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0)
+			# step 3: cross train between first and final repetition to examine learning effects
+			#ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DvTv_0'], test_cnds = ['DvTr_0','DrTv_0'], 
+			#				freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 0, name = 'baseline-0')
+			#ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DvTv_3'], test_cnds = ['DvTr_3','DrTv_3'], 
+			#				freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 0, name = 'baseline-3')
+			# ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DrTv_0'], test_cnds = ['DrTv_3'], 
+			#  			 freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 0, name = 'DrTv-perm_0')
+			# ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DvTr_0'], test_cnds = ['DvTr_3'], 
+			#  			 freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 0, name = 'DvTr-perm_0')
+			# step 4: compare conditions within the theta band
+			#ctf.spatialCTF(sj, [-0.3, 0.8], cnds, method = 'Foster', freqs = dict(theta = [4,8]), downsample = 4, nr_perm = 0)
+			# step 5: test whether anticipatory effects can be explained by lingering effects frm previous trial
+			#ctf = CTF(beh, eeg, 'all_channels_no-eye', '{}-1'.format(header[:-4]), nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
+			#ctf.spatialCTF(sj, [-0.3, 0.8], ['DvTv_3'], method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0, plot = False)
+
+
 			# ERP analysis
-			#erp = ERP(header = header, baseline = [-0.3, 0], eye = True)
-			#erp.selectERPData(sj = sj, time = [-0.3, 0.8], l_filter = 30) 
-			# erp.ipsiContra(sj = sj, left = [2,3], right = [4,5], l_elec = ['PO7','PO3','O1','P3','P5','P7'], 
-			# 				r_elec = ['PO8','PO4','O2','P4','P6','P8'], midline = midline, balance = False, erp_name = 'main-unbalanced')
-			# erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1','P3','P5','P7'], 
-			# 				r_elec = ['PO8','PO4','O2','P4','P6','P8'], midline = midline, balance = True, erp_name = 'main-low')
+			#erp = ERP(eeg, beh, header = header, baseline = [-0.3, 0], eye = True)
+			#erp.selectERPData(time = [-0.3, 0.8], l_filter = 30) 
+			#erp.ipsiContra(sj = sj, left = [2,3], right = [4,5], l_elec = ['PO7','PO3','O1','P3','P5','P7'], 
+			#  				r_elec = ['PO8','PO4','O2','P4','P6','P8'], midline = midline, balance = False, erp_name = 'main-unbalanced')
+			#erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1','P3','P5','P7'], 
+			#  				r_elec = ['PO8','PO4','O2','P4','P6','P8'], midline = midline, balance = False, erp_name = 'main-unbalanced-low')
 			# erp.topoFlip(left = [1, 2])
 			# erp.topoSelection(sj = sj, loc = [2,4], midline = midline, topo_name = 'main', balance = True)
 			#erp.topoSelection(sj = sj, loc = [0,1,2,3,4,5], topo_name = 'frontal-bias', balance = True)
 
 			# BDM analysis
-			#bdm = BDM(decoding = header, nr_folds = 10, eye = True, elec_oi = 'post', downsample = 128, bdm_filter = dict(alpha = (8,12)))
-			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), bdm_matrix = False)
+			#bdm = BDM(beh ,eeg, decoding = header, nr_folds = 10, elec_oi = 'all', downsample = 128, bdm_filter = dict(alpha = (8,12)))
+			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
 
-			# # CTF analysis
-			#ctf = CTF(beh, eeg, 'all_channels_no-eye', header, nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
-			#ctf.spatialCTF(sj, [-0.3, 0.8], cnds, method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0, plot = False)
+			#bdm = BDM(beh, eeg, decoding = header, nr_folds = 10, elec_oi = 'post', downsample = 128, bdm_filter = None)
+			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
 
-			#ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DvTv_0'], test_cnds = ['DvTv_3'], 
-			#				freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 500, name = 'DvTv-perm_500')
-			# ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DrTv_0'], test_cnds = ['DrTv_3'], 
-			#  			 freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 500, name = 'DrTv-perm_500')
-			# ctf.crosstrainCTF(sj, [-0.3, 0.8], train_cnds = ['DvTr_0'], test_cnds = ['DvTr_3'], 
-			#  			 freqs = dict(alpha = [8,12]), filt_art = 0.5, downsample = 4, tgm = True, nr_perm = 500, name = 'DvTr-perm_500')
+			#bdm = BDM(beh, eeg, decoding = header, nr_folds = 10, elec_oi = 'post', downsample = 128, bdm_filter = dict(alpha = (8,12)))
+			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
 
-			# control analysis to check for repetition effects
-			#ctf = CTF(beh, eeg, 'all_channels_no-eye', '{}-1'.format(header[:-4]), nr_iter = 10, nr_blocks = 3, nr_bins = 6, nr_chans = 6, delta = False)
-			#ctf.spatialCTF(sj, [-0.3, 0.8], ['DvTv_3'], method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0, plot = False)
+			#bdm = BDM(beh, eeg, decoding = header, nr_folds = 10, elec_oi = 'post', downsample = 128, bdm_filter = dict(theta = (4,8)))
+			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
+
+			#bdm = BDM(beh, eeg, decoding = header, nr_folds = 10, elec_oi = 'post', downsample = 128, bdm_filter = dict(beta = (12,20)))
+			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
 
 			# TF analysis
 			#tf = TF(beh, eeg)
@@ -1300,12 +1868,15 @@ if __name__ == '__main__':
 	# analysis manuscript
 	# BEH
 	#PO.BEHexp1()
+	#PO.BEHexp2()
 
 	# ERP 
+	#PO.erpPlot(repetition = 'target_loc', color = 'green')
+	#PO.erpPlot(repetition = 'dist_loc', color = 'red')
 	#for header in ['target_loc', 'dist_loc']:
 		#PO.componentSelection(header, cmp_name = 'P1', cmp_window = [0.11,0.15], ext = 0.0175, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 		#PO.componentSelection(header, cmp_name = 'N1', cmp_window = [0.16,0.22], ext = 0.0175, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
-		#PO.componentSelection(header, cmp_name = 'N2pc', cmp_window = [0.17,0.23], ext = 0, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
+		#PO.componcentSelection(header, cmp_name = 'N2pc', cmp_window = [0.17,0.23], ext = 0, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 		#PO.componentSelection(header, cmp_name = 'Pd', cmp_window = [0.28,0.35], ext = 0, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 		#PO.erpLateralized(header, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 
@@ -1318,12 +1889,20 @@ if __name__ == '__main__':
 	# 						cmpnts = dict(N2pc = (0.2, 0.3), Pd = (0.25, 0.4)))
 
 	# BDM
-	#PO.bdmAcc()
+	#PO.bdmPlot(repetition = 'target_loc', color = 'green')
+	#PO.bdmPlot(repetition = 'dist_loc', color = 'red')
+	
+	
 	#PO.bdmDiag()
 	#for header in ['target_loc', 'dist_loc']:
 	#		PO.bdmSelection(header, 'Pd', (0.28,0.35))
 
 	# CTF
+	#PO.ctfTemp()
+	#PO.ctfPlot(repetition = 'target_loc', color = 'green')
+	#PO.ctfPlot(repetition = 'dist_loc', color = 'red')
+	#PO.ctfCrossPlot(repetition = 'target_loc')
+	#PO.ctfCrossPlot(repetition = 'dist_loc')
 	#PO.ctfSlopes()
 	#PO.ctfCrossTrainold()
 	#PO.ctfallFreqs()

@@ -376,7 +376,38 @@ def FDR(p_vals, q = 0.05, method = 'pdep', adjust_p = False, report = True):
 
 	return h, crit_p, adj_ci_cvrg, adj_p	
 
-def signedRankArray(X, Y):
+def threshArray(X, chance, method = 'ttest', p_value = 0.05):	
+	'''
+	Two step thresholding of a two dimensional data array.
+	Step 1: use group level testing for each individual data point
+	Step 2: apply clusterbased permutation on the thresholded data from step 1
+
+	Arguments
+	- - - - - 
+
+	X (array): subject X dim1 X dim2, where dim1 and dim2 can be any type of dimension 
+				(time, frequency, electrode, etc). Values in array represent some dependent
+				measure (e.g classification accuracy or power)
+	chance (int | float): chance value. All non-significant values will be reset to this value
+	method (str): statistical test used in first step of thresholding
+	p_value (float) | p_value used for thresholding
+
+
+	Returns
+	- - - -
+	X (array): thresholded data 
+
+	'''
+
+	p_vals = signedRankArray(X, chance)
+	X[:,p_vals > p_value] = chance
+	p_vals = clusterBasedPermutation(X,chance)
+	X = X.mean(axis = 0)
+	X[p_vals > p_value] = chance
+
+	return X
+
+def signedRankArray(X, Y, method = 'ttest'):
 	'''
 
 	Arguments
@@ -385,8 +416,9 @@ def signedRankArray(X, Y):
 	X1 (array): subject X dim1 X dim2, where dim1 and dim2 can be any type of dimension 
 				(time, frequency, electrode, etc). Values in array represent some dependent
 				measure (e.g classification accuracy or power)
-	X2 (array | float): either a datamatrix with same dimensions as X1, or a single value 
+	Y (array | float): either a datamatrix with same dimensions as X1, or a single value 
 				against which X1 will be tested
+	method (str): type of test to calculate p values
 	'''
 
 	# check whether X2 is a chance variable or a data array
@@ -397,7 +429,10 @@ def signedRankArray(X, Y):
 
 	for i in range(p_vals.shape[0]):
 		for j in range(p_vals.shape[1]):
-			_, p_vals[i,j] = wilcoxon(X[:,i,j], Y[:,i,j]) 
+			if method == 'wilcoxon':
+				_, p_vals[i,j] = wilcoxon(X[:,i,j], Y[:,i,j]) 
+			elif method == 'ttest':
+				_, p_vals[i,j] = ttest_rel(X[:,i,j], Y[:,i,j]) 
 
 	return p_vals		
 

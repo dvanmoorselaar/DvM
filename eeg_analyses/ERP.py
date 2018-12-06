@@ -24,7 +24,7 @@ from eeg_support import *
 
 class ERP(FolderStructure):
 
-	def __init__(self, header, baseline, eye = False):
+	def __init__(self, eeg, beh, header, baseline, eye = False):
 		''' 
 
 		Arguments
@@ -36,12 +36,14 @@ class ERP(FolderStructure):
 
 		'''
 
+		self.eeg = eeg
+		self.beh = beh
 		self.header = header
 		self.baseline = baseline
 		self.flipped = False
 		self.eye = eye
 
-	def selectERPData(self, sj, time = [-0.3, 0.8], l_filter = False, thresh_bin = 1):
+	def selectERPData(self, time = [-0.3, 0.8], l_filter = False):
 		''' 
 
 		Arguments
@@ -53,13 +55,11 @@ class ERP(FolderStructure):
 
 		'''
 
-		# read in processed behavior from pickle file
-		with open(self.FolderTracker(extension = ['beh','processed'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
-			beh = pickle.load(handle)
+		beh = self.beh
+		EEG = self.eeg
 
 		# read in eeg data 
 		self.flipped = False
-		EEG = mne.read_epochs(self.FolderTracker(extension = ['processed'], filename = 'subject-{}_all-epo.fif'.format(sj)))
 		if l_filter:
 			EEG.filter(l_freq = None, h_freq = l_filter)
 
@@ -69,22 +69,6 @@ class ERP(FolderStructure):
 		eegs = EEG._data[:,picks,s:e]
 		times = EEG.times[s:e]
 		ch_names = EEG.ch_names
-
-		# exclude trials contaminated by unstable eye position
-		nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
-		heog = EEG._data[:,ch_names.index('HEOG'),s:e]
-
-		#eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
-		#beh['eye_bins'][eye_trials] = 99
-	
-		# use mask to select conditions and position bins (flip array for nans)
-		#eye_mask = ~(beh['eye_bins'] > thresh_bin)	
-		#if self.eye:
-		#	eegs = eegs[eye_mask,:,:]
-
-		#	for key in beh.keys():
-		#		if key not in ['clean_idx']:
-		#			beh[key] = beh[key][eye_mask]
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
@@ -294,7 +278,6 @@ class ERP(FolderStructure):
 				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec,:], self.eeg[idx_c_r,:,:][:,idx_r_elec,:]))
 				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec,:], self.eeg[idx_c_r,:,:][:,idx_l_elec,:]))
 
-			embed()	
 			# baseline correct data	
 			ipsi = self.baselineCorrect(ipsi, self.times, self.baseline)
 			contra = self.baselineCorrect(contra, self.times, self.baseline)

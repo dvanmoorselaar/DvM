@@ -95,8 +95,8 @@ class CTF(BDM):
 		eegs = self.eeg._data[:,picks,:]
 
 		# select conditions from pickle file	
-		if conditions == 'all':
-			cnd_mask = np.ones(beh['condition'].size, dtype = bool)
+		if conditions == ['all']:
+			cnd_mask = np.ones(self.beh['condition'].size, dtype = bool)
 		else:	
 			cnd_mask = np.array([cnd in conditions for cnd in self.beh['condition']])
 
@@ -283,7 +283,7 @@ class CTF(BDM):
 				for b in range(self.nr_bins):
 					bin_count[i,b] = sum(temp_bin == b) 
 
-		elif of_interest == 'all':
+		elif of_interest == ['all']:
 			_, bin_count = np.unique(pos_bins, return_counts = True)
 
 		else:
@@ -411,9 +411,9 @@ class CTF(BDM):
 		nr_freqs = freqs.shape[0]
 
 		# read in all data (train plus test data)
-		pos_bins, cnds, eegs, EEG = self.readData(sj, train_cnds + test_cnds)
-		samples = np.logical_and(EEG.times >= window[0], EEG.times <= window[1])
-		nr_samples = EEG.times[samples][::downsample].size
+		pos_bins, cnds, eegs = self.selectData(train_cnds + test_cnds)
+		samples = np.logical_and(self.eeg.times >= window[0], self.eeg.times <= window[1])
+		nr_samples = self.eeg.times[samples][::downsample].size
 	
 		# loop over test conditions
 		for test_cnd in test_cnds:
@@ -499,7 +499,7 @@ class CTF(BDM):
 			print('saving cross training CTF dict')
 			pickle.dump(CTF, handle)
 
-	def spatialCTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', plot = True, nr_perm = 0):
+	def spatialCTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', nr_perm = 0, collapse = False):
 		'''
 		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
 
@@ -512,8 +512,8 @@ class CTF(BDM):
 		from 1Hz
 		downsample (int): factor to downsample the bandpass filtered data
 		method (str): method used for splitting data into training and testing sets
-		plot (bool): show plots of total power slopes on subject level across conditions
 		nr_perm (int): number of times model is run with permuted data
+		collapse (bool): create CTF collapsed across conditions
 
 		Returns
 		- - - -
@@ -535,7 +535,7 @@ class CTF(BDM):
 			cnd_name = 'all'
 			conditions = [conditions]
 		else:
-			cnd_name = 'cnds'													
+			cnd_name = 'cnds'												
 			
 		if 'all' in freqs.keys():
 			frqs = np.vstack([[i, i + 4] for i in range(freqs['all'][0],freqs['all'][1] + 1,2)])
@@ -551,6 +551,9 @@ class CTF(BDM):
 		
 		# Determine the number of trials that can be used for each position bin, matched across conditions
 		nr_per_bin = self.maxTrial(cnds, pos_bins, conditions, method) # NEEDS TO BE FIXED
+
+		if collapse:
+			conditions += ['all']	
 
 		# Loop over frequency bands (such that all data is filtered only once)
 		for fr in range(nr_freqs):
@@ -576,19 +579,19 @@ class CTF(BDM):
 				# this is done only on the first frequency loop to ensure that datasets are identical across frequencies
 				if fr == 0:
 					if cnd == 'all':
-					# ADD CODE FOR NEW TRAINING PROCEDURE
-						pass
+						cnd_idx = np.arange(cnds.size)
+						labels = pos_bins[:]
 					else:
 						# select train and test trials 
 						cnd_idx = np.where(cnds == cnd)[0]
 						labels = pos_bins[cnds == cnd]
-						self.nr_folds = self.nr_iter
-						if method == 'Foster':
-							ctf_info[cnd]['tr'], ctf_info[cnd]['te']  = self.assignBlocks(labels, cnd_idx, nr_per_bin, self.nr_iter)
-							C1 = np.empty((self.nr_bins* (self.nr_blocks - 1), self.nr_chans)) * np.nan 										
-						elif method == 'k-fold':
-							ctf_info[cnd]['tr'], ctf_info[cnd]['te'], _ = self.bdmTrialSelection(cnd_idx, labels, nr_per_bin, {})
-							C1 = self.basisset
+					self.nr_folds = self.nr_iter
+					if method == 'Foster':
+						ctf_info[cnd]['tr'], ctf_info[cnd]['te']  = self.assignBlocks(labels, cnd_idx, nr_per_bin, self.nr_iter)
+						C1 = np.empty((self.nr_bins* (self.nr_blocks - 1), self.nr_chans)) * np.nan 										
+					elif method == 'k-fold':
+						ctf_info[cnd]['tr'], ctf_info[cnd]['te'], _ = self.bdmTrialSelection(cnd_idx, labels, nr_per_bin, {})
+						C1 = self.basisset
 
 				# Loop through each iteration (is folds in the new set up)
 				for itr in range(self.nr_iter * self.nr_blocks):
@@ -660,7 +663,7 @@ class CTF(BDM):
 							   'E_slopes_p': e_slopes[1:], 'E_slopes': e_slopes[0]}
 
 
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0]), overwrite = False),'wb') as handle:
 			print('saving slopes dict')
 			pickle.dump(slopes, handle)
 	

@@ -27,7 +27,7 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, decoding, nr_folds, eye, elec_oi = 'all', downsample = 128, bdm_filter = None):
+	def __init__(self, beh, eeg, decoding, nr_folds, elec_oi = 'all', downsample = 128, bdm_filter = None):
 		''' 
 
 		Arguments
@@ -39,9 +39,10 @@ class BDM(FolderStructure):
 
 		'''
 
+		self.beh = beh
+		self.eeg = eeg
 		self.decoding = decoding
 		self.nr_folds = nr_folds
-		self.eye = eye
 		self.elec_oi = elec_oi
 		self.downsample = downsample
 		self.bdm_filter = bdm_filter
@@ -51,13 +52,12 @@ class BDM(FolderStructure):
 		else:	 
 			self.bdm_type = 'broad'
 
-	def selectBDMData(self, sj, time = (-0.3, 0.8), thresh_bin = 1):
+	def selectBDMData(self, time = (-0.3, 0.8), thresh_bin = 1):
 		''' 
 
 		Arguments
 		- - - - - 
 
-		sj(int): subject number
 		time (tuple | list): time samples (start to end) for decoding
 		thresh_bin (int): exclude trials with a deviation larger than 1. If 0 all trials are use for decoding analysis
 		downsample (int): downsample the data to this sampling range (save computational time)
@@ -73,11 +73,10 @@ class BDM(FolderStructure):
 		'''
 
 		# read in processed behavior from pickle file
-		with open(self.FolderTracker(extension = ['beh','processed'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
-			beh = pickle.load(handle)
+		beh = self.beh
 
 		# read in eeg data 
-		EEG = mne.read_epochs(self.FolderTracker(extension = ['processed'], filename = 'subject-{}_all-epo.fif'.format(sj)))
+		EEG = self.eeg
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
@@ -94,22 +93,6 @@ class BDM(FolderStructure):
 		picks = select_electrodes(np.array(EEG.ch_names)[picks], self.elec_oi)
 		eegs = EEG._data[:,picks,s:e]
 		times = EEG.times[s:e]
-
-		# exclude trials contaminated by unstable eye position
-		# nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
-		# heog = EEG._data[:,EEG.ch_names.index('HEOG'),s:e]
-
-		# eye_trials = eog_filt(beh, EEG, heog, sfreq = EEG.info['sfreq'], windowsize = 50, windowstep = 25, threshold = 30)
-		# beh['eye_bins'][eye_trials] = 99
-	
-		# # use mask to select conditions and position bins (flip array for nans)
-		# eye_mask = ~(beh['eye_bins'] > thresh_bin)	
-		# if self.eye:
-		# 	eegs = eegs[eye_mask,:,:]
-
-		# 	for key in beh.keys():
-		# 		if key not in ['clean_idx']:
-		# 			beh[key] = beh[key][eye_mask]
 
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
@@ -148,7 +131,7 @@ class BDM(FolderStructure):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh = self.selectBDMData(sj, time = time)	
+		eegs, beh = self.selectBDMData(time = time)	
 
 		# limit trials to factors of interest
 		if factor != None: # NOW ONLY SUPPORTS AND: COME UP WITH FIX
@@ -225,7 +208,7 @@ class BDM(FolderStructure):
 				classification[cnd].update({'perm': class_acc[1:]})
 	
 		# store classification dict	
-		with open(self.FolderTracker(['bdm',self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.bdm_type)) ,'wb') as handle:
+		with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.bdm_type)) ,'wb') as handle:
 			pickle.dump(classification, handle)
 
 	def selectMaxTrials(self,beh, cnds, cnds_header = 'condition'):

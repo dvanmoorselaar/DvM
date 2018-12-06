@@ -94,7 +94,7 @@ class PreProcessing(object):
 			print('saving combined data file')
 			raw_data_comb.to_excel(os.path.join(self.project_folder,'raw','raw_data_combined.xlsx'), sheet_name ='raw_data')		
 		
-		self.raw_data_comb = raw_data_comb	
+		self.raw_data_comb = raw_data_comb
 
 	def select_data(self, project_parameters = [], save = False):
 		"""
@@ -206,9 +206,9 @@ class PreProcessing(object):
 		Arguments
 		- - - - - 
 		criteria (dict): Columns corresponding to the keys will be used for outlier selection. 
-							If value of dict is not '', data will first be filtered to selct subset of data 
+							If value of dict is not '', data will first be filtered to select subset of data 
 							(e.g. only do outlier selection after applying RT filter)
-		agg_func (str): summmary statistic foroutlier selection (e.g mean/median/sum, etc) 
+		agg_func (str): summmary statistic for outlier selection (e.g mean/median/sum, etc) 
 		sd (float): SD criteria 
 
 		Returns
