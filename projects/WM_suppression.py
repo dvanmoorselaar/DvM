@@ -53,7 +53,6 @@ class WM_suppression(FolderStructure):
 		PP.exclude_outliers(criteria = dict(RT_search = "RT_search_filter == True", search_resp = "", memory_resp = ""))
 
 		# create JASP output
-		embed()
 		pivot_data = PP.work_data.query("RT_search_filter == True")
 		pivot = pivot_data.pivot_table(values = 'RT_search', index = 'subject_nr', columns = PP.factor_headers, aggfunc = 'mean')
 		# limit analysis to load 1
@@ -66,26 +65,55 @@ class WM_suppression(FolderStructure):
 		X[:,3] = pivot['unrel']['yes'][1].values
 		X[:,4] = np.stack((pivot['no']['no'][1].values, pivot['no']['yes'][1].values)).mean(axis = 0)
 
+		np.savetxt(self.FolderTracker(['exp2','analysis'], filename = 'RT_JASP.csv'), X, delimiter = "," ,header = ",".join(headers), comments='')
+				
 
-		embed()
-		
-		
-		headers = ['sj'] + ['_'.join(np.array(labels,str)) for labels in product(*self.factor_labels)]
-		p_values = np.hstack((pivot.index.values.reshape(-1,1), np.zeros(pivot.shape)))
-		for i, labels in enumerate(product(*self.factor_labels)):
-			p_values[:,i + 1] = pivot[labels]
+	def combineExps(self):
+		'''
+		creates combined JASP OUTPUT FOR EXP 1 and 2
+		'''	
 
-		if save:
-			np.savetxt(os.path.join(self.project_folder,'analysis', '{}_JASP.csv'.format(voi)), p_values, delimiter = "," ,header = ",".join(headers), comments='')
+		#read in data
+		file = self.FolderTracker(['exp1','analysis'], filename = 'preprocessed.csv')
+		DF1 = pd.read_csv(file)
 
+		file = self.FolderTracker(['exp2','analysis'], filename = 'preprocessed.csv')
+		DF2 = pd.read_csv(file)
 
+		# prepare DF2 so that it can be concattenated to DF1
+		parameters = ['subject_nr', 'condition','suppression','RT_search','RT_search_filter']
+		DF2 = DF2[DF2['load'] == 1] # filter out load 2 trials
+		DF2['condition'][DF2['condition'] == 'rel-match'] = 'match'
+		DF2['condition'][DF2['condition'] == 'rel-mis'] = 'match'
+		DF2['condition'][DF2['condition'] == 'unrel'] = 'neutral'
+		DF2 = DF2.rename(columns={'suppressed': 'suppression'})
+		DF2['condition'][DF2['condition'] == 'rel-match'] = 'match'
+		DF2['suppression'][DF2['suppression'] == 'yes'] = 'suppression'
+		DF2['suppression'][DF2['suppression'] == 'no'] = 'no_suppression'
+		self.plotRTrep(DF2)
+		DF2['subject_nr'] += 100
 
-		#PP.prep_JASP(agg_func = 'mean', voi = 'RT_search', data_filter = "search_resp == 1", save = True)
-		PP.save_data_file()
+		DF_comb = pd.concat([DF1[parameters],DF2[parameters]])
+
+		# create pivot
+		DF_comb = DF_comb.query("RT_search_filter == True")
+		pivot = DF_comb.pivot_table(values = 'RT_search', index = 'subject_nr', columns = ['condition','suppression'], aggfunc = 'mean')
+
+		headers = ['no-suppr_match','no-suppr_neutral', 'suppr_match','suppr_neutral', 'no']
+		X = np.zeros((pivot.shape[0],len(headers)))
+
+		X[:,0] = pivot['match']['no_suppression'].values
+		X[:,1] =  pivot['neutral']['no_suppression'].values
+		X[:,2] = pivot['match']['suppression'].values
+		X[:,3] =  pivot['neutral']['suppression'].values
+		X[:,4] = np.nanmean((pivot['no']['suppression'].values,pivot['no']['no_suppression'].values), axis = 0)
+
+		np.savetxt(self.FolderTracker(['comb','analysis'], filename = 'RT_JASP.csv'), X, delimiter = "," ,header = ",".join(headers), comments='')
+
 
 	def plotRT(self):
 		'''
-		Creates bar plot with individual data points overlayed
+		Creates violin plot with individual data points overlayed
 		'''	
 
 		# read in preprocessed data and create pivot table
@@ -117,6 +145,39 @@ class WM_suppression(FolderStructure):
 		plt.close()
 
 		print '???????'
+
+	def plotRTrep(self, DF):
+		'''
+		Creates violin plot with individual data points overlayed for replication study
+		'''
+
+		DF = DF.query("RT_search_filter == True")
+		pivot = DF.pivot_table(values = 'RT_search', index = 'subject_nr', columns = ['suppression','condition'], aggfunc = 'mean')
+		
+		# plot no suppression and suppression seperate
+		plt.figure(figsize = (15,10))
+		# no suppression
+		ax = plt.subplot(1,2, 1, ylim = (425,1650))
+		df = pd.melt(pivot['no_suppression'], value_name = 'RT (ms)')
+		sns.stripplot(x = 'condition', y = 'RT (ms)', data = df, size = 10,jitter = True, color = 'grey')
+		sns.violinplot(x = 'condition', y = 'RT (ms)', data = df, color= 'white', cut = 1)
+		sns.despine(offset=50, trim = False)
+
+		# suppression
+		ax = plt.subplot(1,2, 2, ylabel = 'RT (ms)', ylim = (425,1650))
+		# replace match and neutral by suppression data (makes sure that layout of figures is identical)
+		df['RT (ms)'][df['condition'] == 'match'] = pivot['suppression']['match'].values
+		df['RT (ms)'][df['condition'] == 'neutral'] = pivot['suppression']['neutral'].values
+		sns.stripplot(x = 'condition', y = 'RT (ms)', data = df, size = 10,jitter = True, color = 'grey')
+		sns.violinplot(x = 'condition', y = 'RT (ms)', data = df, color= 'white', cut = 1)
+		sns.despine(offset=50, trim = False)
+
+		plt.tight_layout()
+		plt.savefig(self.FolderTracker(['exp2','analysis','figs'], filename = 'RT-main.pdf'))
+		plt.close()
+
+		print '???????'
+
 
 	def distractorReps(self):
 		'''
@@ -218,8 +279,10 @@ if __name__ == '__main__':
 	# behavior analysis
 	PO =  WM_suppression()
 	#PO.prepareBEH(project, part, factors, labels, project_param)
-	PO.prepareRep(project, 'exp2', ['condition','suppressed','load'], [['rel-match','rel-mis','unrel','no'],['yes','no'],[1,2]], project_param)
-	#PO.plotRT()
-	PO.distractorReps()
+	#PO.prepareRep(project, 'exp2', ['condition','suppressed','load'], [['rel-match','rel-mis','unrel','no'],['yes','no'],[1,2]], project_param)
+	PO.combineExps()
+	PO.plotRT()
+	#PO.distractorReps()
+
 
 

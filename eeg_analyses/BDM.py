@@ -103,7 +103,7 @@ class BDM(FolderStructure):
 		return 	eegs, beh
 
 
-	def Classify(self,sj, cnds, cnd_header, bdm_labels = 'all', factor = None, time = (-0.3, 0.8), nr_perm = 0, gat_matrix = False, downscale = False):
+	def Classify(self,sj, cnds, cnd_header, bdm_labels = 'all', factor = None, time = (-0.3, 0.8), nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
 
 		Arguments
@@ -121,7 +121,8 @@ class BDM(FolderStructure):
 					The number sets the number of permutations
 		gat_matrix (bool): If True, train X test decoding analysis is performed
 		downscale (bool): If True, decoding is repeated with increasingly less trials. Set to True if you are 
-						interested in the minumum number of trials that support classification	
+						interested in the minumum number of trials that support classification
+		save (bool): sets whether output is saved (via standard file organization) or returned 	
 
 		Returns
 		- - - -
@@ -173,6 +174,7 @@ class BDM(FolderStructure):
 				cnd_labels = cnd_labels[sub_idx]
 
 			nr_unique = np.unique(cnd_labels).size	
+			print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(cnd_labels)))
 			
 			# initiate decoding array
 			if gat_matrix:
@@ -208,8 +210,11 @@ class BDM(FolderStructure):
 				classification[cnd].update({'perm': class_acc[1:]})
 	
 		# store classification dict	
-		with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.bdm_type)) ,'wb') as handle:
-			pickle.dump(classification, handle)
+		if save: 
+			with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.bdm_type)) ,'wb') as handle:
+				pickle.dump(classification, handle)
+		else:
+			return classification		
 
 	def selectMaxTrials(self,beh, cnds, cnds_header = 'condition'):
 		''' 

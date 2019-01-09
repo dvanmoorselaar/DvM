@@ -1,5 +1,5 @@
-#import matplotlib
-#matplotlib.use('agg') # now it works via ssh connection
+import matplotlib
+matplotlib.use('agg') # now it works via ssh connection
 
 import os
 import mne
@@ -432,13 +432,11 @@ class DT_sim(FolderStructure):
 
 		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle') ,'rb') as handle:
 			info = pickle.load(handle)
-
 		times = info['times']	
 
-		time = (-0.05, 0)
-		s, e = [np.argmin(abs(info['times'] - t)) for t in time]
-		files = glob.glob(self.FolderTracker(['tf', method], filename = '*-tf.pickle'))
-		print files
+		#time = (-0.05, 0)
+		#s, e = [np.argmin(abs(info['times'] - t)) for t in time]
+		files = glob.glob(self.FolderTracker(['tf', method, 'dist_loc'], filename = '*-tf.pickle'))
 		tf = []
 		for file in files:
 			with open(file ,'rb') as handle:
@@ -447,22 +445,25 @@ class DT_sim(FolderStructure):
 		contra_idx = [info['ch_names'].index(e) for e in c_elec]
 		ipsi_idx = [info['ch_names'].index(e) for e in i_elec]
 
-		plt.figure(figsize = (30,10))
-		for plt_idx, cnd in enumerate(['DTsim','DTdisP','DTdisDP']):
-			ax = plt.subplot(1,3 , plt_idx + 1, title = cnd, xlabel = 'time (ms)', ylabel = 'freq')
+		plt.figure(figsize = (40,15))
+		for plt_idx, cnd in enumerate(['DTsim-no','DTdisP-no','DTdisDP-no', 'DTsim-yes','DTdisP-yes','DTdisDP-yes']):
+			ax = plt.subplot(2,3 , plt_idx + 1, title = cnd, xlabel = 'time (ms)', ylabel = 'freq')
 			contra = np.stack([np.mean(tf[i][cnd]['base_power'][:,contra_idx,:], axis = 1) for i in range(len(tf))])
 			ipsi = np.stack([np.mean(tf[i][cnd]['base_power'][:,ipsi_idx,:], axis = 1) for i in range(len(tf))])
-			X = contra - ipsi
+			X = (contra - ipsi) 
 			#sig = clusterBasedPermutation(X,0)
 			X = X.mean(axis = 0)
 			#print X[:,s:e].mean(axis = 1)
 			#X[sig == 1] = 0
 			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
 							   origin = 'lower', extent=[times[0],times[-1],5,40],
-							   vmin = -0.1, vmax = 0.1)
-			
-			plt.yticks(info['frex'][::3])
+							   vmin = -1, vmax = 1)
+
+			plt.axvline (x = -0.25, color = 'white', ls ='--')
+			plt.axvline (x = 0, color = 'white', ls ='--')
+			plt.yticks(info['frex'][::5])
 			plt.colorbar()
+			sns.despine(offset=50, trim = False)
 
 		plt.tight_layout()			
 		plt.savefig(self.FolderTracker(['tf','figs'], filename = 'tf-main-basetest.pdf'))
@@ -494,7 +495,7 @@ if __name__ == '__main__':
 	#PO.plotERP()
 	#PO.plotBDM(header = 'target')
 	#PO.plotBDM(header = 'dist')
-	#PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
+	PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
 
 
 	# run preprocessing

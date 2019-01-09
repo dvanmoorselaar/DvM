@@ -264,7 +264,7 @@ class DT_reps(FolderStructure):
 		except:
 			print('what happened?')		
 
-	def BEHexp1(self):
+	def BEHexp1(self, set_size_control = False):
 		'''
 		analyzes experiment 1 as reported in the MS
 		'''
@@ -275,6 +275,12 @@ class DT_reps(FolderStructure):
 
 		# create pivot (main analysis)
 		data = data.query("RT_filter == True")
+		if set_size_control: # filter out all trials in set size 8 where distractor and target are presented next to one another
+			data['distance'] = abs(data['target_loc'] - data['dist_loc']) 
+			data['distance'][data['distance'] > 4] = 8 - data['distance'][data['distance'] > 4]
+			data['loc_filter'] = np.logical_and(data['set_size'] == 8, data['distance'] == 1)
+			data = data.query("loc_filter == False")
+
 		pivot = data.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','set_size','repetition'], aggfunc = 'mean')
 		pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
 
@@ -320,16 +326,20 @@ class DT_reps(FolderStructure):
 
 		plt.xticks([0,1,2,3,4,5,6,7,8,9,10,11])	
 		plt.legend(loc='best', shadow = True)
-		sns.despine(offset=10, trim = False)
+		sns.despine(offset=50, trim = False)
 
-		plt.savefig(self.FolderTracker(['beh-exp1','figs'], filename = 'main-ana.pdf'))		
+		if set_size_control:
+			plt.savefig(self.FolderTracker(['beh-exp1','figs'], filename = 'control-ana.pdf'))	
+		else:	
+			plt.savefig(self.FolderTracker(['beh-exp1','figs'], filename = 'main-ana.pdf'))		
 		plt.close()	
 
-		# save parameters for JASP 		
-		np.savetxt(self.FolderTracker(['beh-exp1','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
-		np.savetxt(self.FolderTracker(['beh-exp1','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
+		# save parameters for JASP 	
+		if not set_size_control:	
+			np.savetxt(self.FolderTracker(['beh-exp1','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
+			np.savetxt(self.FolderTracker(['beh-exp1','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
 
-	def BEHexp2(self):
+	def BEHexp2(self, set_size_control = False):
 		'''
 		analyzes experiment 2 as reported in the MS
 		'''
@@ -340,6 +350,11 @@ class DT_reps(FolderStructure):
 
 		# create pivot (main analysis)
 		data = data.query("RT_filter == True")
+		if set_size_control: # filter out all trials in set size 8 where distractor and target are presented next to one another
+			data['distance'] = abs(data['target_loc'] - data['dist_loc']) 
+			data['distance'][data['distance'] > 4] = 8 - data['distance'][data['distance'] > 4]
+			data['loc_filter'] = np.logical_and(data['set_size'] == 8, data['distance'] == 1)
+			data = data.query("loc_filter == False")
 		pivot = data.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','set_size','repetition'], aggfunc = 'mean')
 		pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
 
@@ -385,14 +400,19 @@ class DT_reps(FolderStructure):
 
 		plt.xticks([0,1,2,3,4,5,6,7,8,9,10,11])	
 		plt.legend(loc='best', shadow = True)
-		sns.despine(offset=10, trim = False)
+		sns.despine(offset=50, trim = False)
 
-		plt.savefig(self.FolderTracker(['beh-exp2','figs'], filename = 'main-ana.pdf'))		
+
+		if set_size_control:
+			plt.savefig(self.FolderTracker(['beh-exp2','figs'], filename = 'control-ana.pdf'))	
+		else:	
+			plt.savefig(self.FolderTracker(['beh-exp2','figs'], filename = 'main-ana.pdf'))			
 		plt.close()	
 
-		# save parameters for JASP 		
-		np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
-		np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
+		# save parameters for JASP 
+		if not set_size_control:		
+			np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
+			np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
 
 
 	def ctfTemp(self):
@@ -1795,9 +1815,8 @@ if __name__ == '__main__':
 
 		# READ IN PREPROCESSED DATA FOR FURTHER ANALYSIS
 		#PO.updateBEH(sj)
-		sj = 23
-		beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1)
-		embed()
+		#sj = 23
+		#beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1)
 
 		for header in ['target_loc', 'dist_loc']:
 
@@ -1867,8 +1886,8 @@ if __name__ == '__main__':
 
 	# analysis manuscript
 	# BEH
-	#PO.BEHexp1()
-	#PO.BEHexp2()
+	PO.BEHexp1(set_size_control = False)
+	PO.BEHexp2(set_size_control = False)
 
 	# ERP 
 	#PO.erpPlot(repetition = 'target_loc', color = 'green')
@@ -1909,6 +1928,6 @@ if __name__ == '__main__':
 	#PO.ctfrepBias()
 
 	# TF.
-	PO.plotTF()
+	#PO.plotTF()
 
 
