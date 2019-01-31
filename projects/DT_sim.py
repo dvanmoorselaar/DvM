@@ -6,6 +6,7 @@ import mne
 import sys
 import glob
 import pickle
+import logging
 sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM')
 
 import numpy as np
@@ -24,7 +25,30 @@ from support.support import *
 from stats.nonparametric import *
 
 # subject specific info
-sj_info = {'1': {'tracker': (False, '', ''),  'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
+
+sj_info = {'1': {'tracker': (True, 'tsv', 30, 'Onset task display',0), 'replace':{}}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
+			'2': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'3': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'4': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'5': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'6': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'7': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'8': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'9': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'10': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'11': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'12': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'13': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'14': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'15': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'16': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'17': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'18': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'19': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'20': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'21': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'22': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
+			'23': {'tracker': (False, 'tsv', 30, 'Onset task display',0), 'replace':{}},
 			'24': {'tracker': (True, 'tsv', 30,'Onset task display',0), 'replace':{}}}
 
 
@@ -89,8 +113,9 @@ class DT_sim(FolderStructure):
                     filename= self.FolderTracker(extension=['processed', 'info'], 
                         filename='preprocess_sj{}_ses{}.log'.format(
                         sj, session), overwrite = False),
-                    filemode='w')
+                    filemode='w+')
 
+		logging.info('Started preprocessing subject {}, session {}'.format(sj, session))
 		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
 		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
 		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
@@ -102,12 +127,15 @@ class DT_sim(FolderStructure):
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
 		EEGica = EEG.filter(h_freq=None, l_freq=1,
-		                   fir_design='firwin', skip_by_annotation='edge')
+		                    fir_design='firwin', skip_by_annotation='edge')
 		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-		            skip_by_annotation='edge')
+		             skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
+		if sj == 5 and session == 1: # correct for starting eeg recording during practice
+			events = events[59:,:]
+
 		beh, missing = EEG.matchBeh(sj, session, events, trigger, 
 		                             headers = project_param)
 
@@ -116,14 +144,14 @@ class DT_sim(FolderStructure):
 		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
 		# ARTIFACT DETECTION
-		epochs.selectBadChannels(channel_plots = False, inspect=True, RT = None)    
-		epochs.artifactDetection(inspect=True, run = True)
+		epochs.selectBadChannels(channel_plots = channel_plots, inspect = inspect, RT = None)    
+		epochs.artifactDetection(inspect=inspect, run = True)
 
 		# ICA
-		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = inspect)
 
 		# EYE MOVEMENTS
-		epochs.detectEye(epochs, missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
+		epochs.detectEye(missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
 
 		# INTERPOLATE BADS
 		epochs.interpolate_bads(reset_bads=True, mode='accurate')
@@ -136,6 +164,7 @@ class DT_sim(FolderStructure):
 		Checks min condition number per cnd after preprocessing
 		'''
 
+		embed()
 		# loop across all processed behavior files
 		files = glob.glob(self.FolderTracker(['beh', 'processed'], filename = 'subject-*_all.pickle'))
 		for file in files:
@@ -158,53 +187,57 @@ class DT_sim(FolderStructure):
 			if min_p < 75:
 				print min_p, cnd_info[0][cnd_sort[0]], file
 
-	def mainBEH(self, exp = 'beh', column = 'dist_high', ylim = (350,750)):
+	def plotExp1_2_3(self, exp = 'exp_1', excl_pos_bias = False):
+		'''
+		creates a bar plot with individual datapoints overlayed
 		'''
 
-		'''
+		file = self.FolderTracker([exp ,'analysis'], filename = 'preprocessed.csv')
+	
+		# seperate plots for target and distractor suppression
+		for to_plot in ['dist_high', 'target_high']:
+			DF = pd.read_csv(file)
 
-		# read in data
-		file = self.FolderTracker([exp,'analysis'], filename = 'preprocessed.csv')
-		DF = pd.read_csv(file)
+			# creat pivot (with RT filtered data)
+			DF = DF.query("RT_filter == True")
 
-		# creat pivot (with RT filtered data)
-		DF = DF.query("RT_filter == True")
-		
-		# create unbiased DF
-		if column == 'dist_high':
-			DF = DF[DF['target_high'] == 'no']
-		elif column == 'target_high':
-			DF = DF[DF['dist_high'] == 'no']
+			if excl_pos_bias:
+				if 'dist' in to_plot:
+					DF = DF[DF['target_high'] == 'no']
+				elif 'target' in to_plot:
+					DF = DF[DF['dist_high'] == 'no']	
 
-		pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type',column], aggfunc = 'mean')
-		error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+			pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type',to_plot], aggfunc = 'mean')	
+			error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+			# save output to JASP for analysis
+			headers = ['-'.join(string) for string in pivot.keys()]
+			np.savetxt(self.FolderTracker([exp,'analysis'], filename = 'RTs-JASP-{}.csv'.format(to_plot[:-5])), pivot.values, delimiter = "," ,header = ",".join(headers), comments='')
+	
+			# plot the seperate conditions (3 X 1 plot design)
+			f = plt.figure(figsize = (30,10))
+			levels = np.unique(pivot.keys().get_level_values('block_type'))
+			for idx, block in enumerate(levels):
+				
+				# get effect and p-value
+				diff = pivot[block]['yes'].mean() -  pivot[block]['no'].mean()
+				t, p = ttest_rel(pivot[block]['yes'], pivot[block]['no'])
 
-		# plot the seperate conditions (3 X 1 plot design)
-		f = plt.figure(figsize = (30,10))
+				ax = plt.subplot(1,3, idx + 1, title = '{0}: \ndiff = {1:.0f}, p = {2:.3f}'.format(block, diff, p), ylabel = 'RT (ms)', ylim = (300,800))
+				df = pd.melt(pivot[block], value_name = 'RT (ms)')
+				df['sj'] = range(pivot.index.size) * 2
+				ax = sns.stripplot(x = to_plot, y = 'RT (ms)', data = df, hue = 'sj', size = 20, jitter = True, edgecolor = 'black', color = 'white', linewidth = 3)
+				ax.legend_.remove()
+				sns.barplot(x = to_plot, y = 'RT (ms)', data = df, color= 'white')
 
-		#levels = np.unique(pivot.keys().get_level_values('block_type'))
-		levels = ['DTsim','DTdisDP','DTdisP']
-		for idx, block in enumerate(levels):
+				sns.despine(offset=50, trim = False)
 			
-			# get effect and p-value
-			diff = pivot[block]['yes'].mean() -  pivot[block]['no'].mean()
-			t, p = ttest_rel(pivot[block]['yes'], pivot[block]['no'])
+			f.subplots_adjust(wspace=50)
+			plt.tight_layout()
+			plt.savefig(self.FolderTracker([exp,'figs'], filename = 'main_ana_{}.pdf'.format(to_plot[:-5])))		
+			plt.close()	
 
-			ax = plt.subplot(1,3, idx + 1, title = '{0}: \ndiff = {1:.0f}, p = {2:.3f}'.format(block, diff, p), ylabel = 'RT (ms)', ylim = ylim)
-			df = pd.melt(pivot[block], value_name = 'RT (ms)')
-			df['sj'] = range(pivot.index.size) * 2
-			ax = sns.stripplot(x = column, y = 'RT (ms)', data = df, hue = 'sj', size = 10, jitter = True)
-			ax.legend_.remove()
-			sns.violinplot(x = column, y = 'RT (ms)', data = df, color= 'white', cut = 1)
 
-			sns.despine(offset=50, trim = False)
-		
-		f.subplots_adjust(wspace=50)
-		plt.tight_layout()
-		plt.savefig(self.FolderTracker([exp,'figs'], filename = 'block_effect_{}.pdf'.format(column)))		
-		plt.close()	
-
-	def singleTarget(self):
+	def singleTargetEEG(self):
 		'''
 
 		'''
@@ -217,53 +250,29 @@ class DT_sim(FolderStructure):
 		DF = DF[DF['dist_loc'] == 'None']
 
 		# read in single target data
-		T_pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','target_high'], aggfunc = 'mean')
-		T_error = pd.Series(confidence_int(T_pivot.values), index = T_pivot.keys())
+		pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','target_high'], aggfunc = 'mean')
+		error = pd.Series(confidence_int(T_pivot.values), index = T_pivot.keys())
+		levels = np.unique(pivot.keys().get_level_values('block_type'))
 
-		# read in distractor data
-		DF = pd.read_csv(file)
-		DF = DF.query("RT_filter == True")
-		DF = DF[DF['target_high'] == 'no']
-		D_pivot = DF.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','dist_high'], aggfunc = 'mean')
-		D_error = pd.Series(confidence_int(D_pivot.values), index = D_pivot.keys())
+		# save output to JASP for analysis
+		headers = ['-'.join(string) for string in pivot.keys()]
+		np.savetxt(self.FolderTracker([exp,'analysis'], filename = 'RTs-JASP-{}.csv'.format(to_plot[:-5])), pivot.values, delimiter = "," ,header = ",".join(headers), comments='')
 
-		# create line plot (DTsim, DTdisDP, DTdisP)
-		blocks = ['DTsim','DTdisP']
-
-		# show effects
+		#do actual plotting 
 		f = plt.figure(figsize = (20,10))
-		
-		# plot 
-		ax =  plt.subplot(1,2, 2, title = 'Single target trials', ylabel = 'RT (ms)', ylim = (390,430),xlim = (-0.25,1.25))
-		plt.xticks((0,1), blocks)
-		plt.plot((0,1),[T_pivot.mean()[bl]['no'] for bl in blocks], color = 'green')
-		plt.plot((0,1),[T_pivot.mean()[bl]['yes'] for bl in blocks], color = 'red')
-		plt.errorbar((0,1),[T_pivot.mean()[bl]['no'] for bl in blocks], 
-							yerr = [T_error[bl]['no'] for bl in blocks], 
-							fmt = 'o', label = 'single target - low', color = 'green')
-		plt.errorbar((0,1),[T_pivot.mean()[bl]['yes'] for bl in blocks], 
-							yerr = [T_error[bl]['yes'] for bl in blocks], 
-							fmt = 's', label = 'single target - high', color = 'red')
+		plt.bar(range(1,6,2), [pivot[level]['no'].mean() for level in levels], 
+				yerr = [error[level]['no'].mean() for level in levels] , 
+				width = 0.5, color = 'green', label = 'low probability', ecolor = 'green')
+		plt.bar(np.arange(1,6,2)  + 0.5, [pivot[level]['yes'].mean() for level in levels], 
+				yerr = [error[level]['yes'].mean() for level in levels] , 
+				width = 0.5, color = 'red', label = 'high probability', ecolor = 'red')
 
+		plt.xticks(np.arange(1,6,2) + 0.5, levels)
+		plt.ylim(390,430)
+		plt.xlim(0,7)
 		plt.legend(loc = 'best')
+
 		sns.despine(offset=50, trim = False)
-
-		ax =  plt.subplot(1,2, 1, title = 'Distractor trials', ylabel = 'RT (ms)', ylim = (410,470),xlim = (-0.25,1.25))
-		plt.xticks((0,1), blocks)
-		plt.plot((0,1),[D_pivot.mean()[bl]['no'] for bl in blocks], color = 'green')
-		plt.plot((0,1),[D_pivot.mean()[bl]['yes'] for bl in blocks], color = 'red')
-		plt.errorbar((0,1),[D_pivot.mean()[bl]['no'] for bl in blocks], 
-							yerr = [D_error[bl]['no'] for bl in blocks], 
-							fmt = 'o', label = 'dist - low', color = 'green')
-		plt.errorbar((0,1),[D_pivot.mean()[bl]['yes'] for bl in blocks], 
-							yerr = [D_error[bl]['yes'] for bl in blocks], 
-							fmt = 's', label = 'dist - high', color = 'red')
-
-		plt.legend(loc = 'best')
-		sns.despine(offset=50, trim = False)
-
-		plt.tight_layout()
-		f.subplots_adjust(wspace=0.5)
 		plt.savefig(self.FolderTracker(['beh','figs'], filename = 'single-target.pdf'))		
 		plt.close()
 
@@ -473,9 +482,9 @@ class DT_sim(FolderStructure):
 
 if __name__ == '__main__':
 
-	os.environ['MKL_NUM_THREADS'] = '2' 
-	os.environ['NUMEXP_NUM_THREADS'] = '2'
-	os.environ['OMP_NUM_THREADS'] = '2'
+	#os.environ['MKL_NUM_THREADS'] = '5' 
+	#os.environ['NUMEXP_NUM_THREADS'] = '5'
+	#os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
 	project_folder = '/home/dvmoors1/BB/DT_sim'
@@ -485,51 +494,44 @@ if __name__ == '__main__':
 	PO = DT_sim()
 
 	# analyze behavior
+	# behavioral experiments 1 and 2
+	#PO.prepareBEH(project, 'exp_1', factors, [['DTsim','DTdisU','DTdisP'],['yes','no']], project_param, to_filter)
+	#PO.prepareBEH(project, 'exp_2', factors, [['DT_sim','DT_dis_DP','DT_dis_P'],['yes','no']], project_param, to_filter)
+	#PO.plotExp1_2_3(exp = 'exp_1', excl_pos_bias = True)
+	#PO.plotExp1_2_3(exp = 'exp_2', excl_pos_bias = True)
+	
+	# eeg experiment
 	#PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
-	#PO.mainBEH(exp = 'beh', column = 'dist_high',  ylim = (200,600))
-	#PO.singleTarget()
-	#PO.mainBEH(exp = 'exp_2', column = 'target_high',  ylim = (350,900))
+	#PO.plotExp1_2_3(exp = 'beh', excl_pos_bias = True)
+	#PO.singleTargetEEG()
 
 	# analyze eeg
-	#PO.countCndCheck()
+	PO.countCndCheck()
 	#PO.plotERP()
 	#PO.plotBDM(header = 'target')
 	#PO.plotBDM(header = 'dist')
-	PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
+	#PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
 
+	# # run preprocessing
+	# for sj in range(1,25):
+	# 	print 'starting subject {}'.format(sj)
 
-	# run preprocessing
-	for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]:
-		pass
+	# 	# for session in [1,2]:
+	# 	# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	# 	# 		t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+	# 	# 		trigger = trigger, project_param = project_param, 
+	# 	# 		project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
-		#PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		#  t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		#  trigger = trigger, project_param = project_param, 
-		#  project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
-
-
-
-		beh, eeg = PO.loadData(sj, (-0.8,0.5),False, 'HEOG', 1)
-
-		# TF analysis
-		tf = TF(beh, eeg)
-		tf.TFanalysis(sj = sj, cnds = ['DTsim-yes','DTdisP-yes','DTdisDP-yes','DTsim-no','DTdisP-no','DTdisDP-no'], 	
-				  	cnd_header ='condition', base_period = (-0.8,-0.6), 
-					time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), factor = {'dist_loc': ['1','2','4','5']}, downsample = 4)
-
-	#  	#TF analysis
-	# 	tf = TF()
-	# 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
-	# 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
-	# 			  time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
+	# 	beh, eeg = PO.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
 
 	# 	# ERP analysis
-	# 	erp = ERP(header = 'dist_loc', baseline = [-0.45,-0.25], eye = False)
-	# 	erp.selectERPData(sj = sj, time = [-0.45, 0.55], l_filter = 40) 
+	# 	erp = ERP(eeg, beh, header = 'dist_loc', baseline = [-0.45,-0.25])
+	# 	erp.selectERPData(time = [-0.45, 0.55], l_filter = 30) 
 	# 	erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
 	# 									r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
 	# 	erp.topoFlip(left = [2])
 	# 	erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
+
 
 	# 	# BDM analysis
 	# 	# feature decoding (dist)
@@ -544,3 +546,20 @@ if __name__ == '__main__':
 	#	bdm = BDM('dist_loc', nr_folds = 10, eye = False, elec_oi = 'all', downsample = 128, bdm_filter = None)
 	#	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', 
 	#				bdm_labels = ['0','1','2','3','4','5'], time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+
+
+		# TF analysis
+		#tf = TF(beh, eeg)
+		#tf.TFanalysis(sj = sj, cnds = ['DTsim-yes','DTdisP-yes','DTdisDP-yes','DTsim-no','DTdisP-no','DTdisDP-no'], 	
+		#		  	cnd_header ='condition', base_period = (-0.8,-0.6), 
+		#			time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), factor = {'dist_loc': ['1','2','4','5']}, downsample = 4)
+
+	#  	#TF analysis
+	# 	tf = TF()
+	# 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
+	# 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
+	# 			  time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
+
+
+
+

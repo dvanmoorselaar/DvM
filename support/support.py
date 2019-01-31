@@ -23,7 +23,7 @@ def select_electrodes(ch_names, subset):
 
 	return picks	
 
-def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1):
+def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None):
 	'''
 
 	'''
@@ -35,8 +35,11 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1):
 		s,e = [np.argmin(abs(eeg.times - t)) for t in eye_window]
 		eog = eeg._data[nan_idx,eeg.ch_names.index(eye_ch),s:e]
 
-		idx_eye = eog_filt(eog, sfreq = eeg.info['sfreq'])
-		beh['eye_bins'][nan_idx[idx_eye]] = 99	
+		if eye_dict != None:
+
+			idx_eye = eog_filt(eog, sfreq = eeg.info['sfreq'], windowsize = eye_dict['windowsize'], 
+								windowstep = eye_dict['windowstep'], threshold = eye_dict['threshold'])
+			beh['eye_bins'][nan_idx[idx_eye]] = 99	
 	
 	# remove trials from beh and eeg objects
 	to_drop = np.where(beh['eye_bins'] > eye_thresh)[0]	
@@ -49,21 +52,42 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1):
 
 def eog_filt(eog, sfreq, windowsize = 50, windowstep = 25, threshold = 30):
 	'''
-	evaluate nan trials for eye movements
+	Split-half sliding window approach. This function slids a window in prespecified steps over 
+	eog data. If the change in voltage from the first half to the second half of the window is greater 
+	than a threshold, this trial is marked for rejection
 
-	'''
+	Arguments
+	- - - - - 
+	eog(array): epochs X times. Data used for trial rejection
+	sfreq (float): digitizing frequency
+	windowsize (int): size of the sliding window (in ms)
+	windowstep (int): step size to slide window over the trial
+	threshold (int): threshold in microvolt
 
-	windowstep /= 1000 / sfreq
-	windowsize /= 1000 / sfreq
-	s, e = 0, eog.shape[-1] - 1
+	Returns
+	- - - -
 
+	eye_trials: array that specifies for each epoch whether eog_filt detected an eye movement
+
+	'''	
+
+	# shift miliseconds to samples
+	windowstep /= 1000.0 / sfreq
+	windowsize /= 1000.0 / sfreq
+	s, e = 0, eog.shape[-1]
+
+	# create multiple windows based on window parameters (accept that final samples of epoch may not be included) 
+	window_idx = [(i, i + int(windowsize)) for i in range(s, e, int(windowstep)) if i + int(windowsize) < e]
+
+	# loop over all epochs and store all eye events into a list
 	eye_trials = []
 	for i, x in enumerate(eog):
 		
-		for j in np.arange(s, e - windowstep, windowstep):
+		for idx in window_idx:
+			window = x[idx[0]:idx[1]]
 
-			w1 = np.mean(x[int(j):int(j + windowsize / 2) - 1])
-			w2 = np.mean(x[int(j + windowsize / 2):int(j + windowsize) - 1])
+			w1 = np.mean(window[:window.size/2])
+			w2 = np.mean(window[window.size/2:])
 
 			if abs(w1 - w2) > threshold:
 				eye_trials.append(i)
@@ -71,7 +95,7 @@ def eog_filt(eog, sfreq, windowsize = 50, windowstep = 25, threshold = 30):
 
 	eye_trials = np.array(eye_trials, dtype = int)			
 
-	print 'selected {} bad trials via eyethreshold'.format(eye_trials.size)	
+	print ('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(i) * 100))	
 
 	return eye_trials	
 

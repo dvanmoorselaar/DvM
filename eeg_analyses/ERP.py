@@ -24,7 +24,7 @@ from eeg_support import *
 
 class ERP(FolderStructure):
 
-	def __init__(self, eeg, beh, header, baseline, eye = False):
+	def __init__(self, eeg, beh, header, baseline):
 		''' 
 
 		Arguments
@@ -41,7 +41,6 @@ class ERP(FolderStructure):
 		self.header = header
 		self.baseline = baseline
 		self.flipped = False
-		self.eye = eye
 
 	def selectERPData(self, time = [-0.3, 0.8], l_filter = False):
 		''' 
@@ -188,7 +187,7 @@ class ERP(FolderStructure):
 		self.flipped = True	
 
 
-	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', midline = None, balance = False, erp_name = '', plot = True):
+	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', midline = None, balance = False, erp_name = ''):
 		''' 
 
 		Creates laterilized ERP's by cross pairing left and right electrodes with left and right position labels.
@@ -205,7 +204,6 @@ class ERP(FolderStructure):
 		midline (None | dict): Can be used to limit analysis to trials where a specific 
 								stimulus (key of dict) was presented on the midline (value of dict)
 		erp_name (str): name of the pickle file to store erp data
-		plot (bool): show condition averaged difference waves for each subject
 
 		Returns
 		- - - -
@@ -299,12 +297,6 @@ class ERP(FolderStructure):
 		# save erps	
 		with open(self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name)) ,'wb') as handle:
 			pickle.dump(erps, handle)	
-
-		if plot:
-			plt.legend(loc = 'best')
-			plt.savefig(self.FolderTracker(['erp',self.header],'sj-{}_diff.pdf'.format(sj)))	
-			plt.close()	
-
 
 	def topoSelection(self, sj, conditions = 'all', loc = 'all', midline = None, balance = False, topo_name = ''):
 		''' 

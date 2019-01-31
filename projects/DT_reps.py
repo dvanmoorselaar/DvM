@@ -58,11 +58,11 @@ sj_info = {'1': {'tracker': (True, 'asc', 500, 'Onset placeholder',0), 'replace'
 project = 'DT_reps'
 part = 'beh'
 factors = ['block_type','repetition']
-labels = [['DrTv','DvTr','DvTv'],[1,2,3,4]]
+labels = [['DrTv','DvTr','DvTv'],[0,1,2,3]]
 to_filter = ['RT'] 
 project_param = ['practice','nr_trials','trigger','condition','RT', 'subject_nr',
 				'block_type', 'correct','dist_loc','dist_orient','target_loc',
-				'target_orient','repetition','fixed_pos', 'set_size']
+				'target_orient','repetition','fixed_pos', 'set_size', 'block_cnt']
 
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
@@ -91,8 +91,8 @@ class DT_reps(FolderStructure):
 		PP.combine_single_subject_files(save = False)
 		PP.select_data(project_parameters = project_param, save = False)
 		PP.filter_data(to_filter = to_filter, filter_crit = ' and correct == 1', cnd_sel = True, save = True)
-		PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
-		PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
+		#PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
+		#PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = 'RT_filter == True', save = True)
 		PP.save_data_file()
 
 	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
@@ -414,6 +414,127 @@ class DT_reps(FolderStructure):
 			np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
 			np.savetxt(self.FolderTracker(['beh-exp2','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
 
+	def BEHexp3(self):
+		'''
+		analyzes experiment 3 as reported in the MS
+		'''
+
+		# read in data
+		file = self.FolderTracker(['beh','analysis'], filename = 'preprocessed.csv')
+		data = pd.read_csv(file)
+
+		# create pivot (main analysis)
+		data = data.query("RT_filter == True")
+		pivot = data.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','repetition'], aggfunc = 'mean')
+		pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+
+		# plot conditions
+		plt.figure(figsize = (20,10))
+
+		ax = plt.subplot(1,2, 1, title = 'Repetition effect', ylabel = 'RT (ms)', xlabel = 'repetition', ylim = (350,550), xlim = (0,4))
+		for b, bl in enumerate(['DrTv','DvTv','DvTr']):
+			pivot[bl].mean().plot(yerr = pivot_error[bl], 
+											label = bl, 
+											ls = '-', color = ['red','blue','green'][b])
+		
+		plt.xticks([0,1,2,3])	
+		plt.legend(loc='best', shadow = True)
+		sns.despine(offset=10, trim = False)
+
+		# create pivot (normalized data)
+		norm = pivot.values
+		for i,j in [(0,4),(4,8),(8,12)]:
+			norm[:,i:j] /= np.matrix(norm[:,i]).T
+
+		pivot = pd.DataFrame(norm, index = np.unique(data['subject_nr']), columns = pivot.keys())
+		pivot_error = pd.Series(confidence_int(pivot.values), index = pivot.keys())
+
+		# fit data to exponential decay function (and plot normalized data)
+		ax = plt.subplot(1,2, 2, title = 'Normalized RT', ylabel = 'au', xlabel = 'repetition', ylim = (0.5,1), xlim = (0,4))
+		alpha, delta = np.zeros((pivot.shape[0],6)),  np.zeros((pivot.shape[0],6))
+		c_idx = 0
+		headers = []
+		for b, bl in enumerate(['DrTv','DvTv','DvTr']):
+			for s, set_size in enumerate([4,8]):
+				headers.append('{}_{}'.format(bl,set_size))
+				X = pivot[bl].values
+				pivot[bl].mean().plot(yerr = pivot_error[bl], 
+												label = bl,
+												ls = '-', color = ['red','blue','green'][b])
+				for i, x in enumerate(X):
+					popt, pcov = curvefitting(range(4),x,bounds=(0, [1,1])) 
+					alpha[i, c_idx] = popt[0]
+					delta[i, c_idx] = popt[1]
+				c_idx += 1
+
+		plt.xticks([0,1,2,3])	
+		plt.legend(loc='best', shadow = True)
+		sns.despine(offset=50, trim = False)
+
+		plt.savefig(self.FolderTracker(['beh','analysis','figs'], filename = 'main-ana.pdf'))			
+		plt.close()	
+
+		# save parameters for JASP 
+		np.savetxt(self.FolderTracker(['beh','analysis'], filename = 'fits_alpha-JASP.csv'), alpha, delimiter = "," ,header = ",".join(headers), comments='')
+		np.savetxt(self.FolderTracker(['beh','analysis'], filename = 'fits_delta-JASP.csv'), delta, delimiter = "," ,header = ",".join(headers), comments='')
+
+	def primingCheck(self):
+		'''
+		Analyze whether the observed effects simply reflect priming or priming plus
+		'''
+
+		# read in data
+		file = self.FolderTracker(['beh','analysis'], filename = 'preprocessed.csv')
+		beh = pd.read_csv(file)
+
+		# first determine the priming/suppresssive effects in distractor repeat sequences (now collapsed across conditions)
+		beh = beh.query("RT_filter == True")
+		DR = np.diff(beh.pivot_table(values = 'RT', index = 'subject_nr', columns = ['block_type','repetition'], aggfunc = 'mean')['DrTv'])
+		DR_error = pd.Series(confidence_int(DR))
+
+		# now calculate the priming effect in baseline sequences (still contains multiple reps)
+		beh = beh[beh['block_type'] == 'DvTv']
+		beh['priming'] = np.nan
+		beh['priming'] = beh['priming'].apply(pd.to_numeric)
+		for i in range(1, beh.shape[0]):
+			if (beh['dist_loc'].iloc[i - 1] == beh['dist_loc'].iloc[i]) and \
+			(beh['nr_trials'].iloc[i] - 1 == beh['nr_trials'].iloc[i-1]) and\
+			(beh['subject_nr'].iloc[i -1] == beh['subject_nr'].iloc[i]) and \
+			(beh['repetition'].iloc[i] > beh['repetition'].iloc[i-1]): # search for repetitions, that are direct, within the same subject and within the same sequence
+				beh['priming'].iloc[i] = beh['RT'].iloc[i]- beh['RT'].iloc[i - 1]
+
+		# get priming effect
+		PR = beh.pivot_table(values = 'priming', index = 'subject_nr', columns = ['repetition'], aggfunc = 'mean')	
+		PR_error = pd.Series(confidence_int(PR.values))
+		PR_mean_error = PR.mean(axis = 1).values.std()/sqrt(PR.shape[0])
+
+		# save output for JASP
+		headers = ['DR1','DR2','DR3','PR1','PR2','PR3','PRave']
+		x = np.hstack((np.hstack((DR, PR)), PR.mean(axis =1).reshape(DR.shape[0],1)))
+			
+		# save as .csv file
+		np.savetxt(self.FolderTracker(['beh','analysis'], filename = 'priming.csv'), x, delimiter = "," ,header = ",".join(headers), comments='')	
+		t, p = ttest_rel(DR, PR)
+		print t, p
+
+		# plot comparison / plot average
+		plt.figure(figsize = (10,10))
+		plt.bar(np.arange(1,4)-0.1,abs(DR.mean(axis = 0)), width = 0.2, yerr = DR_error, align = 'center', color = 'red', label = 'Dr')
+		plt.bar(np.arange(1,4)+0.1,abs(PR.mean(axis = 0).values), width = 0.2,  yerr = PR_error,align = 'center', color = 'blue', label = 'baseline')
+		plt.ylim((0,40))
+		plt.legend(loc = 'best')
+		sns.despine(offset=50, trim = False)
+		plt.savefig(self.FolderTracker(['beh','analysis','figs'], filename = 'priming.pdf'))	
+		plt.close()
+
+		plt.figure(figsize = (10,10))
+		plt.bar(np.arange(1,4)-0.1,abs(DR.mean(axis = 0)), width = 0.2, yerr = DR_error, align = 'center', color = 'red', label = 'Dr')
+		plt.bar(np.arange(1,4)+0.1,[abs(PR.mean().mean())]*3, width = 0.2,  yerr = [PR_mean_error]*3,align = 'center', color = 'blue', label = 'baseline')
+		plt.ylim((0,40))
+		plt.legend(loc = 'best')
+		sns.despine(offset=50, trim = False)
+		plt.savefig(self.FolderTracker(['beh','analysis','figs'], filename = 'priming_ave.pdf'))	
+		plt.close()
 
 	def ctfTemp(self):
 		'''
@@ -469,7 +590,7 @@ class DT_reps(FolderStructure):
 			yrange = [0.005, 0.004]
 			rep_cnds = ['DvTr_0','DvTr_3']
 		elif repetition == 'dist_loc':
-			ylim = [[-0.05,0.16],[-0.2,0.1]]
+			ylim = [[-0.05,0.16],[-0.35,0.1]]
 			yrange = [0.005, 0.005]
 			rep_cnds = ['DrTv_0','DrTv_3']	
 		
@@ -479,24 +600,19 @@ class DT_reps(FolderStructure):
 		times = info['times'] - 0.25
 
 		# read in Total slopes collapsed across conditions
-		freqs = []
 		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition], filename = 'all_*_slopes-Foster_all.pickle'))
-		for file in files:
-			freqs.append(pickle.load(open(file, 'rb')))
+		print files
+		freqs = [pickle.load(open(file, 'rb')) for file in files]
 
 		# read in Total and Evoked slopes within alpha band
-		alpha = []
-		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition], filename = 'cnds_*_slopes-Foster_theta.pickle'))
-		for file in files:
-			alpha.append(pickle.load(open(file, 'rb')))
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition], filename = 'cnds_*_slopes-Foster_alpha.pickle'))
+		alpha = [pickle.load(open(file, 'rb')) for file in files]
 		#self.ctfANOVAinput(times, window, alpha, ['DvTv_0','DvTv_3'] + rep_cnds, repetition )
 
 		# read in repetition effect within alpha band
-		reps = []
 		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye',repetition[:-4] +'-1'], filename = 'cnds_*_slopes-Foster_alpha.pickle'))
-		for file in files:
-			reps.append(pickle.load(open(file, 'rb')))
-
+		reps = [pickle.load(open(file, 'rb')) for file in files]
+		
 		# plot total across frequencies
 		ax = plt.subplot(221, xlabel = 'Time (ms)', ylabel = 'freqs')  
 		slopes = np.stack([ctf['all']['T_slopes'] for ctf in freqs])
@@ -507,6 +623,8 @@ class DT_reps(FolderStructure):
 		X[p_vals > 0.01] = 0
 		plt.imshow(X, cmap = cm.viridis, interpolation='none', aspect='auto', 
 						  origin = 'lower', extent=[times[0],times[-1],4,34])
+		plt.axhline(y = 8, color = 'white', ls = '--')
+		plt.axhline(y = 12, color = 'white', ls = '--')
 		plt.colorbar()
 
 		# plot evoked and total effects
@@ -541,7 +659,7 @@ class DT_reps(FolderStructure):
 						
 		# save figures
 		plt.tight_layout()
-		plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'main-{}-theta.pdf'.format(repetition)))
+		plt.savefig(self.FolderTracker(['ctf','all_channels_no-eye','MS-plots'], filename = 'main-{}-alpha.pdf'.format(repetition)))
 		plt.close()	
 
 	def ctfANOVAinput(self, times, window, slopes, factors, repetition ):
@@ -721,7 +839,7 @@ class DT_reps(FolderStructure):
 		print 'onset ' + repetition, onset *1000, t_value
 
 
-	def bdmPlot(self, repetition, color = ['red'], window = (-0.55,0)):
+	def bdmPlot(self, repetition, color = ['red'], window = (-0.55,0), plot_clusters):
 		'''
 		Plot as shown in MS.
 			- CTF across a range of frequencies collapsed across conditions (top left)
@@ -780,11 +898,21 @@ class DT_reps(FolderStructure):
 
 		# # plot GAT matrices
 		plt_idx = [9,10,13,14]
+		perm_info = {}
 		for c, cnd in enumerate((['DvTv_0','DvTv_3'] + rep_cnds)):
 			ax = plt.subplot(4,4,plt_idx[c], xlabel = 'Train ?? time (ms)',  ylabel = 'Test ?? time (ms)', title = cnd) 
 			dec = np.stack([b[cnd]['standard'] for b in bdm])
+			perm_info[cnd] = dec
 			X = threshArray(dec, 1/6.0, method = 'ttest', p_value = 0.05)
-			plt.imshow(X, norm = norm, cmap = cm.bwr, interpolation='none', aspect='auto', 
+			if plot_clusters:
+				#if c == 1:
+				#	sig_cl = clusterBasedPermutation(perm_info[rep_cnds[0]], perm_info[rep_cnds[1]], p_val = 0.05)	
+				if c == 3:	
+					sig_cl = clusterBasedPermutation(perm_info[rep_cnds[0]] - perm_info[rep_cnds[0]], perm_info['DvTv_0'] - perm_info['DvTv_3'], p_val = 0.05)	
+				plt.imshow(np.array(sig_cl, dtype = bool), aspect='auto', 
+					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]])
+			else:
+				plt.imshow(X, norm = norm, cmap = cm.bwr, interpolation='none', aspect='auto', 
 					origin = 'lower', extent=[times[0],times[-1],times[0],times[-1]], vmin = 0.14, vmax = 0.28)
 			#if c in [1,3]:
 			#	plt.colorbar() 
@@ -1803,7 +1931,7 @@ if __name__ == '__main__':
 	#PO.prepareBEH(project, part, factors, labels, project_param)
 
 	#preprocessing and main analysis
-	for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]: 
+	for sj in [20,21,22,23,24]: 
 
 
 		# RUN PREPROCESSING
@@ -1815,7 +1943,6 @@ if __name__ == '__main__':
 
 		# READ IN PREPROCESSED DATA FOR FURTHER ANALYSIS
 		#PO.updateBEH(sj)
-		#sj = 23
 		#beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1)
 
 		for header in ['target_loc', 'dist_loc']:
@@ -1886,8 +2013,10 @@ if __name__ == '__main__':
 
 	# analysis manuscript
 	# BEH
-	PO.BEHexp1(set_size_control = False)
-	PO.BEHexp2(set_size_control = False)
+	#PO.BEHexp1(set_size_control = False)
+	#PO.BEHexp2(set_size_control = False)
+	#PO.primingCheck()
+	#PO.BEHexp3()	
 
 	# ERP 
 	#PO.erpPlot(repetition = 'target_loc', color = 'green')
@@ -1908,8 +2037,8 @@ if __name__ == '__main__':
 	# 						cmpnts = dict(N2pc = (0.2, 0.3), Pd = (0.25, 0.4)))
 
 	# BDM
-	#PO.bdmPlot(repetition = 'target_loc', color = 'green')
-	#PO.bdmPlot(repetition = 'dist_loc', color = 'red')
+	PO.bdmPlot(repetition = 'target_loc', color = 'green')
+	PO.bdmPlot(repetition = 'dist_loc', color = 'red')
 	
 	
 	#PO.bdmDiag()
@@ -1929,5 +2058,6 @@ if __name__ == '__main__':
 
 	# TF.
 	#PO.plotTF()
+
 
 
