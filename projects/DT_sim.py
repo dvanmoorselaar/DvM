@@ -61,7 +61,7 @@ labels = [['DTsim','DTdisP','DTdisDP'],['yes','no']]
 to_filter = ['RT'] 
 project_param = ['practice','nr_trials','trigger','condition','RT', 'subject_nr',
 				'block_type', 'correct','dist_high','dist_loc','dist_orient',
-		         'dist_type','high_loc', 'target_high','target_loc','target_type']
+		         'dist_type','high_loc', 'target_high','target_loc','target_type', 'block_cnt']
 
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
@@ -133,8 +133,8 @@ class DT_sim(FolderStructure):
 
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
-		if sj == 5 and session == 1: # correct for starting eeg recording during practice
-			events = events[59:,:]
+		#if sj == 5 and session == 1: # correct for starting eeg recording during practice
+		#	events = events[59:,:]
 
 		beh, missing = EEG.matchBeh(sj, session, events, trigger, 
 		                             headers = project_param)
@@ -159,18 +159,47 @@ class DT_sim(FolderStructure):
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, trigger)
 
+
+	def detectSaccades(self, sj):
+		'''
+		Visual inspection of saccades detected by automatic step algorythm
+		'''
+
+		# read in epochs
+		beh, eeg = self.loadData(sj, (-0.75,0.55),False)# 'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+		front_electr = [eeg.ch_names.index(e) for e in [
+			'Fp1', 'Fpz', 'Fp2', 'AF7', 'AF3', 'AFz', 'AF4', 'AF8', 'VEOG', 'HEOG']]
+
+		# get eog data of interest
+		s, e = [np.argmin(abs(eeg.times - t)) for t in (-0.75,0.55)]
+		eog = eeg._data[:,eeg.ch_names.index('HEOG'),s:e]
+		eye_idx = eog_filt(eog, eeg.info['sfreq'], windowsize = 200, windowstep = 10, threshold = 25)	
+
+
+		bad_eogs = eeg[eye_idx]
+		idx_bads = bad_eogs.selection
+
+		bad_eogs.plot(block=True, n_epochs=5, n_channels=len(
+			front_electr), picks=front_electr, scalings='auto')
+
+		missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eogs.selection])
+		eye_idx = np.delete(eye_idx, missing)
+
+		beh['eye_bins'][eye_idx] = 99
+		beh = beh.to_dict('list')
+
+		pickle.dump(beh,open(self.FolderTracker(extension=['beh', 'processed'],
+            	filename='subject-{}_all.pickle'.format(sj)),'wb'))
+
 	def countCndCheck(self):
 		'''
 		Checks min condition number per cnd after preprocessing
 		'''
 
-		embed()
-		# loop across all processed behavior files
-		files = glob.glob(self.FolderTracker(['beh', 'processed'], filename = 'subject-*_all.pickle'))
-		for file in files:
-			# open file
-			with open(file, 'rb') as handle:
-				beh = pickle.load(handle)
+		# loop across all subjects
+		sj_info = []
+		for sj in range(1,25):
+			beh, eeg = self.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = None)
 
 			# get minimum condition number
 			cnd_info = np.unique(beh['condition'], return_counts = True)	
@@ -184,8 +213,10 @@ class DT_sim(FolderStructure):
 			# calculate percentage of min condition
 			min_p =  cnd_info[1][cnd_sort[0]]/max_trial * 100
 			
-			if min_p < 75:
-				print min_p, cnd_info[0][cnd_sort[0]], file
+			if min_p < 70:
+				sj_info.append((min_p, cnd_info[0][cnd_sort[0]], sj))
+
+		embed()
 
 	def plotExp1_2_3(self, exp = 'exp_1', excl_pos_bias = False):
 		'''
@@ -299,6 +330,61 @@ class DT_sim(FolderStructure):
 		sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
 		for cl in sig_cl:
 			plt.plot(times[cl], np.ones(cl.size) * y, color = color, ls = '--')
+
+
+	def adjustBeh(self):
+		'''
+		Add a factor to the beh file so that decoding can be done on trials with and without target type repeats
+		in DTdisDP 
+		'''	
+
+		# read in preprocessed beh	
+		for sj in range(1,25):	
+			beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
+								filename = 'subject-{}_all.pickle'.format(sj)),'rb'))
+
+			# read in raw behavior
+			raws = []
+			files = glob.glob(self.FolderTracker(extension = ['beh','raw'], 
+								filename = 'subject-{}_ses_*.csv'.format(sj)))
+			for file in files:
+				raws.append(pd.read_csv(file))
+			raws = pd.concat(raws)
+			raws = raws[raws['practice'] == 'no']
+			raws.reset_index(inplace = True)
+
+			# check for target repeats
+			target_rep =  np.zeros(raws.shape[0], dtype = bool)
+			for i in range(raws.shape[0]):
+				if raws['nr_trials'][i] > 1:
+					if raws['target_type'][i] == raws['target_type'][i - 1]:
+						target_rep[i] = True
+
+			# find indices that survived preprocessin
+			ses = 0
+			idx = []
+			tr_old = 1
+			for tr in beh['nr_trials']:
+				if tr < tr_old: # first trial of block can't be a repeat
+					ses = 1
+				raw_idx = np.where(raws['nr_trials'] == tr)[0]
+				if raw_idx.size == 1:
+					idx.append(raw_idx[0])
+				else:
+					idx.append(raw_idx[ses])	
+				tr_old = tr
+	
+			# check selection 	
+			if np.sum(raws['nr_trials'][idx].values == beh['nr_trials']) != len(beh['nr_trials']):
+				print 'selected the wrong trials for subject {}'.format(sj)
+
+			beh['target_rep'] = target_rep[idx]
+
+			# save updated pickle file
+			pickle.dump(beh, open(self.FolderTracker(extension = ['beh','processed'], 
+						filename = 'subject-{}_all.pickle'.format(sj)),'wb'))	
+
+
 
 
 	def plotERP(self):
@@ -445,7 +531,7 @@ class DT_sim(FolderStructure):
 
 		#time = (-0.05, 0)
 		#s, e = [np.argmin(abs(info['times'] - t)) for t in time]
-		files = glob.glob(self.FolderTracker(['tf', method, 'dist_loc'], filename = '*-tf.pickle'))
+		files = glob.glob(self.FolderTracker(['tf', method], filename = '*-tf.pickle'))
 		tf = []
 		for file in files:
 			with open(file ,'rb') as handle:
@@ -454,20 +540,20 @@ class DT_sim(FolderStructure):
 		contra_idx = [info['ch_names'].index(e) for e in c_elec]
 		ipsi_idx = [info['ch_names'].index(e) for e in i_elec]
 
+		embed()
 		plt.figure(figsize = (40,15))
-		for plt_idx, cnd in enumerate(['DTsim-no','DTdisP-no','DTdisDP-no', 'DTsim-yes','DTdisP-yes','DTdisDP-yes']):
-			ax = plt.subplot(2,3 , plt_idx + 1, title = cnd, xlabel = 'time (ms)', ylabel = 'freq')
+		for plt_idx, cnd in enumerate(['DTsim','DTdisP','DTdisDP']):
+			ax = plt.subplot(1,3 , plt_idx + 1, title = cnd, xlabel = 'time (ms)', ylabel = 'freq')
 			contra = np.stack([np.mean(tf[i][cnd]['base_power'][:,contra_idx,:], axis = 1) for i in range(len(tf))])
 			ipsi = np.stack([np.mean(tf[i][cnd]['base_power'][:,ipsi_idx,:], axis = 1) for i in range(len(tf))])
 			X = (contra - ipsi) 
-			#sig = clusterBasedPermutation(X,0)
-			X = X.mean(axis = 0)
-			#print X[:,s:e].mean(axis = 1)
-			#X[sig == 1] = 0
-			plt.imshow(X, cmap = cm.jet, interpolation='none', aspect='auto', 
+			X_thresh = threshArray(X, 0, method = 'ttest', p_value = 0.05)
+			X_thresh = np.array(X_thresh, dtype = bool)
+			plt.imshow(X.mean(axis = 0), cmap = cm.jet, interpolation='none', aspect='auto', 
 							   origin = 'lower', extent=[times[0],times[-1],5,40],
 							   vmin = -1, vmax = 1)
-
+			plt.contour(X_thresh,origin = 'lower')
+			
 			plt.axvline (x = -0.25, color = 'white', ls ='--')
 			plt.axvline (x = 0, color = 'white', ls ='--')
 			plt.yticks(info['frex'][::5])
@@ -482,9 +568,9 @@ class DT_sim(FolderStructure):
 
 if __name__ == '__main__':
 
-	#os.environ['MKL_NUM_THREADS'] = '5' 
-	#os.environ['NUMEXP_NUM_THREADS'] = '5'
-	#os.environ['OMP_NUM_THREADS'] = '5'
+	os.environ['MKL_NUM_THREADS'] = '5' 
+	os.environ['NUMEXP_NUM_THREADS'] = '5'
+	os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
 	project_folder = '/home/dvmoors1/BB/DT_sim'
@@ -492,6 +578,7 @@ if __name__ == '__main__':
 
 	# initiate current project
 	PO = DT_sim()
+
 
 	# analyze behavior
 	# behavioral experiments 1 and 2
@@ -505,54 +592,117 @@ if __name__ == '__main__':
 	#PO.plotExp1_2_3(exp = 'beh', excl_pos_bias = True)
 	#PO.singleTargetEEG()
 
+	# adjust behavior file
+	#PO.adjustBeh()
+
 	# analyze eeg
-	PO.countCndCheck()
+	#PO.countCndCheck()
+
+	
 	#PO.plotERP()
 	#PO.plotBDM(header = 'target')
 	#PO.plotBDM(header = 'dist')
 	#PO.plotTF(c_elec = ['PO7','PO3','O1'], i_elec= ['PO8','PO4','O2'], method = 'wavelet')
 
 	# # run preprocessing
-	# for sj in range(1,25):
-	# 	print 'starting subject {}'.format(sj)
+	for sj in [5,6,7,8,9,10,11,12]:
+	 	print 'starting subject {}'.format(sj)
 
-	# 	# for session in [1,2]:
-	# 	# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-	# 	# 		t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-	# 	# 		trigger = trigger, project_param = project_param, 
-	# 	# 		project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+		#for session in [2]:
+		# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		# 		t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		# 		trigger = trigger, project_param = project_param, 
+		# 		project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
-	# 	beh, eeg = PO.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+		#PO.detectSaccades(sj = sj)
+		beh, eeg = PO.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = None)#dict(windowsize = 200, windowstep = 10, threshold = 20))
 
-	# 	# ERP analysis
-	# 	erp = ERP(eeg, beh, header = 'dist_loc', baseline = [-0.45,-0.25])
-	# 	erp.selectERPData(time = [-0.45, 0.55], l_filter = 30) 
-	# 	erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
-	# 									r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
-	# 	erp.topoFlip(left = [2])
-	# 	erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
+		# # ERP analysis
+		#erp = ERP(eeg, beh, header = 'dist_loc', baseline = [-0.45,-0.25])
+		#erp.selectERPData(time = [-0.45, 0.55], l_filter = 30) 
+		#erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
+		# 								r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
+		#erp.ipsiContra(sj = sj, left = [1,2], right = [4,5], l_elec = ['PO7','PO3','O1'], 
+		#								r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main-two')
+		#erp.topoFlip(left = [1,2])
+		#erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
+		#erp.topoSelection(sj = sj, loc = [1,2,4,5], midline = {'target_loc': [0,3]}, topo_name = 'main-two')
 
+		# # BDM analysis (collapsed across low and high; exclude single target trials)
+		# # feature decoding (dist)
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
+		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 			excl_factor = dict(dist_loc = ['None']), gat_matrix = True)
 
-	# 	# BDM analysis
-	# 	# feature decoding (dist)
-	# 	bdm = BDM('all_channels', 'dist_type', nr_folds = 10, eye = False)
-	# 	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+		# # # feature decoding (target)
+		bdm = BDM(beh, eeg, decoding = 'target_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
+		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+					excl_factor = dict(dist_loc = ['None']), gat_matrix = True)
 
-	# 	# feature decoding (target)
-	# 	bdm = BDM('all_channels', 'target_type', nr_folds = 10, eye = False)
-	# 	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', subset = None, time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+		bdm = BDM(beh, eeg, decoding = 'target_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
+		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		 			excl_factor = dict(target_rep = [False]), gat_matrix = False)	
 	
-	#	# location decoding (dist_loc)
-	#	bdm = BDM('dist_loc', nr_folds = 10, eye = False, elec_oi = 'all', downsample = 128, bdm_filter = None)
-	#	bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', 
-	#				bdm_labels = ['0','1','2','3','4','5'], time = (-0.45, 0.55), nr_perm = 0, bdm_matrix = True)
+		# cross feature decoding (independent)
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 1, elec_oi = 'all', downsample = 128)
+		#bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 				tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
+		# 				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = True)
 
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 1, elec_oi = 'all', downsample = 128)
+		#bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 				tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
+		# 				tr_header = 'target_type', te_header = 'target_type', gat_matrix = False)
+
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 1, elec_oi = 'all', downsample = 128, bdm_filter = dict(alpha = (8,12)))
+		#bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		#				tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
+		#				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = False)
+
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 1, elec_oi = 'all', downsample = 128, bdm_filter = dict(theta = (4,8)))
+		#bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		#				tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
+		#				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = False)
+
+		# cross feature decoding (dependent)
+		#beh, eeg = PO.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = None)
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
+		#bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55),
+		#				tr_te_rel = 'dep', excl_factor = dict(dist_loc = ['None']),
+		#				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = False) # excl_factor already set
+
+		# beh, eeg = PO.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = None)
+		# bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, elec_oi = 'all', downsample = 128, bdm_filter = dict(alpha = (8,12)))
+		# bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55),
+		# 				tr_te_rel = 'dep', excl_factor = dict(dist_loc = ['None']),
+		# 				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = False) # excl_factor already set
+
+		# beh, eeg = PO.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = None)
+		# bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, elec_oi = 'all', downsample = 128, bdm_filter = dict(theta = (4,8)))
+		# bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55),
+		# 				tr_te_rel = 'dep', excl_factor = dict(dist_loc = ['None']),
+		# 				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = False) # excl_factor already set
+		# BDM analysis ( low and high seperate)
+		# feature decoding (dist)
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
+		#bdm.Classify(sj, cnds = ['DTsim-no','DTdisP-no','DTdisDP-no', 'DTsim-yes','DTdisP-yes','DTdisDP-yes'], cnd_header = 'condition', time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)
+
+		#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
+		# feature decoding (target)
+		#bdm = BDM(beh, eeg, decoding = 'target_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
+		#bdm.Classify(sj, cnds = ['DTsim-no','DTdisP-no','DTdisDP-no', 'DTsim-yes','DTdisP-yes','DTdisDP-yes'], cnd_header = 'condition', time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)	
+		
+
+		# location decoding (dist_loc)
+		#bdm = BDM(beh, eeg, decoding = 'dist_loc', nr_folds = 10, elec_oi = 'all', downsample = 128)
+		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', 
+		#			bdm_labels = ['0','1','2','3','4','5'], time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)
 
 		# TF analysis
 		#tf = TF(beh, eeg)
-		#tf.TFanalysis(sj = sj, cnds = ['DTsim-yes','DTdisP-yes','DTdisDP-yes','DTsim-no','DTdisP-no','DTdisDP-no'], 	
-		#		  	cnd_header ='condition', base_period = (-0.8,-0.6), 
-		#			time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), factor = {'dist_loc': ['1','2','4','5']}, downsample = 4)
+		#tf.TFanalysis(sj = sj, cnds = ['all','DTsim','DTdisP','DTdisDP'], 	
+		# 		  	cnd_header ='block_type', elec_oi = ['PO7', 'PO3', 'O1', 'PO8', 'PO4', 'O2'], base_period = (-0.8,-0.6), 
+		# 			time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_loc = [2]), downsample = 4)
 
 	#  	#TF analysis
 	# 	tf = TF()

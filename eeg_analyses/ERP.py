@@ -289,8 +289,6 @@ class ERP(FolderStructure):
 			ipsi = np.mean(ipsi, axis = 0) 
 			contra = np.mean(contra, axis = 0)
 
-			if plot:
-				plt.plot(contra.mean(axis = 0) - ipsi.mean(axis = 0), label = cnd)
 
 			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'elec': [l_elec, r_elec]})	
 

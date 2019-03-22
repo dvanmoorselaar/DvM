@@ -3,6 +3,7 @@ import mne
 import pickle
 import random
 import copy
+import itertools
 #import matplotlib
 #matplotlib.use('agg') # now it works via ssh connection
 
@@ -20,6 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from support.support import select_electrodes
+from scipy.stats import rankdata
 
 from IPython import embed
 
@@ -27,7 +29,7 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, beh, eeg, decoding, nr_folds, elec_oi = 'all', downsample = 128, bdm_filter = None):
+	def __init__(self, beh, EEG, decoding, nr_folds, elec_oi = 'all', downsample = 128, bdm_filter = None):
 		''' 
 
 		Arguments
@@ -40,7 +42,7 @@ class BDM(FolderStructure):
 		'''
 
 		self.beh = beh
-		self.eeg = eeg
+		self.EEG = EEG
 		self.decoding = decoding
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
@@ -52,17 +54,14 @@ class BDM(FolderStructure):
 		else:	 
 			self.bdm_type = 'broad'
 
-	def selectBDMData(self, time = (-0.3, 0.8), thresh_bin = 1):
+	def selectBDMData(self, time, excl_factor = None):
 		''' 
 
 		Arguments
 		- - - - - 
 
 		time (tuple | list): time samples (start to end) for decoding
-		thresh_bin (int): exclude trials with a deviation larger than 1. If 0 all trials are use for decoding analysis
-		downsample (int): downsample the data to this sampling range (save computational time)
-		filter (dict): filter data in specified frequency band
-
+		excl_factor (dict): see Classify documentation
 
 		Returns
 		- - - -
@@ -72,11 +71,26 @@ class BDM(FolderStructure):
 
 		'''
 
-		# read in processed behavior from pickle file
+		# load processed behavior and eeg
 		beh = self.beh
+		EEG = self.EEG
 
-		# read in eeg data 
-		EEG = self.eeg
+		# check whether trials need to be excluded
+		if type(excl_factor) == dict: # remove unwanted trials from beh
+			mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
+			for m in mask: 
+				mask[0] = np.logical_or(mask[0],m)
+			mask = mask[0]
+			if mask.sum() > 0:
+				beh.drop(np.where(mask)[0], inplace = True)
+				beh.reset_index(inplace = True)
+				EEG.drop(np.where(mask)[0])
+				print 'Dropped {} trials after specifying excl_factor'.format(sum(mask))
+				print 'NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN'
+
+			else:
+				print 'Trial exclusion: no trials selected that matched specified criteria'
+				mask = np.zeros(beh.shape[0], dtype = bool)
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
@@ -103,7 +117,7 @@ class BDM(FolderStructure):
 		return 	eegs, beh
 
 
-	def Classify(self,sj, cnds, cnd_header, bdm_labels = 'all', factor = None, time = (-0.3, 0.8), nr_perm = 0, gat_matrix = False, downscale = False, save = True):
+	def Classify(self,sj, cnds, cnd_header, time, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
 
 		Arguments
@@ -113,8 +127,10 @@ class BDM(FolderStructure):
 		cnds (list): list of condition labels (as stored in beh dict). 
 		cnd_header (str): variable name containing conditions of interest
 		bdm_labels (list | str): Specifies whether all labels or only a subset of labels should be decoded
-		factor (dict | None): if a dictionary only uses trials where a specific condition is met. 
-							Key in dict specifies column header, all values in dict are included in decoding  
+		excl_factor (dict | None): This gives the option to exclude specific conditions from analysis. 
+								For example, to only include trials where the cue was pointed to the left and not to the right specify
+								the following: factor = dict('cue_direc': ['right']). Mutiple column headers and multiple variables per 
+								header can be specified 
 		time (tuple | list): time samples (start to end) for decoding
 		nr_perm (int): If perm = 0, run standard decoding analysis. 
 					If perm > 0, the decoding is performed on permuted labels. 
@@ -132,17 +148,7 @@ class BDM(FolderStructure):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh = self.selectBDMData(time = time)	
-
-		# limit trials to factors of interest
-		if factor != None: # NOW ONLY SUPPORTS AND: COME UP WITH FIX
-			mask = [beh[key] == f for  key in factor.keys() for f in factor[key]]
-			for m in mask: # check whether this works with multiple masks
-				mask[0] = m * mask[0]
-			eegs = eegs[mask[0]]
-			beh = pd.DataFrame.from_dict(beh)	
-			beh.drop(np.where(~mask[0])[0], inplace = True)
-			beh.reset_index(inplace = True)
+		eegs, beh = self.selectBDMData(time, excl_factor)	
 		
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(beh, cnds, cnd_header)]
@@ -163,26 +169,26 @@ class BDM(FolderStructure):
 
 			if cnd != 'all':
 				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-				cnd_labels = beh[self.decoding][cnd_idx]
+				cnd_labels = beh[self.decoding][cnd_idx].values
 			else:
 				cnd_idx = np.arange(beh[cnd_header].size)
-				cnd_labels = beh[self.decoding]
+				cnd_labels = beh[self.decoding].values
 
 			if bdm_labels != 'all':
 				sub_idx = [i for i,l in enumerate(cnd_labels) if l in bdm_labels]	
 				cnd_idx = cnd_idx[sub_idx]
 				cnd_labels = cnd_labels[sub_idx]
 
-			nr_unique = np.unique(cnd_labels).size	
-			print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(cnd_labels)))
+			labels = np.unique(cnd_labels)
+			print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(cnd_labels, return_counts = True)))
 			
 			# initiate decoding array
 			if gat_matrix:
 				class_acc = np.empty((nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
-				label_info = np.empty((nr_perm, eegs.shape[2], eegs.shape[2], nr_unique)) * np.nan
+				label_info = np.empty((nr_perm, eegs.shape[2], eegs.shape[2], labels.size)) * np.nan
 			else:	
 				class_acc = np.empty((nr_perm, eegs.shape[2])) * np.nan	
-				label_info = np.empty((nr_perm, eegs.shape[2], nr_unique)) * np.nan
+				label_info = np.empty((nr_perm, eegs.shape[2], labels.size)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -195,12 +201,14 @@ class BDM(FolderStructure):
 						print('Minimum condition label downsampled to {}'.format(n))
 						bdm_info = {}
 
-					# select train and test trials 	
-					train_tr, test_tr, bdm_info = self.bdmTrialSelection(cnd_idx, cnd_labels, n, bdm_info)
+					# select train and test trials
+					train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info)
+					Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.decoding], eegs, train_tr, test_tr)
+
 
 					# do actual classification
-					class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
-				
+					#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
+					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
 					if i == 0:
 						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'info': bdm_info})
 					else:
@@ -211,10 +219,256 @@ class BDM(FolderStructure):
 	
 		# store classification dict	
 		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}_perm-{}-{}.pickle'.format(sj,bool(nr_perm -1),self.bdm_type)) ,'wb') as handle:
+			with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}-{}-rep.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
-			return classification		
+			return classification	
+
+	def crossClassify(self, sj, cnds, cnd_header, time, tr_header, te_header,tr_te_rel = 'ind', excl_factor = None, tr_factor = None, te_factor = None, bdm_labels = 'all', gat_matrix = False, save = True):	
+		'''
+		UPdate function but it does the trick
+		'''
+
+		# read in data 
+		print ('NR OF TRAIN LABELS DIFFER PER CONDITION!!!!')
+		print ('DOES NOT YET CONTAIN FACTOR SELECTION FOR DEPENDENT DATA')
+		eegs, beh = self.selectBDMData(time, excl_factor)	
+		nr_time = eegs.shape[-1]
+
+		max_tr = self.selectMaxTrials(beh, cnds, cnd_header)
+
+		if cnds == 'all':
+			cnds = [cnds]
+
+		if tr_te_rel == 'ind':	
+			# use train and test factor to select independent trials!!!
+			beh = pd.DataFrame.from_dict(beh)	
+			tr_factor = dict(dist_loc = ['0','1','2','3','4','5'])
+			tr_mask = [(beh[key] == f).values for  key in tr_factor.keys() for f in tr_factor[key]]
+			for m in tr_mask: 
+					tr_mask[0] = np.logical_or(tr_mask[0],m)
+			tr_eegs = eegs[tr_mask[0]]
+			tr_beh = beh.drop(np.where(~tr_mask[0])[0])
+			tr_beh.reset_index(inplace = True)
+			
+			te_factor = dict(dist_loc = ['None'])
+			te_mask = [(beh[key] == f).values for  key in te_factor.keys() for f in te_factor[key]]
+			for m in te_mask: 
+				te_mask[0] = np.logical_or(te_mask[0],m)
+			te_eegs = eegs[te_mask[0]]
+			te_beh = beh.drop(np.where(~te_mask[0])[0])
+			te_beh.reset_index(inplace = True)
+
+		# create dictionary to save classification accuracy
+		classification = {'info': {'elec': self.elec_oi}}
+
+		if cnds == 'all':
+			cnds = [cnds]
+	
+		# loop over conditions
+		for cnd in cnds:
+
+			#print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(tr_beh[self.decoding], return_counts = True)))
+			if tr_te_rel == 'ind':
+				tr_mask = (tr_beh[cnd_header] == cnd).values
+				Ytr = tr_beh[tr_header][tr_mask].values.reshape(1,-1)
+				Xtr = tr_eegs[tr_mask,:,:][np.newaxis, ...]
+
+				te_mask = (te_beh[cnd_header] == cnd).values
+				Yte = te_beh[te_header][te_mask].values.reshape(1,-1)
+				Xte = te_eegs[te_mask,:,:][np.newaxis, ...]
+			else:
+				if cnd != 'all':
+					cnd_idx = np.where(beh[cnd_header] == cnd)[0]
+					cnd_labels = beh[self.decoding][cnd_idx].values
+				else:
+					cnd_idx = np.arange(beh[cnd_header].size)
+					cnd_labels = beh[self.decoding].values
+
+				# select train and test trials	
+				train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, max_tr, {})
+				Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[tr_header], eegs, train_tr, test_tr)
+	
+			# do actual classification
+			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
+	
+			classification.update({cnd:{'standard': copy.copy(class_acc)}})
+		# store classification dict	
+		if save: 
+			with open(self.FolderTracker(['bdm',self.elec_oi, 'cross'], filename = 'class_{}_perm-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+				pickle.dump(classification, handle)
+		else:
+			return classification	
+
+	def crossTimeDecoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False, method = 'auc'):
+		'''
+
+		At the moment only supports linear classification as implemented in sklearn. Decoding is done 
+		across all time points. 
+
+		Arguments
+		- - - - - 
+
+		Xtr (array): 
+		xte (array): 
+		Ytr (array):
+		Yte (array): 
+		labels (array | list):
+		gat_matrix (bool):
+		method (str): method to calculate classification accuracy
+
+		Returns
+		- - - -
+
+		class_acc (array): classification accuracies (nr train time X nr test time). If Decoding is only done across diagonal nr test time equals 1 
+		label_info (array): Shows how frequent a specific label is selected (nr train time X nr test time X nr unique labels).   
+		'''
+
+		# set necessary parameters
+		nr_labels = len(labels)
+		N = self.nr_folds
+		nr_elec, nr_time = Xtr.shape[-2], Xtr.shape[-1]
+		if gat_matrix:
+			nr_test_time = nr_time
+		else:
+			nr_test_time = 1	
+
+		# initiate linear classifier
+		lda = LinearDiscriminantAnalysis()
+
+		# inititate decoding arrays
+		class_acc = np.zeros((N,nr_time, nr_test_time))
+		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
+
+		for n in range(N):
+			print ('Fold {} out of {} folds'.format(n + 1,N))
+			Ytr_ = Ytr[n]
+			Yte_ = Yte[n]
+			
+			for tr_t in range(nr_time):
+				for te_t in range(nr_test_time):
+					if not gat_matrix:
+						te_t = tr_t
+
+					Xtr_ = Xtr[n,:,:,tr_t]
+					Xte_ = Xte[n,:,:,te_t]
+
+					# train model and predict
+					lda.fit(Xtr_,Ytr_)
+					conf_scores = lda.decision_function(Xte_)
+					predict = lda.predict(Xte_)
+					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_), method = 'auc') # 
+
+					if not gat_matrix:
+						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
+						label_info[n, tr_t, :] = [sum(predict == l) for l in labels]
+						class_acc[n,tr_t,:] = class_perf # 
+
+					else:
+						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
+						label_info[n, tr_t, te_t] = [sum(predict == l) for l in labels]	
+						class_acc[n,tr_t, te_t] = class_perf
+
+		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
+		label_info = np.squeeze(np.mean(label_info, axis = 0))
+
+		return class_acc, label_info
+
+	def computeClassPerf(self, scores, true_labels, label_order, method = 'acc'):
+		'''
+		
+		Computes classifier performance, using the test scores of the classifier and the true labels of
+		the test set.
+
+		Arguments
+		- - - - - 
+
+		scores (array): confidences scores of the classifier to the trials in the test set
+		true_labels (array): true labels of the trials in the test set
+		label_order (list): order of columns in scores
+		method (str): the method used to compute classifier performance. Available methods are:
+						acc (default) - computes balanced accuracy (number of correct classifications per class,
+%                       averaged over all classes)
+						auc - computes Area Under the Curve 
+
+		Returns
+		- - - -
+
+		class_perf (float): classification accuracy as calculated with specified method
+ 
+		'''
+
+		# shift true_scores to indices
+		true_labels = np.array([list(label_order).index(l) for l in true_labels])
+
+		nr_class = scores.shape[1]
+
+		if method == 'auc':
+			# select all pairwise combinations of classes
+			pairs = list(itertools.combinations(range(nr_class), 2))
+			if len(pairs) > 1: # do this both ways in case of multi class problem
+				pairs += [p[::-1] for p in pairs]
+
+			# initiate AUC
+			auc = np.zeros(len(pairs))	
+
+			# loop over all pairwise combinations
+			for i, comp in enumerate(pairs):
+				pair_idx = np.logical_or(true_labels == comp[0], true_labels == comp[1]) 	# grab two classes
+				bool_labels = np.zeros(true_labels.size, dtype = bool) 	# set all labels to false
+				bool_labels[true_labels == comp[0]] = True 				# set only positive class to True
+				labels_2_use = bool_labels[pair_idx]					# select pairwise labels
+				scores_2_use = scores[pair_idx,comp[0]]					# select pairwisescores
+				auc[i] = self.scoreAUC(labels_2_use, scores_2_use)		# compute AUC
+
+			class_perf = np.mean(auc)
+
+		elif method == 'acc':
+			print 'THIS IS NOT YET VALIDATED. BE CAUTIOUS' 
+			predict = np.argmin(scores, axis =1)
+			class_perf = np.sum(predict == true_labels)/float(true_labels.size)
+				
+		return class_perf
+		
+
+	def scoreAUC(self, labels, scores):
+		'''
+
+		Calculates the AUC - area under the curve.
+
+		Besides being the area under the ROC curve, AUC is has a slightly less known interpretation:
+		If you choose a random pair of samples which is one positive and one negative - AUC is the probabilty 
+		that the positive-sample score is above the negative-sample score.
+		
+		Here we compute the AUC by counting these pairs.
+
+		function modified after the ADAM toolbox and http://www.springerlink.com/content/nn141j42838n7u21/fulltext.pdf
+
+		Arguments
+		- - - - - 
+
+		labels (array): Boolen labels of size N
+		scores (array): scores of size N
+
+
+		Returns
+		- - - -
+
+		auc (float): area under the curve
+
+		'''
+
+		num_pos = np.sum(labels)
+		num_neg = labels.size - num_pos
+
+		assert num_pos != 0,'no positive labels entered in AUC calculation'
+		assert num_neg != 0,'no negative labels entered in AUC calculation'
+
+		ranks = rankdata(scores) 
+		auc = (np.sum(ranks[labels]) - num_pos * (num_pos + 1)/2)/ (num_pos * num_neg)
+
+		return auc
+
 
 	def selectMaxTrials(self,beh, cnds, cnds_header = 'condition'):
 		''' 
@@ -260,7 +514,50 @@ class BDM(FolderStructure):
 
 		return max_trials
 
-	def bdmTrialSelection(self, idx, labels, max_tr, bdm_info):
+	def trainTestSelect(self, tr_labels, eegs, train_tr, test_tr, te_labels = None):
+		'''
+
+		Arguments
+		- - - - - 
+
+		tr_labels (array): decoding labels used for training
+		eegs (array): eeg data (epochs X electrodes X timepoints)
+		train_tr (array): indices of train trials (nr of folds X nr unique train labels X nr train trials)
+		test_tr (array): indices of test trials (nr of folds X nr unique test labels X nr test trials)
+		te_labels (array): only specify if train and test labels differ (e.g. in cross decoding analysis)
+
+		Returns
+		- - - -
+
+		Xtr (array): data that serves as training input (nr folds X epochs X elecs X timepoints) 
+		Xte (array): data that serves to evaluate model
+		Ytr (array): training labels. Training label for each epoch in Xtr
+		Yte (array): test labels. Test label for each epoch in Xte
+		'''
+
+		# check test labels
+		if te_labels is None:
+			te_labels = tr_labels
+
+		# initiate train and test label arrays
+		Ytr = np.zeros(train_tr.shape, dtype = tr_labels.dtype).reshape(self.nr_folds, -1)
+		Yte = np.zeros(test_tr.shape, dtype = tr_labels.dtype).reshape(self.nr_folds, -1)
+
+		# initiate train and test data arrays
+		Xtr = np.zeros((self.nr_folds, np.product(train_tr.shape[-2:]), eegs.shape[1],eegs.shape[2]))
+		Xte = np.zeros((self.nr_folds, np.product(test_tr.shape[-2:]), eegs.shape[1],eegs.shape[2]))
+
+		# select train data and train labels
+		for n in range(train_tr.shape[0]):
+			Xtr[n] = eegs[np.hstack(train_tr[n])]
+			Xte[n] = eegs[np.hstack(test_tr[n])]
+			Ytr[n] = tr_labels[np.hstack(train_tr[n])]
+			Yte[n] = te_labels[np.hstack(test_tr[n])]
+
+		return Xtr, Xte, Ytr, Yte	
+
+
+	def trainTestSplit(self, idx, labels, max_tr, bdm_info):
 		''' 
 
 		Splits up data into training and test sets. The number of training and test sets is 
@@ -283,7 +580,6 @@ class BDM(FolderStructure):
 
 		train_tr (array): trial indices per fold and unique label (folds X labels X trials)
 		test_tr (array): trial indices per fold and unique label (folds X labels X trials)
-
 		'''
 
 		N = self.nr_folds
@@ -321,7 +617,7 @@ class BDM(FolderStructure):
 
 		pass 
 
-	def linearClassification(self, X, train_tr, test_tr, max_tr, labels, bdm_matrix = False):
+	def linearClassification(self, X, train_tr, test_tr, max_tr, labels, gat_matrix = False):
 		''' 
 
 		Arguments
@@ -346,7 +642,7 @@ class BDM(FolderStructure):
 		steps = int(max_tr/N)
 
 		nr_elec, nr_time = X.shape[1], X.shape[2]
-		if bdm_matrix:
+		if gat_matrix:
 			nr_test_time = nr_time
 		else:
 			nr_test_time = 1	
@@ -365,7 +661,7 @@ class BDM(FolderStructure):
 			
 			for tr_t in range(nr_time):
 				for te_t in range(nr_test_time):
-					if not bdm_matrix:
+					if not gat_matrix:
 						te_t = tr_t
 
 					Xtr = np.array([X[train_tr[n,l,:],:,tr_t] for l in range(nr_labels)]).reshape(-1,nr_elec) 
@@ -374,7 +670,7 @@ class BDM(FolderStructure):
 					lda.fit(Xtr,Ytr)
 					predict = lda.predict(Xte)
 					
-					if not bdm_matrix:
+					if not gat_matrix:
 						class_acc[n,tr_t, :] = sum(predict == Yte)/float(Yte.size)
 						label_info[n, tr_t, :] = [sum(predict == l) for l in np.unique(labels)]	
 					else:

@@ -1,6 +1,7 @@
 import numpy as np
 import mne
 import scipy.sparse as sparse
+import warnings
 
 from IPython import embed 
 from math import sqrt
@@ -29,6 +30,7 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict =
 	'''
 
 	nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
+	print ('Trials without reliable eyetracking data {} out of {} clean trials ({}%)'.format(nan_idx.size, beh['eye_bins'].size, nan_idx.size/float(beh['eye_bins'].size)*100))
 
 	# limit step algorhytm to trials without eye tracking data
 	if nan_idx.size > 0:
@@ -43,6 +45,7 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict =
 	
 	# remove trials from beh and eeg objects
 	to_drop = np.where(beh['eye_bins'] > eye_thresh)[0]	
+	print ('Dropped {} trials based on threshold criteria ({})%'.format(to_drop.size, to_drop.size/float(beh['eye_bins'].size)*100))
 	beh.drop(to_drop, inplace = True)
 	beh.reset_index(inplace = True)
 	eeg.drop(to_drop, reason='eye detection')
@@ -94,32 +97,49 @@ def eog_filt(eog, sfreq, windowsize = 50, windowstep = 25, threshold = 30):
 				break
 
 	eye_trials = np.array(eye_trials, dtype = int)			
-
-	print ('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(i) * 100))	
+	print ('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(eog.shape[0]) * 100))	
 
 	return eye_trials	
 
 
-def confidence_int(data, p_value = 0.05, morey = True):
-	"""
+def confidence_int(data, p_value = .05, tail='two', morey=True):
+	'''
 
-	"""
+	Cousineau's method (2005) for calculating within-subject confidence intervals
+	If needed, Morey's correction (2008) can be applied (recommended).
 
-	# normalize the data by subtracting the participants mean performance from each observation, and then add the grand mean to each observation
-	ind_mean = data.mean(axis = 1).reshape(data.shape[0],1)
-	grand_mean = data.mean(axis = 1).mean()
+	Arguments
+	----------
+	data (array): Data for which CIs should be calculated
+	p_value (float): p-value for determining t-value (the default is .05).
+	tail (string): Two-tailed ('two') or one-tailed t-value.
+	morey (bool), Apply Morey correction (the default is True)
+
+	Returns
+	-------
+	CI (array): Confidence intervals for each condition
+	'''
+
+	if tail=='two':
+		p_value = p_value/2
+	elif tail not in ['two','one']:
+		p_value = p_value/2        
+		warnings.warn('Incorrect argument for tail: using default')
+	
+	# normalize the data by subtracting the participants mean performance from each observation, 
+	# and then add the grand mean to each observation
+	ind_mean = data.mean(axis=1).reshape(data.shape[0],1)
+	grand_mean = data.mean(axis=1).mean()
 	data = data - ind_mean + grand_mean
-
+	# Look up t-value and caluclate CIs
 	t_value = abs(t.ppf([p_value], data.shape[0]-1)[0])
+	CI = data.std(axis=0, ddof=1)/sqrt(data.shape[0])*t_value
 
-	# calculate standard 95% CI
-	CI = data.std(axis = 0)/sqrt(data.shape[0])*t_value
-
-	# correct CI according confidence_into Morey 2008
+	# correct CIs according to Morey (2008)
 	if morey:
-		CI = CI*(data.shape[1]/float((data.shape[1] - 1)))	
+		CI = CI*(data.shape[1]/float((data.shape[1] - 1))) 
 
-	return CI	
+	return CI 
 
 def curvefitting(x, y, bounds, func = lambda x, a, d: d + (1 - d) * a**x):
 	'''

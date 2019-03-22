@@ -67,11 +67,13 @@ project_param = ['practice','nr_trials','trigger','condition','RT', 'subject_nr'
 montage = mne.channels.read_montage(kind='biosemi64')
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
+eog =  ['EXG1','EXG2','EXG3','EXG4']
+ref =  ['EXG5','EXG6']
 trigger = [3]
 t_min = 0
 t_max = 0
 flt_pad = 0.5
-eeg_runs = [1,2,3] # 3 runs for subject 15 session 2
+eeg_runs = [1,2] # 3 runs for subject 15 session 2
 binary =  3840
 
 # set general plotting parameters
@@ -124,10 +126,10 @@ class DT_reps(FolderStructure):
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-		# EEGica = EEG.filter(h_freq=None, l_freq=1,
+		#EEGica = EEG.filter(h_freq=None, l_freq=1,
 		#                    fir_design='firwin', skip_by_annotation='edge')
-		# EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-		#             skip_by_annotation='edge')
+		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+		             skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
@@ -143,16 +145,16 @@ class DT_reps(FolderStructure):
 		epochs.artifactDetection(inspect=False, run = False)
 
 		# ICA
-		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+		#epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
 
 		# EYE MOVEMENTS
-		self.binEye(epochs, missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
+		#self.binEye(epochs, missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
 
 		# INTERPOLATE BADS
-		epochs.interpolate_bads(reset_bads=True, mode='accurate')
+		#epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
 		# LINK BEHAVIOR
-		epochs.linkBeh(beh, events, trigger)
+		#epochs.linkBeh(beh, events, trigger)
 
 
 	def matchBeh(self, sj, session, events, trigger, headers, max_trigger = 66):
@@ -263,6 +265,18 @@ class DT_reps(FolderStructure):
 							filename = 'subject-{}_all.pickle'.format(sj)),'wb'))	
 		except:
 			print('what happened?')		
+
+
+	def eyeStats(self):
+		'''
+
+		'''
+
+
+		for sj in [19,23,24]:
+			print sj
+			beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1, dict(windowsize = 50, windowstep = 25, threshold = 30))
+
 
 	def BEHexp1(self, set_size_control = False):
 		'''
@@ -573,6 +587,20 @@ class DT_reps(FolderStructure):
 			plt.close()		
 
 
+	def DrvsTr(self):
+		'''
+
+		'''
+
+		# read in Total and Evoked slopes within alpha band
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye','target_loc'], filename = 'cnds_*_slopes-Foster_alpha.pickle'))
+		target = [pickle.load(open(file, 'rb')) for file in files]
+
+		files = glob.glob(self.FolderTracker(['ctf','all_channels_no-eye','dist_loc'], filename = 'cnds_*_slopes-Foster_alpha.pickle'))
+		dist = [pickle.load(open(file, 'rb')) for file in files]
+
+		embed()
+
 	def ctfPlot(self, repetition, color = ['red'], window = (-0.55,0)):
 		'''
 		Plot as shown in MS.
@@ -749,7 +777,7 @@ class DT_reps(FolderStructure):
 		times = info['times'] - 0.25
 		elec_idx = [erps['1']['all']['elec'][0].index(e) for e in ['PO7','PO3','O1']]
 		self.erpANOVAinput(times, (0.17,0.23), erps, repetition, 'N2pc', elec_idx)
-		self.erpANOVAinput(times, (0.27,0.34), erps, repetition, 'Pd', elec_idx)
+		self.erpANOVAinput(times, (0.28,0.36), erps, repetition, 'Pd', elec_idx)
 
 		# plot ipsi and contralateral seperately
 		plt_idx = 1
@@ -783,6 +811,8 @@ class DT_reps(FolderStructure):
 				erp = erp_dict['contra'][cnd] - erp_dict['ipsi'][cnd]
 				err, X = bootstrap(erp)
 				plt.plot(times, X, label = cnd, color = colors[i], ls = ['--','-'][c])
+			plt.axvline(x = 0.30)
+			plt.axvline(x = 0.36)
 
 			if i == 1:
 				# repetition effect	
@@ -829,17 +859,17 @@ class DT_reps(FolderStructure):
 			headers.append(factors[i])
 
 		X = np.vstack(x).T	
+
 		# save as .csv file
 		np.savetxt(self.FolderTracker(['erp','anova'], filename = '{}-{}.csv'.format(component,repetition)), X, delimiter = "," ,header = ",".join(headers), comments='')	
-
 		# apply jackknife procedure
 		rep0 = np.stack([erps[key]['DvTr_0']['contra'][elec_idx,:] for key in erps]).mean(axis = 1) - np.stack([erps[key]['DvTr_0']['ipsi'][elec_idx,:] for key in erps]).mean(axis = 1)
 		rep3 = np.stack([erps[key]['DvTr_3']['contra'][elec_idx,:] for key in erps]).mean(axis = 1) - np.stack([erps[key]['DvTr_3']['ipsi'][elec_idx,:] for key in erps]).mean(axis = 1)
-		onset, t_value = jackknife(rep0,rep3, times, [0.17,0.23], percent_amp = 45, timing = 'offset')	
+		onset, t_value = jackknife(rep0,rep3, times, [0.16,0.24], percent_amp = 45, timing = 'offset')	
 		print 'onset ' + repetition, onset *1000, t_value
 
 
-	def bdmPlot(self, repetition, color = ['red'], window = (-0.55,0), plot_clusters):
+	def bdmPlot(self, repetition, color = ['red'], window = (-0.55,0), plot_clusters = False):
 		'''
 		Plot as shown in MS.
 			- CTF across a range of frequencies collapsed across conditions (top left)
@@ -873,7 +903,7 @@ class DT_reps(FolderStructure):
 			bdm.append(pickle.load(open(file, 'rb')))
 
 		self.bdmANOVAinput(times, (0.17,0.23), bdm, repetition, 'N2pc')
-		self.bdmANOVAinput(times, (0.27,0.34), bdm, repetition, 'Pd')
+		self.bdmANOVAinput(times, (0.28,0.36), bdm, repetition, 'Pd')
 		
 		# plot diagonal decoding
 		perm = {}
@@ -921,7 +951,7 @@ class DT_reps(FolderStructure):
 
 		# read in broadband EEG across posterior electrodes
 		if repetition == 'target_loc':
-			dec_info = [('post','alpha'),('post','theta')]
+			dec_info = [('post','alpha'),('all','alpha')]
 		elif repetition == 'dist_loc':
 			dec_info = [('post','alpha'),('post','theta')]
 
@@ -937,7 +967,7 @@ class DT_reps(FolderStructure):
 			for file in files:
 				bdm.append(pickle.load(open(file, 'rb')))
 			if repetition == 'dist_loc':	
-				self.bdmANOVAinput(times, (0.27,0.34), bdm, repetition, 'Pd-{}'.format(band), diag = False)
+				self.bdmANOVAinput(times, (0.28,0.36), bdm, repetition, 'Pd-{}'.format(band), diag = False)
 			color_idx = 0
 			for c, cnd in enumerate((['DvTv_0','DvTv_3'] + rep_cnds)):
 
@@ -1144,6 +1174,7 @@ class DT_reps(FolderStructure):
 		elif 'Pd' == cmp_name:
 			diff_peak = times[strt:end][np.argmin(gr_diff[strt:end])]	
 
+		embed()
 
 		# show plots of ipsi and contra waveforms (left) and diff wave (right)
 		plt.figure(figsize = (30,15))
@@ -1931,21 +1962,20 @@ if __name__ == '__main__':
 	#PO.prepareBEH(project, part, factors, labels, project_param)
 
 	#preprocessing and main analysis
-	for sj in [20,21,22,23,24]: 
-
+	for sj in range(1,14): 
 
 		# RUN PREPROCESSING
-		# for session in range(1,3):
-		# 	PO.prepareEEG(sj = sj, session = 2, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		#   				t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		#   				trigger = trigger, project_param = project_param, 
-		#  				project_folder = project_folder, binary = binary, channel_plots = False, inspect = False)
+		#for session in range(1,3):
+		#	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		#				t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		#				trigger = trigger, project_param = project_param, 
+		#				project_folder = project_folder, binary = binary, channel_plots = False, inspect = False)
 
 		# READ IN PREPROCESSED DATA FOR FURTHER ANALYSIS
 		#PO.updateBEH(sj)
-		#beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1)
+		#beh, eeg = PO.loadData(sj, (-0.3,0.8),True, 'HEOG', 1, dict(windowsize = 50, windowstep = 25, threshold = 30))
 
-		for header in ['target_loc', 'dist_loc']:
+		for header in ['dist_loc']:
 
 			if header == 'target_loc':
 				midline = {'dist_loc': [0,3]}
@@ -2001,6 +2031,9 @@ if __name__ == '__main__':
 			#bdm = BDM(beh, eeg, decoding = header, nr_folds = 10, elec_oi = 'post', downsample = 128, bdm_filter = dict(theta = (4,8)))
 			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
 
+			#bdm = BDM(beh, eeg, decoding = header, nr_folds = 10, elec_oi = 'all', downsample = 128, bdm_filter = dict(theta = (4,8)))
+			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
+
 			#bdm = BDM(beh, eeg, decoding = header, nr_folds = 10, elec_oi = 'post', downsample = 128, bdm_filter = dict(beta = (12,20)))
 			#bdm.Classify(sj, cnds = cnds, cnd_header = 'condition', time = (-0.3, 0.8), gat_matrix = False, nr_perm = 0)
 
@@ -2012,6 +2045,7 @@ if __name__ == '__main__':
 
 
 	# analysis manuscript
+	#PO.eyeStats()
 	# BEH
 	#PO.BEHexp1(set_size_control = False)
 	#PO.BEHexp2(set_size_control = False)
@@ -2025,7 +2059,7 @@ if __name__ == '__main__':
 		#PO.componentSelection(header, cmp_name = 'P1', cmp_window = [0.11,0.15], ext = 0.0175, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 		#PO.componentSelection(header, cmp_name = 'N1', cmp_window = [0.16,0.22], ext = 0.0175, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 		#PO.componcentSelection(header, cmp_name = 'N2pc', cmp_window = [0.17,0.23], ext = 0, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
-		#PO.componentSelection(header, cmp_name = 'Pd', cmp_window = [0.28,0.35], ext = 0, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
+		#PO.componentSelection(header, cmp_name = 'Pd', cmp_window = [0.28,0.4], ext = 0, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 		#PO.erpLateralized(header, erp_name = 'lat-down1-mid', elec = ['PO3','PO7','O1'])
 
 	#PO.erpSelection(header = 'dist_loc', topo_name = 'main', elec = ['PO3','PO7','O1'])
@@ -2037,8 +2071,8 @@ if __name__ == '__main__':
 	# 						cmpnts = dict(N2pc = (0.2, 0.3), Pd = (0.25, 0.4)))
 
 	# BDM
-	PO.bdmPlot(repetition = 'target_loc', color = 'green')
-	PO.bdmPlot(repetition = 'dist_loc', color = 'red')
+	#PO.bdmPlot(repetition = 'target_loc', color = 'green')
+	#PO.bdmPlot(repetition = 'dist_loc', color = 'red')
 	
 	
 	#PO.bdmDiag()
@@ -2046,6 +2080,7 @@ if __name__ == '__main__':
 	#		PO.bdmSelection(header, 'Pd', (0.28,0.35))
 
 	# CTF
+	PO.DrvsTr()
 	#PO.ctfTemp()
 	#PO.ctfPlot(repetition = 'target_loc', color = 'green')
 	#PO.ctfPlot(repetition = 'dist_loc', color = 'red')

@@ -16,7 +16,8 @@ class FolderStructure(object):
 	def __init__(self):
 		pass 	
 
-	def FolderTracker(self, extension = [], filename = '', overwrite = True):
+	@staticmethod
+	def FolderTracker(extension = [], filename = '', overwrite = True):
 		'''
 		FolderTracker creates folder address. At the same time it 
 		checks whether the specific folder already exists (if not it is created)
