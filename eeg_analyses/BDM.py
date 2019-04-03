@@ -249,7 +249,6 @@ class BDM(FolderStructure):
 		if tr_te_rel == 'ind':	
 			# use train and test factor to select independent trials!!!
 			beh = pd.DataFrame.from_dict(beh)	
-			tr_factor = dict(dist_loc = ['0','1','2','3','4','5'])
 			tr_mask = [(beh[key] == f).values for  key in tr_factor.keys() for f in tr_factor[key]]
 			for m in tr_mask: 
 					tr_mask[0] = np.logical_or(tr_mask[0],m)
@@ -257,7 +256,6 @@ class BDM(FolderStructure):
 			tr_beh = beh.drop(np.where(~tr_mask[0])[0])
 			tr_beh.reset_index(inplace = True)
 			
-			te_factor = dict(dist_loc = ['None'])
 			te_mask = [(beh[key] == f).values for  key in te_factor.keys() for f in te_factor[key]]
 			for m in te_mask: 
 				te_mask[0] = np.logical_or(te_mask[0],m)
