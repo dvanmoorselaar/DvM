@@ -299,7 +299,7 @@ class BDM(FolderStructure):
 			classification.update({cnd:{'standard': copy.copy(class_acc)}})
 		# store classification dict	
 		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, 'cross'], filename = 'class_{}_perm-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+			with open(self.FolderTracker(['bdm',self.elec_oi, 'cross'], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
@@ -657,7 +657,7 @@ class BDM(FolderStructure):
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
-			print ('Fold {} out of {} folds'.format(n + 1,N))
+			print '\rFold {} out of {} folds'.format(n + 1,N),
 			
 			for tr_t in range(nr_time):
 				for te_t in range(nr_test_time):
