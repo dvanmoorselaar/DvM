@@ -360,7 +360,7 @@ class BDM(FolderStructure):
 					lda.fit(Xtr_,Ytr_)
 					conf_scores = lda.decision_function(Xte_)
 					predict = lda.predict(Xte_)
-					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_), method = self.method) # 
+					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_)) # 
 
 					if not gat_matrix:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
