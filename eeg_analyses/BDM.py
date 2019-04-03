@@ -211,7 +211,6 @@ class BDM(FolderStructure):
 					train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info)
 					Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.decoding], eegs, train_tr, test_tr)
 
-
 					# do actual classification
 					#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
 					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
@@ -399,12 +398,12 @@ class BDM(FolderStructure):
  
 		'''
 
-		# shift true_scores to indices
-		true_labels = np.array([list(label_order).index(l) for l in true_labels])
 
 		nr_class = scores.shape[1]
 
 		if self.method == 'auc':
+			# shift true_scores to indices
+			true_labels = np.array([list(label_order).index(l) for l in true_labels])
 			# select all pairwise combinations of classes
 			pairs = list(itertools.combinations(range(nr_class), 2))
 			if len(pairs) > 1: # do this both ways in case of multi class problem
@@ -425,7 +424,7 @@ class BDM(FolderStructure):
 			class_perf = np.mean(auc)
 
 		elif self.method == 'acc':
-			# THIS IS NOT YET VALIDATED. BE CAUTIOUS!!!!! 
+			print' THIS IS NOT YET VALIDATED. BE CAUTIOUS!!!!!' 
 			#predict = np.argmin(scores, axis =1)
 			class_perf = np.sum(predict == true_labels)/float(true_labels.size)
 				
