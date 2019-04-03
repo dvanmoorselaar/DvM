@@ -344,7 +344,7 @@ class BDM(FolderStructure):
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
-			print ('Fold {} out of {} folds'.format(n + 1,N))
+			print '\r Fold {} out of {} folds'.format(n + 1,N),
 			Ytr_ = Ytr[n]
 			Yte_ = Yte[n]
 			
@@ -424,7 +424,7 @@ class BDM(FolderStructure):
 			class_perf = np.mean(auc)
 
 		elif self.method == 'acc':
-			print 'THIS IS NOT YET VALIDATED. BE CAUTIOUS' 
+			# THIS IS NOT YET VALIDATED. BE CAUTIOUS!!!!! 
 			predict = np.argmin(scores, axis =1)
 			class_perf = np.sum(predict == true_labels)/float(true_labels.size)
 				
@@ -657,7 +657,7 @@ class BDM(FolderStructure):
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
-			print '\rFold {} out of {} folds'.format(n + 1,N),
+			print '\r Fold {} out of {} folds'.format(n + 1,N),
 			
 			for tr_t in range(nr_time):
 				for te_t in range(nr_test_time):
