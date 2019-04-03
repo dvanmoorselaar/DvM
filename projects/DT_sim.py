@@ -636,7 +636,7 @@ if __name__ == '__main__':
 		# 		project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 		#PO.detectSaccades(sj = sj)
-		beh, eeg = PO.loadData(sj, (-0.75,0.55),True, 'HEOG', 1, eye_dict = None)#dict(windowsize = 200, windowstep = 10, threshold = 20))
+		beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)#dict(windowsize = 200, windowstep = 10, threshold = 20))
 
 		# # ERP analysis (distractor tuned)
 		#erp = ERP(eeg, beh, header = 'dist_loc', baseline = [-0.45,-0.25])
@@ -658,9 +658,9 @@ if __name__ == '__main__':
 
 		# # BDM analysis (collapsed across low and high; exclude single target trials)
 		# # feature decoding (dist)
-		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
-		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-		# 			excl_factor = dict(dist_loc = ['None']), gat_matrix = True)
+		bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, method = 'acc', elec_oi = 'all', downsample = 128)
+		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		 			excl_factor = dict(dist_loc = ['None']), gat_matrix = True)
 
 		# # # feature decoding (target)
 		#bdm = BDM(beh, eeg, decoding = 'target_type', nr_folds = 10, elec_oi = 'all', downsample = 128)

@@ -360,7 +360,8 @@ class BDM(FolderStructure):
 					lda.fit(Xtr_,Ytr_)
 					conf_scores = lda.decision_function(Xte_)
 					predict = lda.predict(Xte_)
-					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_)) # 
+					embed()
+					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_), predict) # 
 
 					if not gat_matrix:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
@@ -377,7 +378,7 @@ class BDM(FolderStructure):
 
 		return class_acc, label_info
 
-	def computeClassPerf(self, scores, true_labels, label_order):
+	def computeClassPerf(self, scores, true_labels, label_order, predict):
 		'''
 		
 		Computes classifier performance, using the test scores of the classifier and the true labels of
@@ -389,6 +390,7 @@ class BDM(FolderStructure):
 		scores (array): confidences scores of the classifier to the trials in the test set
 		true_labels (array): true labels of the trials in the test set
 		label_order (list): order of columns in scores
+		predict (array): predicted labels
 
 
 		Returns
@@ -425,7 +427,7 @@ class BDM(FolderStructure):
 
 		elif self.method == 'acc':
 			# THIS IS NOT YET VALIDATED. BE CAUTIOUS!!!!! 
-			predict = np.argmin(scores, axis =1)
+			#predict = np.argmin(scores, axis =1)
 			class_perf = np.sum(predict == true_labels)/float(true_labels.size)
 				
 		return class_perf
