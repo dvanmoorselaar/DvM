@@ -53,7 +53,7 @@ class FolderStructure(object):
 		return folder	
 
 
-	def loadData(self, sj, eye_window, eyefilter, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None):
+	def loadData(self, sj, eyefilter, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None):
 		'''
 		loads EEG and behavior data
 
