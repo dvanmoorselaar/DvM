@@ -29,11 +29,16 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, beh, EEG, decoding, nr_folds, elec_oi = 'all', downsample = 128, bdm_filter = None):
+	def __init__(self, beh, EEG, decoding, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None):
 		''' 
 
 		Arguments
 		- - - - - 
+
+		method (str): the method used to compute classifier performance. Available methods are:
+					acc (default) - computes balanced accuracy (number of correct classifications per class,
+%                   averaged over all classes)
+					auc - computes Area Under the Curve 
 
 
 		Returns
@@ -48,6 +53,7 @@ class BDM(FolderStructure):
 		self.elec_oi = elec_oi
 		self.downsample = downsample
 		self.bdm_filter = bdm_filter
+		self.method = method
 		if bdm_filter != None:
 			self.bdm_type = bdm_filter.keys()[0]
 			self.bdm_band = bdm_filter[self.bdm_type]
@@ -219,7 +225,7 @@ class BDM(FolderStructure):
 	
 		# store classification dict	
 		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}-{}-rep.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+			with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
@@ -300,7 +306,7 @@ class BDM(FolderStructure):
 		else:
 			return classification	
 
-	def crossTimeDecoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False, method = 'auc'):
+	def crossTimeDecoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False):
 		'''
 
 		At the moment only supports linear classification as implemented in sklearn. Decoding is done 
@@ -315,8 +321,7 @@ class BDM(FolderStructure):
 		Yte (array): 
 		labels (array | list):
 		gat_matrix (bool):
-		method (str): method to calculate classification accuracy
-
+		
 		Returns
 		- - - -
 
@@ -357,7 +362,7 @@ class BDM(FolderStructure):
 					lda.fit(Xtr_,Ytr_)
 					conf_scores = lda.decision_function(Xte_)
 					predict = lda.predict(Xte_)
-					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_), method = 'auc') # 
+					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_), method = self.method) # 
 
 					if not gat_matrix:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
@@ -374,7 +379,7 @@ class BDM(FolderStructure):
 
 		return class_acc, label_info
 
-	def computeClassPerf(self, scores, true_labels, label_order, method = 'acc'):
+	def computeClassPerf(self, scores, true_labels, label_order):
 		'''
 		
 		Computes classifier performance, using the test scores of the classifier and the true labels of
@@ -386,10 +391,7 @@ class BDM(FolderStructure):
 		scores (array): confidences scores of the classifier to the trials in the test set
 		true_labels (array): true labels of the trials in the test set
 		label_order (list): order of columns in scores
-		method (str): the method used to compute classifier performance. Available methods are:
-						acc (default) - computes balanced accuracy (number of correct classifications per class,
-%                       averaged over all classes)
-						auc - computes Area Under the Curve 
+
 
 		Returns
 		- - - -
@@ -403,7 +405,7 @@ class BDM(FolderStructure):
 
 		nr_class = scores.shape[1]
 
-		if method == 'auc':
+		if self.method == 'auc':
 			# select all pairwise combinations of classes
 			pairs = list(itertools.combinations(range(nr_class), 2))
 			if len(pairs) > 1: # do this both ways in case of multi class problem
@@ -423,7 +425,7 @@ class BDM(FolderStructure):
 
 			class_perf = np.mean(auc)
 
-		elif method == 'acc':
+		elif self.method == 'acc':
 			print 'THIS IS NOT YET VALIDATED. BE CAUTIOUS' 
 			predict = np.argmin(scores, axis =1)
 			class_perf = np.sum(predict == true_labels)/float(true_labels.size)
