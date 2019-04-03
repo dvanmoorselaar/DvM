@@ -19,6 +19,7 @@ from mne.baseline import rescale
 from scipy.signal import hilbert
 from numpy.fft import fft, ifft,rfft, irfft
 from support.FolderStructure import *
+from signals.signal_processing import *
 from IPython import embed
 
 class TF(FolderStructure):
@@ -60,6 +61,7 @@ class TF(FolderStructure):
 		# select time window and EEG electrodes
 		picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
 		eegs = EEG._data[:,picks,:]
+		embed()
 	
 		return eegs, beh, EEG.times, EEG.info['sfreq'], EEG.ch_names
 
@@ -229,11 +231,54 @@ class TF(FolderStructure):
 		plot_dict = {'ch_names': ch_names, 'times':times[idx_2_save], 'frex': freqs}
 
 		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
-			pickle.dump(plot_dict, handle)		
+			pickle.dump(plot_dict, handle)
 
-	def TFanalysis(self, sj, cnds, cnd_header, base_period, time_period, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
+	def permuted_Z(self, raw_power,ch_names, num_frex, nr_time, nr_perm = 1000):
+
+
+		print('For permutation procedure it is assumed that it is as if all stimuli of interest are presented right')
+		# ipsi_contra pairs
+		contra_ipsi_pair = [('Fp1','Fp2'),('AF7','AF8'),('AF3','AF4'),('F7','F8'),('F5','F6'),('F3','F4'),\
+					('F1','F2'),('FT7','FT8'),('FC5','FC6'),('FC3','FC4'),('FC1','FC2'),('T7','T8'),\
+					('C5','C6'),('C3','C4'),('C1','C2'),('TP7','TP8'),('CP5','CP6'),('CP3','CP4'),\
+					('CP1','CP2'),('P9','P10'),('P7','P8'),('P5','P6'),('P3','P4'),('P1','P2'),\
+					('PO7','PO8'),('PO3','PO4'),('O1','O2')]
+
+		# initiate Z array
+		Z = np.zeros((len(ch_names)/2, num_frex, nr_time))
+		Z_elec = []
+
+		# loop over contra_ipsi pairs
+		pair_idx = 0
+		for (contra_elec, ipsi_elec) in contra_ipsi_pair:
+
+			if contra_elec not in ch_names: continue	
+			
+			# get indices of electrode pair
+			contra_idx = ch_names.index(contra_elec)
+			ipsi_idx = ch_names.index(ipsi_elec)
+
+			# get the real difference
+			real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
+
+			# create distribution of fake differences
+			fake_diff = np.zeros((nr_perm,) + real_diff.shape)
+			signed = np.sign(np.random.normal(size = real_diff.shape[0]))
+			permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
+			for p in range(nr_perm):
+				fake_diff[p] = real_diff * permuter
+
+			# Z scoring
+			print('Z scoring pair {}-{}'.format(contra_elec, ipsi_elec))
+			Z[pair_idx] = (np.mean(real_diff, axis = 0) - np.mean(fake_diff, axis = (0,1))) / np.std(np.mean(fake_diff, axis = 1), axis = 0, ddof = 1)	
+			Z_elec.append(contra_elec)
+			pair_idx += 1
+
+		return Z, Z_elec
+
+	def TFanalysis(self, sj, cnds, cnd_header, time_period, base_period = None, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
-		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decomposition
+		Time frequency analysis using either morlet waveforms or filter-hilbert method for time frequency decomposition
 
 		Add option to subtract ERP to get evoked power
 		Add option to match trial number
@@ -243,14 +288,15 @@ class TF(FolderStructure):
 		sj (int): subject number
 		cnds (list): list of conditions as stored in behavior file
 		cnd_header (str): key in behavior file that contains condition info
-		base_period (tuple | list): time window used for baseline correction
+		base_period (tuple | list): time window used for baseline correction. 
 		time_period (tuple | list): time window of interest
 		elec_oi (str | list): If not all, analysis are limited to specified electrodes 
 		factor (dict): limit analysis to a subset of trials. Key(s) specifies column header
 		method (str): specifies whether hilbert or wavelet convolution is used for time-frequency decomposition
 		flip (dict): flips a subset of trials. Key of dictionary specifies header in beh that contains flip info 
 		List in dict contains variables that need to be flipped. Note: flipping is done from right to left hemifield
-		base_type (str): specifies whether DB conversion is condition specific ('conspec') or averaged across conditions ('conavg')
+		base_type (str): specifies whether DB conversion is condition specific ('conspec') or averaged across conditions ('conavg').
+						If Z power is Z-transformed (condition specific). 
 		downsample (int): factor used for downsampling (aplied after filtering). Default is no downsampling
 		min_freq (int): minimum frequency for TF analysis
 		max_freq (int): maximum frequency for TF analysis
@@ -275,7 +321,7 @@ class TF(FolderStructure):
 		eegs = self.eeg._data[:,picks,:]
 		beh = self.beh
 		if elec_oi == 'all':
-			ch_names = self.eeg.ch_names
+			ch_names = self.eeg.ch_names[picks]
 		else:
 			ch_names = elec_oi	
 
@@ -296,13 +342,15 @@ class TF(FolderStructure):
 			frex = [(i,i + 4) for i in range(min_freq, max_freq, 2)]
 			num_frex = len(frex)	
 
-		base_s, base_e = [np.argmin(abs(times - b)) for b in base_period]
+		if type(base_period) in [tuple,list]:
+			base_s, base_e = [np.argmin(abs(times - b)) for b in base_period]
 		idx_time = np.where((times >= time_period[0]) * (times <= time_period[1]))[0]  
 		idx_2_save = np.array([idx for i, idx in enumerate(idx_time) if i % downsample == 0])
 
-		# initiate dict
+		# initiate dicts
 		tf = {}
 		base = {}
+		plot_dict = {'ch_names':ch_names, 'times':times[idx_2_save], 'frex': frex}
 
 		# loop over conditions
 		for c, cnd in enumerate(cnds):
@@ -314,7 +362,7 @@ class TF(FolderStructure):
 			else:
 				cnd_idx = np.arange(beh[cnd_header].size)	
 			if factor != None: # NOW ONLY SUPPORTS OR: COME UP WITH FIX
-				print 'THIS DOES NOT WORK???'
+				print('THIS DOES NOT WORK???')
 				mask = [beh[key] == f for  key in factor.keys() for f in factor[key]]
 				for m in mask: # check whether this works with multiple masks
 					mask[0] = m + mask[0].values
@@ -329,7 +377,7 @@ class TF(FolderStructure):
 				# find ch_idx
 				ch_idx = self.eeg.ch_names.index(ch)
 
-				print '\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),
+				print('\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),)
 
 				# fft decomposition
 				if method == 'wavelet':
@@ -352,10 +400,11 @@ class TF(FolderStructure):
 					raw_conv[:,f,idx] = m[:,idx_2_save]
 					
 					# baseline correction (actual correction is done after condition loop)
-					base[cnd][f,idx] = np.mean(abs(m[:,base_s:base_e])**2)
+					if type(base_period) in [tuple,list]:
+						base[cnd][f,idx] = np.mean(abs(m[:,base_s:base_e])**2)
 
-			# update cnd dict with power values
-			tf[cnd]['power'] = np.mean(abs(raw_conv)**2, axis = 0) 
+			# update cnd dict with phase values (averaged across trials) and power values
+			tf[cnd]['power'] = abs(raw_conv)**2
 			tf[cnd]['phase'] = abs(np.mean(np.exp(np.angle(raw_conv) * 1j), axis = 0))
 
 		# baseline normalization
@@ -365,13 +414,16 @@ class TF(FolderStructure):
 			elif base_type == 'conavg':	
 				con_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
+			elif base_type == 'Z':
+				tf[cnd]['Z_power'], z_info = self.permuted_Z(abs(raw_conv)**2,ch_names, num_frex, idx_2_save.size) 
+				plot_dict.update(dict(z_info = z_info))
+
+			# power values can now safely be averaged
+			tf[cnd]['power'] = np.mean(tf[cnd]['power'], axis = 0)
 
 		# save TF matrices
 		with open(self.FolderTracker(['tf',method],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
 			pickle.dump(tf, handle)		
-
-		# store dictionary with variables for plotting
-		plot_dict = {'ch_names':self.eeg.ch_names, 'times':times[idx_2_save], 'frex': frex}
 
 		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)		

@@ -42,7 +42,7 @@ class ERP(FolderStructure):
 		self.baseline = baseline
 		self.flipped = False
 
-	def selectERPData(self, time = [-0.3, 0.8], l_filter = False):
+	def selectERPData(self, time = [-0.3, 0.8], l_filter = False, excl_factor = None):
 		''' 
 
 		Arguments
@@ -56,6 +56,24 @@ class ERP(FolderStructure):
 
 		beh = self.beh
 		EEG = self.eeg
+		embed()
+
+		# check whether trials need to be excluded
+		if type(excl_factor) == dict: # remove unwanted trials from beh
+			mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
+			for m in mask: 
+				mask[0] = np.logical_or(mask[0],m)
+			mask = mask[0]
+			if mask.sum() > 0:
+				beh.drop(np.where(mask)[0], inplace = True)
+				beh.reset_index(inplace = True)
+				EEG.drop(np.where(mask)[0])
+				print 'Dropped {} trials after specifying excl_factor'.format(sum(mask))
+				print 'NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN'
+
+			else:
+				print 'Trial exclusion: no trials selected that matched specified criteria'
+				mask = np.zeros(beh.shape[0], dtype = bool)
 
 		# read in eeg data 
 		self.flipped = False
@@ -187,7 +205,7 @@ class ERP(FolderStructure):
 		self.flipped = True	
 
 
-	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', midline = None, balance = False, erp_name = ''):
+	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, balance = False, erp_name = ''):
 		''' 
 
 		Creates laterilized ERP's by cross pairing left and right electrodes with left and right position labels.
@@ -201,6 +219,7 @@ class ERP(FolderStructure):
 		l_elec (list): left electrodes (right hemisphere)
 		r_elec (list): right hemisphere (left hemisphere)
 		conditions (str | list): list of conditions. If all, all unique conditions in beh are used
+		cnd_header (str): name of condition column
 		midline (None | dict): Can be used to limit analysis to trials where a specific 
 								stimulus (key of dict) was presented on the midline (value of dict)
 		erp_name (str): name of the pickle file to store erp data
@@ -241,14 +260,14 @@ class ERP(FolderStructure):
 			idx_r = np.array([idx for idx in idx_r if idx in idx_m])
 
 		if balance:
-			max_trial = self.selectMaxTrial(np.hstack((idx_l, idx_r)), conditions, self.beh['condition'])
+			max_trial = self.selectMaxTrial(np.hstack((idx_l, idx_r)), conditions, self.beh[cnd_header])
 
 		# select indices of left and right electrodes
 		idx_l_elec = np.sort([self.ch_names.index(e) for e in l_elec])
 		idx_r_elec = np.sort([self.ch_names.index(e) for e in r_elec])
 
 		if conditions == 'all':
-			conditions = ['all'] + list(np.unique(self.beh['condition']))
+			conditions = ['all'] + list(np.unique(self.beh[cnd_header]))
 	
 		for cnd in conditions:
 
@@ -256,9 +275,9 @@ class ERP(FolderStructure):
 
 			# select left and right trials for current condition
 			if cnd == 'all':
-				idx_c = np.arange(self.beh['condition'].size)
+				idx_c = np.arange(self.beh[cnd_header].size)
 			else:	
-				idx_c = np.where(self.beh['condition'] == cnd)[0]
+				idx_c = np.where(self.beh[cnd_header] == cnd)[0]
 		
 			idx_c_l = np.array([l for l in idx_c if l in idx_l], dtype = int)
 			idx_c_r = np.array([r for r in idx_c if r in idx_r], dtype = int)
@@ -269,12 +288,12 @@ class ERP(FolderStructure):
 
 			if self.flipped:
 				# as if all stimuli presented right: left electrodes are contralateral, right electrodes are ipsilateral
-				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec,:], self.eeg[idx_c_r,:,:][:,idx_r_elec,:]))
-				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec,:], self.eeg[idx_c_r,:,:][:,idx_l_elec,:]))
+				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec], self.eeg[idx_c_r,:,:][:,idx_r_elec]))
+				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec], self.eeg[idx_c_r,:,:][:,idx_l_elec]))
 			else:
 				# stimuli presented bilataral
-				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec,:], self.eeg[idx_c_r,:,:][:,idx_r_elec,:]))
-				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec,:], self.eeg[idx_c_r,:,:][:,idx_l_elec,:]))
+				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec], self.eeg[idx_c_r,:,:][:,idx_r_elec]))
+				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec], self.eeg[idx_c_r,:,:][:,idx_l_elec]))
 
 			# baseline correct data	
 			ipsi = self.baselineCorrect(ipsi, self.times, self.baseline)
@@ -285,12 +304,11 @@ class ERP(FolderStructure):
 				idx_balance = np.random.permutation(ipsi.shape[0])[:max_trial]
 				ipsi = ipsi[idx_balance,:,:]
 				contra = contra[idx_balance,:,:]
+			
+			ipsi = np.mean(ipsi, axis = (0,1)) 
+			contra = np.mean(contra, axis = (0,1))
 
-			ipsi = np.mean(ipsi, axis = 0) 
-			contra = np.mean(contra, axis = 0)
-
-
-			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'elec': [l_elec, r_elec]})	
+			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'diff_wave':contra - ipsi, 'elec': [l_elec, r_elec]})	
 
 		# save erps	
 		with open(self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name)) ,'wb') as handle:
