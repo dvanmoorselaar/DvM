@@ -24,7 +24,7 @@ from IPython import embed
 
 class TF(FolderStructure):
 
-	def __init__(self, beh, eeg):
+	def __init__(self, beh, eeg, laplacian = True):
 		''' 
 
 		Arguments
@@ -37,9 +37,10 @@ class TF(FolderStructure):
 		'''
 
 		self.beh = beh
-		self.eeg = eeg
+		self.EEG = eeg
+		self.laplacian = laplacian
 
-	def selectTFData(self, sj):
+	def selectTFData(self, laplacian):
 		''' 
 
 		Arguments
@@ -51,19 +52,21 @@ class TF(FolderStructure):
 
 		'''
 
-		# read in processed behavior from pickle file
-		with open(self.FolderTracker(extension = ['beh','processed'], filename = 'subject-{}_all.pickle'.format(sj)),'rb') as handle:
-			beh = pickle.load(handle)
+		# load processed behavior and eeg
+		beh = self.beh
+		EEG = self.EEG
 
-		# read in eeg data 
-		EEG = mne.read_epochs(self.FolderTracker(extension = ['processed'], filename = 'subject-{}_all-epo.fif'.format(sj)))
-
-		# select time window and EEG electrodes
+		# select electrodes of interest
 		picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
 		eegs = EEG._data[:,picks,:]
-		embed()
+
+		if laplacian:
+			print('Calculating the laplacian')
+			x,y,z = np.vstack([EEG.info['chs'][i]['loc'][:3] for i in picks]).T
+			leg_order = 20 if picks.size <=100 else 40
+			eegs = laplacian_filter(eegs, x, y, z, leg_order = leg_order, smoothing = 1e-5)
 	
-		return eegs, beh, EEG.times, EEG.info['sfreq'], EEG.ch_names
+		return eegs, beh
 
 	@staticmethod	
 	def nextpow2(i):
@@ -263,9 +266,10 @@ class TF(FolderStructure):
 
 			# create distribution of fake differences
 			fake_diff = np.zeros((nr_perm,) + real_diff.shape)
-			signed = np.sign(np.random.normal(size = real_diff.shape[0]))
-			permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
 			for p in range(nr_perm):
+				# randomly flip ipsi and contra
+				signed = np.sign(np.random.normal(size = real_diff.shape[0]))
+				permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
 				fake_diff[p] = real_diff * permuter
 
 			# Z scoring
@@ -315,20 +319,18 @@ class TF(FolderStructure):
 	
 		'''
 
-		# set parameters
-		picks = mne.pick_types(self.eeg.info, eeg=True, exclude='bads')
-		times = self.eeg.times
-		eegs = self.eeg._data[:,picks,:]
-		beh = self.beh
+		# read in data
+		eegs, beh = self.selectTFData(self.laplacian)
+		times = self.EEG.times
 		if elec_oi == 'all':
-			ch_names = self.eeg.ch_names[picks]
+			ch_names = self.EEG.ch_names[picks]
 		else:
 			ch_names = elec_oi	
 
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = flip.keys()[0]
-			eegs = self.topoFlip(eegs, beh[key], self.eeg.ch_names, left = flip.get(key))
+			eegs = self.topoFlip(eegs, beh[key], self.EEG.ch_names, left = flip.get(key))
 
 		# get parameters
 		nr_time = eegs.shape[-1]
@@ -336,7 +338,7 @@ class TF(FolderStructure):
 		if method == 'wavelet':
 			wavelets, frex = self.createMorlet(min_freq = min_freq, max_freq = max_freq, num_frex = num_frex, 
 									cycle_range = cycle_range, freq_scaling = freq_scaling, 
-									nr_time = nr_time, s_freq = self.eeg.info['sfreq'])
+									nr_time = nr_time, s_freq = self.EEG.info['sfreq'])
 		
 		elif method == 'hilbert':
 			frex = [(i,i + 4) for i in range(min_freq, max_freq, 2)]
@@ -375,7 +377,7 @@ class TF(FolderStructure):
 			# loop over channels
 			for idx, ch in enumerate(ch_names[:nr_chan]):
 				# find ch_idx
-				ch_idx = self.eeg.ch_names.index(ch)
+				ch_idx = self.EEG.ch_names.index(ch)
 
 				print('\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),)
 

@@ -15,7 +15,7 @@ def legendre(N,X):
         matrixReturn[:,i[0]] = np.array([j[N] for j in currValues[0]])
     return matrixReturn	
 
-def laplacian(X, x, y, z, leg_order = 20, smoothing = 1e-5):
+def laplacian_filter(X, x, y, z, leg_order = 20, smoothing = 1e-5):
     '''Computes surface Laplacian of EEG data
         This function, which is an implementation of algorithms described by 
         Perrin, Pernier, Bertrand, and Echallier (1989) PubMed #2464490 is modified after

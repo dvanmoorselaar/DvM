@@ -20,7 +20,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
-from support.support import select_electrodes
+from support.support import select_electrodes, trial_exclusion
 from scipy.stats import rankdata
 
 from IPython import embed
@@ -83,20 +83,7 @@ class BDM(FolderStructure):
 
 		# check whether trials need to be excluded
 		if type(excl_factor) == dict: # remove unwanted trials from beh
-			mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
-			for m in mask: 
-				mask[0] = np.logical_or(mask[0],m)
-			mask = mask[0]
-			if mask.sum() > 0:
-				beh.drop(np.where(mask)[0], inplace = True)
-				beh.reset_index(inplace = True)
-				EEG.drop(np.where(mask)[0])
-				print 'Dropped {} trials after specifying excl_factor'.format(sum(mask))
-				print 'NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN'
-
-			else:
-				print 'Trial exclusion: no trials selected that matched specified criteria'
-				mask = np.zeros(beh.shape[0], dtype = bool)
+			beh, EEG = trial_exclusion(beh, EEG, excl_factor)
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
@@ -424,7 +411,6 @@ class BDM(FolderStructure):
 			class_perf = np.mean(auc)
 
 		elif self.method == 'acc':
-			print' THIS IS NOT YET VALIDATED. BE CAUTIOUS!!!!!' 
 			#predict = np.argmin(scores, axis =1)
 			class_perf = np.sum(predict == true_labels)/float(true_labels.size)
 				

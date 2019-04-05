@@ -658,9 +658,9 @@ if __name__ == '__main__':
 
 		# # BDM analysis (collapsed across low and high; exclude single target trials)
 		# # feature decoding (dist)
-		bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, method = 'acc', elec_oi = 'all', downsample = 128)
-		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-		 			excl_factor = dict(dist_loc = ['None']), gat_matrix = False)
+		#bdm = BDM(beh, eeg, decoding = 'dist_type', nr_folds = 10, method = 'acc', elec_oi = 'all', downsample = 128)
+		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 			excl_factor = dict(dist_loc = ['None']), gat_matrix = False)
 
 		# # # feature decoding (target)
 		#bdm = BDM(beh, eeg, decoding = 'target_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
@@ -727,10 +727,10 @@ if __name__ == '__main__':
 		#			bdm_labels = ['0','1','2','3','4','5'], time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)
 
 		# TF analysis
-		tf = TF(beh, eeg)
+		tf = TF(beh, eeg, laplacian = True)
 		tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 	
 		 		  	cnd_header ='block_type', elec_oi = ['PO7', 'PO3', 'O1', 'PO8', 'PO4', 'O2'], base_period = None, 
-		 			base_type = 'Z', time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_loc = [2]), downsample = 4)
+		 			base_type = 'Z', time_period = (-0.6,0.5), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
 
 	#  	#TF analysis
 	# 	tf = TF()
