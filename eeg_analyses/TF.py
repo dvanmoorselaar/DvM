@@ -19,6 +19,7 @@ from mne.baseline import rescale
 from scipy.signal import hilbert
 from numpy.fft import fft, ifft,rfft, irfft
 from support.FolderStructure import *
+from support.support import trial_exclusion
 from signals.signal_processing import *
 from IPython import embed
 
@@ -40,7 +41,7 @@ class TF(FolderStructure):
 		self.EEG = eeg
 		self.laplacian = laplacian
 
-	def selectTFData(self, laplacian):
+	def selectTFData(self, laplacian, excl_factor):
 		''' 
 
 		Arguments
@@ -56,14 +57,17 @@ class TF(FolderStructure):
 		beh = self.beh
 		EEG = self.EEG
 
+		# check whether trials need to be excluded
+		if type(excl_factor) == dict: # remove unwanted trials from beh
+			beh, EEG = trial_exclusion(beh, EEG, excl_factor)
+
 		# select electrodes of interest
 		picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
 		eegs = EEG._data[:,picks,:]
 
 		if laplacian:
-			print('Calculating the laplacian')
 			x,y,z = np.vstack([EEG.info['chs'][i]['loc'][:3] for i in picks]).T
-			leg_order = 20 if picks.size <=100 else 40
+			leg_order = 10 if picks.size <=100 else 12
 			eegs = laplacian_filter(eegs, x, y, z, leg_order = leg_order, smoothing = 1e-5)
 	
 		return eegs, beh
@@ -249,6 +253,7 @@ class TF(FolderStructure):
 
 		# initiate Z array
 		Z = np.zeros((len(ch_names)/2, num_frex, nr_time))
+		norm = np.zeros((len(ch_names)/2, num_frex, nr_time))
 		Z_elec = []
 
 		# loop over contra_ipsi pairs
@@ -275,10 +280,12 @@ class TF(FolderStructure):
 			# Z scoring
 			print('Z scoring pair {}-{}'.format(contra_elec, ipsi_elec))
 			Z[pair_idx] = (np.mean(real_diff, axis = 0) - np.mean(fake_diff, axis = (0,1))) / np.std(np.mean(fake_diff, axis = 1), axis = 0, ddof = 1)	
+			contra_ipsi_norm = (raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx])/(raw_power[:,:,contra_idx] + raw_power[:,:,ipsi_idx])
+			norm[pair_idx] = contra_ipsi_norm.mean(axis = 0)
 			Z_elec.append(contra_elec)
 			pair_idx += 1
 
-		return Z, Z_elec
+		return Z, norm, Z_elec
 
 	def TFanalysis(self, sj, cnds, cnd_header, time_period, base_period = None, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
@@ -320,10 +327,11 @@ class TF(FolderStructure):
 		'''
 
 		# read in data
-		eegs, beh = self.selectTFData(self.laplacian)
+		eegs, beh = self.selectTFData(self.laplacian, factor)
 		times = self.EEG.times
 		if elec_oi == 'all':
-			ch_names = self.EEG.ch_names[picks]
+			picks = mne.pick_types(self.EEG.info, eeg=True, exclude='bads')
+			ch_names = list(np.array(self.EEG.ch_names)[picks])
 		else:
 			ch_names = elec_oi	
 
@@ -350,9 +358,9 @@ class TF(FolderStructure):
 		idx_2_save = np.array([idx for i, idx in enumerate(idx_time) if i % downsample == 0])
 
 		# initiate dicts
-		tf = {}
+		tf = {'ch_names':ch_names, 'times':times[idx_2_save], 'frex': frex}
 		base = {}
-		plot_dict = {'ch_names':ch_names, 'times':times[idx_2_save], 'frex': frex}
+		plot_dict = {}
 
 		# loop over conditions
 		for c, cnd in enumerate(cnds):
@@ -363,13 +371,6 @@ class TF(FolderStructure):
 				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
 			else:
 				cnd_idx = np.arange(beh[cnd_header].size)	
-			if factor != None: # NOW ONLY SUPPORTS OR: COME UP WITH FIX
-				print('THIS DOES NOT WORK???')
-				mask = [beh[key] == f for  key in factor.keys() for f in factor[key]]
-				for m in mask: # check whether this works with multiple masks
-					mask[0] = m + mask[0].values
-				mask_idx = np.where(mask[0])[0]
-				cnd_idx = np.array([cn for cn in cnd_idx if cn in mask_idx])
 
 			l_conv = 2**self.nextpow2(nr_time * cnd_idx.size + nr_time - 1)
 			raw_conv = np.zeros((cnd_idx.size, num_frex, nr_chan, idx_2_save.size), dtype = complex) 
@@ -379,7 +380,7 @@ class TF(FolderStructure):
 				# find ch_idx
 				ch_idx = self.EEG.ch_names.index(ch)
 
-				print('\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),)
+				print '\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),
 
 				# fft decomposition
 				if method == 'wavelet':
@@ -417,18 +418,15 @@ class TF(FolderStructure):
 				con_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
 			elif base_type == 'Z':
-				tf[cnd]['Z_power'], z_info = self.permuted_Z(abs(raw_conv)**2,ch_names, num_frex, idx_2_save.size) 
-				plot_dict.update(dict(z_info = z_info))
+				tf[cnd]['Z_power'], tf[cnd]['norm_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
+				tf.update(dict(z_info = z_info))
 
 			# power values can now safely be averaged
 			tf[cnd]['power'] = np.mean(tf[cnd]['power'], axis = 0)
 
 		# save TF matrices
-		with open(self.FolderTracker(['tf',method],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
+		with open(self.FolderTracker(['tf',method,'proactive'],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
 			pickle.dump(tf, handle)		
-
-		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
-			pickle.dump(plot_dict, handle)		
 	
 	def createMorlet(self, min_freq, max_freq, num_frex, cycle_range, freq_scaling, nr_time, s_freq):
 		''' 

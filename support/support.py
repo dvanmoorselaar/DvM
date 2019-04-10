@@ -12,7 +12,6 @@ from scipy.stats import t, ttest_rel
 def trial_exclusion(beh, eeg, excl_factor):
 
 
-
 	mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
 	for m in mask: 
 		mask[0] = np.logical_or(mask[0],m)
@@ -20,7 +19,7 @@ def trial_exclusion(beh, eeg, excl_factor):
 	if mask.sum() > 0:
 		beh.drop(np.where(mask)[0], inplace = True)
 		beh.reset_index(inplace = True)
-		EEG.drop(np.where(mask)[0])
+		eeg.drop(np.where(mask)[0])
 		print 'Dropped {} trials after specifying excl_factor'.format(sum(mask))
 		print 'NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN'
 	else:

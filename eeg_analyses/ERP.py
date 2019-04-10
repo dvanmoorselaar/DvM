@@ -56,7 +56,6 @@ class ERP(FolderStructure):
 
 		beh = self.beh
 		EEG = self.eeg
-		embed()
 
 		# check whether trials need to be excluded
 		if type(excl_factor) == dict: # remove unwanted trials from beh
@@ -176,7 +175,8 @@ class ERP(FolderStructure):
 		inst (instance of ERP): The modified instance 
 
 		'''	
-		
+
+
 		# dictionary to flip topographic layout
 		flip_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8','F5':'F6','F3':'F4',\
 					'F1':'F2','FT7':'FT8','FC5':'FC6','FC3':'FC4','FC1':'FC2','T7':'T8',\
@@ -190,7 +190,6 @@ class ERP(FolderStructure):
 					'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4','P1':'P2','PO8':'PO7',\
 					'PO4':'PO3','O2':'O1'}
 
-
 		idx_l = np.sort(np.hstack([np.where(self.beh[self.header] == l)[0] for l in left]))
 
 		# left stimuli are flipped as if presented right
@@ -203,6 +202,27 @@ class ERP(FolderStructure):
 
 		self.eeg[idx_l,:,:] = flipped
 		self.flipped = True	
+
+	def ipsiContraElectrodeSelection(self):
+		'''
+
+		'''	
+
+		# left and right electrodes in standard set-up
+		left_elecs = ['Fp1','AF7','AF3','F7','F5','F3','F1','FT7','FC5','FC3',
+					'FC1','T7','CP1','P9','P7','P5','P3','P1','PO7','PO3','O1']
+		right_elecs = ['Fp2','AF8','AF4','F8','F6','F4','F2','FT8','FC6','FC4',
+						'FC2','T8','CP2','P10','P8','P6','P4','P2','PO8','PO4','O2']
+
+		# check which electrodes are present in the current set-up				
+		left_elecs = [l for l in left_elecs if l in self.ch_names]
+		right_elecs = [r for r in right_elecs if r in self.ch_names]
+
+		# select indices of left and right electrodes
+		idx_l_elec = np.sort([self.ch_names.index(e) for e in l_elec])
+		idx_r_elec = np.sort([self.ch_names.index(e) for e in r_elec])
+
+		return idx_l_elec, idx_r_elec
 
 
 	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, balance = False, erp_name = ''):
@@ -274,11 +294,13 @@ class ERP(FolderStructure):
 			erps[str(sj)].update({cnd:{}})
 
 			# select left and right trials for current condition
+			# first select condition indices
 			if cnd == 'all':
 				idx_c = np.arange(self.beh[cnd_header].size)
 			else:	
 				idx_c = np.where(self.beh[cnd_header] == cnd)[0]
 		
+			# split condition indices in left and right trials	
 			idx_c_l = np.array([l for l in idx_c if l in idx_l], dtype = int)
 			idx_c_r = np.array([r for r in idx_c if r in idx_r], dtype = int)
 
@@ -308,7 +330,15 @@ class ERP(FolderStructure):
 			ipsi = np.mean(ipsi, axis = (0,1)) 
 			contra = np.mean(contra, axis = (0,1))
 
-			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'diff_wave':contra - ipsi, 'elec': [l_elec, r_elec]})	
+			# also store matching topodata
+			if self.flipped == True:
+				print('Also calculate corresponding topoplots')
+				topo = self.baselineCorrect(self.eeg[np.hstack((idx_c_l, idx_c_r))], self.times, self.baseline)
+				topo = topo.mean(axis = 0)
+			else:
+				print('No topoplots created, because data was not flipped. Run topoSelection instead')	
+
+			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'diff_wave':contra - ipsi, 'elec': [l_elec, r_elec], 'topo':topo})	
 
 		# save erps	
 		with open(self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name)) ,'wb') as handle:

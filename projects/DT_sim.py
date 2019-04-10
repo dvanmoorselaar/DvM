@@ -641,11 +641,12 @@ if __name__ == '__main__':
 		# # ERP analysis (distractor tuned)
 		#erp = ERP(eeg, beh, header = 'dist_loc', baseline = [-0.45,-0.25])
 		#erp.selectERPData(time = [-0.45, 0.55], l_filter = 30, excl_factor = dict(dist_loc = ['None'])) 
+		#erp.topoFlip(left = ['1','2'])
 		#erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], 
 		# 								r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main')
 		#erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7'], 
 		# 								r_elec = ['PO8'], midline = {'target_loc': [0,3]}, balance = False, erp_name = 'main-PO7')
-		#erp.topoFlip(left = [1,2])
+		
 		#erp.topoSelection(sj = sj, loc = [2,4], midline = {'target_loc': [0,3]}, topo_name = 'main')
 
 		#  ERP analysis (target tuned)
@@ -726,11 +727,17 @@ if __name__ == '__main__':
 		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', 
 		#			bdm_labels = ['0','1','2','3','4','5'], time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)
 
-		# TF analysis
+		# TF analysis (first analyse anticipatory; collapsed across all trials)
 		tf = TF(beh, eeg, laplacian = True)
-		tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 	
-		 		  	cnd_header ='block_type', elec_oi = ['PO7', 'PO3', 'O1', 'PO8', 'PO4', 'O2'], base_period = None, 
-		 			base_type = 'Z', time_period = (-0.6,0.5), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
+		tf.TFanalysis(sj = sj, cnds = ['all'], 	
+		 		  	cnd_header ='block_type', elec_oi = 'all', base_period = None, 
+		 			base_type = 'Z', time_period = (-0.6,0), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
+		
+		# analyse reactive only for bottom left and right distractors
+		#tf = TF(beh, eeg, laplacian = True)
+		#tf.TFanalysis(sj = sj, cnds = ['DTsim-yes','DTdisP-yes','DTdisDP-yes','DTsim-no','DTdisP-no','DTdisDP-no'], 	
+		# 		  	cnd_header ='condition', elec_oi = 'all', base_period = None, 
+		# 			base_type = 'Z', time_period = (0,0.55), factor = dict(dist_loc = ['0','3','None'], target_loc = [1,2,4,5]), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
 
 	#  	#TF analysis
 	# 	tf = TF()
