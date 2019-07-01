@@ -728,22 +728,23 @@ if __name__ == '__main__':
 		#			bdm_labels = ['0','1','2','3','4','5'], time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)
 
 		# TF analysis (first analyse anticipatory; collapsed across all trials)
-		tf = TF(beh, eeg, laplacian = True)
-		tf.TFanalysis(sj = sj, cnds = ['all'], 	
-		 		  	cnd_header ='block_type', elec_oi = 'all', base_period = None, 
-		 			base_type = 'Z', time_period = (-0.6,0), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
+		#tf = TF(beh, eeg, laplacian = True)
+		#tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 	
+		# 		  	cnd_header ='block_type', elec_oi = 'all', base_period = None, 
+		# 			base_type = 'Z', time_period = (-0.6,0), min_freq = 1, method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
 		
 		# analyse reactive only for bottom left and right distractors
 		#tf = TF(beh, eeg, laplacian = True)
 		#tf.TFanalysis(sj = sj, cnds = ['DTsim-yes','DTdisP-yes','DTdisDP-yes','DTsim-no','DTdisP-no','DTdisDP-no'], 	
 		# 		  	cnd_header ='condition', elec_oi = 'all', base_period = None, 
-		# 			base_type = 'Z', time_period = (0,0.55), factor = dict(dist_loc = ['0','3','None'], target_loc = [1,2,4,5]), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
+		# 			base_type = 'Z', time_period = (0,0.55), min_freq = 1,factor = dict(dist_loc = ['0','3','None'], target_loc = [1,2,4,5]), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
 
 	#  	#TF analysis
-	# 	tf = TF()
-	# 	tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 
-	# 			  cnd_header ='block_type', base_period = (-0.8,-0.6), 
-	# 			  time_period = (-0.6,0.5), method = 'wavelet', flip = dict(high_prob = 'left'), downsample = 4)
+	 	tf = TF(beh, eeg, laplacian = False)
+	 	tf.TFanalysis(sj = sj, cnds = ['all'], 
+	 			  cnd_header ='block_type', base_period = None, 
+	 			  time_period = (-0.6,0.5), elec_oi = ['PO7','PO3','O1','PO8','PO4','O2'], 
+				  base_type = 'Z', method = 'wavelet', flip = dict(high_loc = [2]), downsample = 4)
 
 
 

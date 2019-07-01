@@ -399,13 +399,14 @@ def threshArray(X, chance, method = 'ttest', p_value = 0.05):
 
 	'''
 
-	p_vals = signedRankArray(X, chance)
-	X[:,p_vals > p_value] = chance
-	p_vals = clusterBasedPermutation(X,chance)
-	X = X.mean(axis = 0)
-	X[p_vals > p_value] = chance
+	X_ = np.copy(X) # make sure original data remains unchanged
+	p_vals = signedRankArray(X_, chance, method)
+	X_[:,p_vals > p_value] = chance
+	p_vals = clusterBasedPermutation(X_,chance)
+	X_ = X_.mean(axis = 0)
+	X_[p_vals > p_value] = chance
 
-	return X
+	return X_
 
 def signedRankArray(X, Y, method = 'ttest'):
 	'''

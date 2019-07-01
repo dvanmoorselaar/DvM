@@ -29,9 +29,11 @@ from matplotlib import cm
 from math import pi, sqrt
 from mne.filter import filter_data
 from scipy.signal import hilbert
+from scipy.optimize import curve_fit
 from scipy.stats import norm
 from scipy.ndimage.measurements import label
 from IPython import embed 
+
 
 class CTF(BDM):
 	'''
@@ -39,21 +41,24 @@ class CTF(BDM):
 	Scipts based on Matlab scripts published on open science Framework (https://osf.io/bwzjj/) and lab visit to Chicago University (spring quarter 2016).
 	'''
 
-	def __init__(self, beh, eeg, channel_folder, decoding, nr_iter, nr_blocks, nr_bins, nr_chans, delta):
+	def __init__(
+				self, beh, eeg, channel_folder, decoding, nr_iter, nr_blocks, 
+				nr_bins, nr_chans, delta, power='filtered'):
 		''' 
-		Init function needs to be adjusted to match python pipeline input. At the moment only works with preprocessed matlab data (EEG.mat)
+		
 		Arguments
 		- - - - - 
 		beh (DataFrame): behavioral infor across epochs
 		eeg (mne object): eeg object
 		channel_folder (str): folder specifying which electrodes are used for CTF analysis (e.g. posterior channels)
-		decoding (str)| Default ('memory'): String specifying what to decode. Defaults to decoding of spatial memory location, 
+		decoding (str)): String specifying what to decode. 
 		but can be changed to different locations (e.g. decoding of the location of an intervening stimulus).
 		nr_iter (int):  number iterations to apply forward model 	
 		nr_blocks (str): number of blocks to apply forward model
 		nr_bins (int): number of location bins used in experiment
 		nr_chans (int): number of hypothesized underlying channels
 		delta (bool): should basisset assume a shape of CTF or be a delta function
+		power (str): shuould model be run on filtered data or on raw voltages 
 
 		Returns
 		- - - -
@@ -71,8 +76,8 @@ class CTF(BDM):
 		self.nr_iter = nr_iter													# nr iterations to apply forward model 		
 		self.nr_blocks = nr_blocks												# nr blocks to split up training and test data with leave one out test procedure
 		self.sfreq = 512														# shift of channel position
+		self.power = power
 		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, delta = delta)		# hypothesized set tuning functions underlying power measured across electrodes
-
 
 	def selectData(self, conditions):
 		'''
@@ -162,7 +167,7 @@ class CTF(BDM):
 		return basisset	
 
 
-	def powerAnalysis(self, data, tois, sfreq, band, downsample):
+	def powerAnalysis(self, data, tois, sfreq, band, downsample, power):
 		'''
 		powerAnalysis bandpass filters raw EEG signal to isolate frequency-specific activity using a 5th order butterworth filter (different then original FIR filter). 
 		A Hilbert Transform is then applied to the filtered data to extract the complex analytic signal. To extract the total power this signal is computed by squaring 
@@ -175,6 +180,7 @@ class CTF(BDM):
 		sfreq(int): sampling rate in Hz
 		band(list): lower and higher cut-off value for bandpass filter
 		downsample(int): factor to downsample data after filtering
+		power (str): determines whether analysis are performed on power or voltage
 
 		Returns
 		- - - -
@@ -186,14 +192,19 @@ class CTF(BDM):
 		T = np.empty(data.shape, dtype= np.complex_) * np.nan
 		E = np.copy(T)
 
-		# loop over channels 
-		for ch in range(nr_chan):
-			# concatenate trials to speed up processing time
-			x = np.ravel(data[:,ch,:])
-			x_hilb = hilbert(filter_data(x, sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
-			x_hilb = np.reshape(x_hilb, (data.shape[0],-1))
-			T[:,ch] = np.abs(x_hilb)**2
-			E[:,ch] = x_hilb
+		if power == 'filtered':
+			# loop over channels 
+			for ch in range(nr_chan):
+				# concatenate trials to speed up processing time
+				embed()
+				x = np.ravel(data[:,ch,:])
+				x_hilb = hilbert(filter_data(x, sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
+				x_hilb = np.reshape(x_hilb, (data.shape[0],-1))
+				T[:,ch] = np.abs(x_hilb)**2
+				E[:,ch] = x_hilb
+		else:
+			T = data
+			E = data
 			
 		# trim filtered data to remove times that are not of interest (after filtering to avoid artifacts)
 		E = E[:,:,tois]
@@ -206,7 +217,6 @@ class CTF(BDM):
 		#T = mne.filter.resample(T, down = downsample, npad = 'auto')
 
 		return E, T
-
 
 	def forwardModel(self, train_X, test_X, C1):
 		'''
@@ -237,8 +247,8 @@ class CTF(BDM):
 		# apply forward model
 		B1 = train_X
 		B2 = test_X
-		W, resid_w, rank_w, s_w = np.linalg.lstsq(C1,B1)		# estimate weight matrix W (nr_chans x nr_electrodes)
-		C2, resid_c, rank_c, s_c = np.linalg.lstsq(W.T,B2.T)	# estimate channel response C2 (nr_chans x nr test blocks) 
+		W, resid_w, rank_w, s_w = np.linalg.lstsq(C1,B1, rcond = -1)		# estimate weight matrix W (nr_chans x nr_electrodes)
+		C2, resid_c, rank_c, s_c = np.linalg.lstsq(W.T,B2.T, rcond = -1)	# estimate channel response C2 (nr_chans x nr test blocks) 
 
 		# TRANSPOSE C2 so that we take the average across channels rather than across position bins
 		C2 = C2.T
@@ -560,7 +570,7 @@ class CTF(BDM):
 			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
 
 			# Time-Frequency Analysis 
-			E, T = self.powerAnalysis(eegs, samples, self.sfreq, [frqs[fr][0],frqs[fr][1]], downsample)
+			E, T = self.powerAnalysis(eegs, samples, self.sfreq, [frqs[fr][0],frqs[fr][1]], downsample, self.power)
 
 			# Loop over conditions
 			for c, cnd in enumerate(conditions):
@@ -646,28 +656,51 @@ class CTF(BDM):
 							ctf[cnd]['W_T'][p,fr, itr, smpl] = w 							# save estimated weights per channel and electrode 
 
 		# calculate slopese
-		slopes = {}
+		ctf_inf = {}
 		for cnd in ctf.keys():
-			e_slopes = np.zeros((nr_perm,nr_freqs, nr_samples))
-			t_slopes = np.zeros((nr_perm,nr_freqs, nr_samples))
-			slopes.update({cnd:{}})
+			e_slopes, t_slopes = np.zeros((2, nr_perm,nr_freqs, nr_samples))
+			e_amps, t_amps = np.zeros((2, nr_perm,nr_freqs, nr_samples))
+			e_baselines, t_baselines = np.zeros((2, nr_perm,nr_freqs, nr_samples))
+			e_concentrations, t_concentrations = np.zeros((2, nr_perm,nr_freqs, nr_samples))
+			e_means, t_means = np.zeros((2, nr_perm,nr_freqs, nr_samples))
+			#e_rmses, t_rmses = np.zeros((2, nr_perm,nr_freqs, nr_samples))
+		
+		
+			ctf_inf.update({cnd:{}})
 			for p_ in range(nr_perm):
-				e_slopes[p_,:,:] = self.calculateSlopes(np.mean(ctf[cnd]['tf_E'][p_], axis = 1),nr_freqs,nr_samples)
-				t_slopes[p_,:,:] = self.calculateSlopes(np.mean(ctf[cnd]['tf_T'][p_], axis = 1),nr_freqs,nr_samples)
+				e_slopes[p_,:,:], e_amps[p_,:,:], e_baselines[p_,:,:], e_concentrations[p_,:,:], e_means[p_,:,:], _  = self.summarizeCTFs(np.mean(ctf[cnd]['tf_E'][p_], axis = 1),nr_freqs,nr_samples)
+				t_slopes[p_,:,:], t_amps[p_,:,:], t_baselines[p_,:,:], t_concentrations[p_,:,:], t_means[p_,:,:], _   = self.summarizeCTFs(np.mean(ctf[cnd]['tf_T'][p_], axis = 1),nr_freqs,nr_samples)
 			
 			if nr_perm == 1:
-				slopes[cnd]['T_slopes'] = t_slopes[0]
-				slopes[cnd]['E_slopes'] = e_slopes[0]
+				ctf_inf[cnd]['T_slopes'] = t_slopes[0]
+				ctf_inf[cnd]['E_slopes'] = e_slopes[0]
+				ctf_inf[cnd]['T_amps'] = t_amps[0]
+				ctf_inf[cnd]['E_amps'] = e_amps[0]
+				ctf_inf[cnd]['T_baselines'] = t_baselines[0]
+				ctf_inf[cnd]['E_baselines'] = e_baselines[0]
+				ctf_inf[cnd]['T_concentrations'] = t_concentrations[0]
+				ctf_inf[cnd]['E_concentrations'] = e_concentrations[0]
+				ctf_inf[cnd]['T_means'] = t_means[0]
+				ctf_inf[cnd]['E_means'] = e_means[0]
 			else:
 				slopes[cnd] = {'T_slopes_p': t_slopes[1:], 'T_slopes': t_slopes[0], 
-							   'E_slopes_p': e_slopes[1:], 'E_slopes': e_slopes[0]}
+							   'E_slopes_p': e_slopes[1:], 'E_slopes': e_slopes[0],
+							   'T_amps_p': t_amps[1:], 'T_amps': t_amps[0], 
+							   'E_amps_p': e_amps[1:], 'E_amps': e_amps[0],
+							   'T_baselines_p': t_means[1:], 'T_baselines': t_means[0], 
+							   'E_baselines_p': e_means[1:], 'E_baselines': e_means[0],
+							   'T_concentrations_p': t_sigmas[1:], 'T_concentrations': t_sigmas[0], 
+							   'E_concentrations_p': e_sigmas[1:], 'E_concentrations': e_sigmas[0]}
 
-
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0]), overwrite = False),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
 			print('saving slopes dict')
-			pickle.dump(slopes, handle)
-	
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_info.pickle'.format(freqs.keys()[0])),'wb') as handle:
+			pickle.dump(ctf_inf, handle)
+
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_{}_ctfs-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
+			print('saving ctfs')
+			pickle.dump(ctf, handle)
+			
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_info.pickle'.format(freqs.keys()[0])),'wb') as handle:
 			print('saving info dict')
 			pickle.dump(ctf_info, handle)
 
@@ -801,23 +834,114 @@ class CTF(BDM):
 		# save data
 		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_ctfperm_all.pickle'.format(str(subject_id))),'wb') as handle:
 			print('saving CTF perm dict')
-			pickle.dump(CTFp, handle)	
-					
-	def calculateSlopes(self, data, nr_freqs, nr_samps):
+			pickle.dump(CTFp, handle)
+
+		
+
+	def Gaussian(self, x, amp, mu, sig):
+		'''Standard Gaussian function
+		
+		Arguments:
+			x {array} -- gaussian x coordinates 
+			amp {int|float} -- gaussian amplitude
+			mu {int|foat} -- gaussian mean
+			sig {int|float} -- gaussian width
+		
+		Returns:
+			y{array} -- gaussian y coordinates
 		'''
-		calculateSlopes calculates slopes of CTF data by collapsing across symmetric data points in the tuning curve. The collapsed data create a linear 
-		increasing vector array from the tails to the peak of the tuning curve. A first order polynomial is then fitted to this array to estimate the slope
-		of the tuning curve. 
 
-		Arguments
-		- - - - - 
-		data (array): CTF data across frequencies and sample points (nr freqs, nr samps, nr chans) 
-		nr_freqs (int): number of frequencies in CTF data
-		nr_samps (int): number of sample points in CTF data
+		y = amp * np.exp(-(x - mu)**2/(2*sig**2))
 
-		Returns
-		- - - -
-		slopes(array): slope values across frequencies and sample points
+		return y
+		
+	def fitGaussian(self, y):
+		'''fits a Gaussian to input y
+		
+		Arguments:
+			y {array} -- to be fitted data
+		
+		Returns:
+			popt {array} -- array that contains amplitude, mean and sigma of the fitted Gaussian
+		'''
+
+		x = np.arange(y.size)
+		mu = sum(x * y) / sum(y)
+		sig = np.sqrt(sum(y * mu)**2) / sum(y)
+
+		popt, pcov = curve_fit(self.Gaussian, x, y, p0=[max(y), mu, sig] )
+
+		return popt 
+
+	def fitCosToCTF(self, d, kstep=0.1):
+		'''[summary]
+		
+		Arguments:
+			d {[type]} -- [description]
+		
+		Keyword Arguments:
+			kstep {float} -- [description] (default: {0.1})
+		
+		Returns:
+			[type] -- [description]
+		'''
+
+		
+		num_bins = d.size
+
+		# possible concentration parameters to consider
+		# step size of 0.1 is usually good, but smaller makes for better fits
+		k = np.arange(3, 40 + kstep, kstep)
+
+		# allocate storage arrays
+		sse, baseline, amps = np.zeros((3, k.size))
+
+		# hack to find best central point
+		m_idx = np.argmax(d[int(np.round(num_bins/2.0) - np.round(num_bins * .1) - 1): 
+		  				    int(np.round(num_bins/2.0) + np.round(num_bins * .1))])
+		x = np.linspace(0, np.pi - np.pi/num_bins, num_bins)
+		#u = x[int(m_idx + np.round(num_bins/2.0) - np.round(num_bins * .1) - 1)]
+		u = x[num_bins/2]
+
+		# loop over all concentration parameters
+		# estimate best amp and baseline offset and find combination that minimizes sse
+		a, b = 1,0
+		for i in range(k.size):
+			# create the vm function
+			pred = a * np.exp(k[i] * (np.cos(u - x) - 1)) + b
+			# build a design matrix and use GLM to estimate amp and baseline
+			X = np.zeros((num_bins, 2))
+			X[:,0] = pred
+			X[:,1] = np.ones(num_bins)
+			betas, _, _, _ = np.linalg.lstsq(X, d)
+			amps[i], baseline[i] = betas
+			est = pred * betas[0] + betas[1]
+			sse[i] = sum((est - d)**2)
+
+		idx_min = np.argmin(sse)
+		b = baseline[idx_min]
+		a = amps[idx_min]
+		concentration = k[idx_min]
+		pred = a * np.exp(concentration * (np.cos(u - x) - 1)) + b
+		rmse = np.sqrt(sum((pred - d)**2)/pred.size)
+
+		return a, b, concentration, u, rmse
+
+
+	def summarizeCTFs(self, X, nr_freqs, nr_samps):
+		'''	Captures a range of summary statistics of the channel tuning function. Slopes are calculated by 	
+		collapsing across symmetric data points in the tuning curve. The collapsed data create a linear 
+		increasing vector array from the tails to the peak of the tuning curve. A first order polynomial 
+		is then fitted to this array to estimate the slope of the tuning curve. In addition, the tuning curve is
+		fitted to a Gaussian. The amplitude, mean and sigma of this function are also computed. 
+
+		Arguments:
+			X {array} -- CTF data across frequencies and sample points (nr freqs, nr samps, nr chans) 
+			nr_freqs {int} --  number of frequencies in CTF data
+			nr_samps {int} -- number of sample points in CTF data
+		
+		Returns:
+			[type] -- [description]
 		'''
 
 		if self.nr_chans % 2 == 0:
@@ -826,19 +950,27 @@ class CTF(BDM):
 			steps = int(np.ceil(self.nr_chans / 2.0))	
 
 		slopes = np.empty((nr_freqs, nr_samps)) * np.nan
+		amps = np.copy(slopes)
+		baselines = np.copy(slopes)
+		concentrations = np.copy(slopes)
+		means = np.copy(slopes)
+		preds = np.copy(slopes)
+		rmses = np.copy(slopes)
 
 		for f in range(nr_freqs):
 			for s in range(nr_samps):
-				d = data[f,s,:] 
+				d = X[f,s] 
 				# collapse symmetric slope positions, eg (0, (45,315), (90,270), (135,225), 180)
 				if self.nr_chans % 2 == 0:
 					d = np.array([d[0]] + [np.mean((d[i],d[-i])) for i in range(1,steps)])
 				else:
 					d = np.array([np.mean((d[i],d[i+(-1-2*i)])) for i in range(steps)])
 				slopes[f,s] = np.polyfit(range(1, len(d) + 1), d, 1)[0]
+				#amps[f,s], means[f,s], sigmas[f,s] = self.fitGaussian(X[f,s])
+				amps[f,s], baselines[f,s], concentrations[f,s], means[f,s], rmses[f,s] = self.fitCosToCTF(X[f,s])
 
-		return slopes			
-	
+		return slopes, amps, baselines, concentrations, means, rmses
+
 	def CTFSlopes(self, subject_id, conditions,cnd_name = 'cnds', band = 'alpha', perm = False):
 		'''
 		CTFSlopes sets up data to calculate slope values for real or permuted data. Actual slope calculations across frequencies and sample points 

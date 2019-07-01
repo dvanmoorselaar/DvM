@@ -29,7 +29,7 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, beh, EEG, decoding, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None):
+	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None):
 		''' 
 
 		Arguments
@@ -46,9 +46,10 @@ class BDM(FolderStructure):
 
 		'''
 
+
 		self.beh = beh
-		self.EEG = EEG
-		self.decoding = decoding
+		self.EEG = EEG.apply_baseline(baseline = baseline)
+		self.to_decode = to_decode
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
 		self.downsample = downsample
@@ -101,14 +102,38 @@ class BDM(FolderStructure):
 		eegs = EEG._data[:,picks,s:e]
 		times = EEG.times[s:e]
 
+		# if specified average over trials 
+		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
+
 		# store dictionary with variables for plotting
 		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
 
-		with open(self.FolderTracker(['bdm',self.decoding], filename = 'plot_dict.pickle'),'wb') as handle:
+		with open(self.FolderTracker(['bdm',self.to_decode], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)						
 
 		return 	eegs, beh
 
+	def averageTrials(self, X, Y, trial_avg):
+
+
+		# DOWNSIDE OF ONLY AVERAGING AT THIS STAGE AND WHIT PRSENT METHOD IS THAT TRIALS ARE LOSSED
+		# initiate arrays
+		x_, y_ = [], []
+
+		# loop over each label in Y
+		for label in np.unique(Y):
+			idx = np.where(Y[0] == label)[0]
+			# note that trial order is shuffled 
+			list_of_groups = zip(*(iter(idx),) * trial_avg)
+			for sub in list_of_groups:
+				x_.append(X[:,np.array(sub)].mean(axis = 1))
+				y_.append(label)
+
+		# create averaged x and y arrays
+		x_ = np.swapaxes(np.stack(x_),0,1)
+		y_ = np.array([y_,]*Y.shape[0])
+
+		return x_, y_
 
 	def Classify(self,sj, cnds, cnd_header, time, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
@@ -144,7 +169,7 @@ class BDM(FolderStructure):
 		eegs, beh = self.selectBDMData(time, excl_factor)	
 		
 		# select minumum number of trials given the specified conditions
-		max_tr = [self.selectMaxTrials(beh, cnds, cnd_header)]
+		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
 		if downscale:
 			max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
 
@@ -162,10 +187,10 @@ class BDM(FolderStructure):
 
 			if cnd != 'all':
 				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-				cnd_labels = beh[self.decoding][cnd_idx].values
+				cnd_labels = beh[self.to_decode][cnd_idx].values
 			else:
 				cnd_idx = np.arange(beh[cnd_header].size)
-				cnd_labels = beh[self.decoding].values
+				cnd_labels = beh[self.to_decode].values
 
 			if bdm_labels != 'all':
 				sub_idx = [i for i,l in enumerate(cnd_labels) if l in bdm_labels]	
@@ -196,8 +221,11 @@ class BDM(FolderStructure):
 
 					# select train and test trials
 					train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info)
-					Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.decoding], eegs, train_tr, test_tr)
-
+					Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)
+					self.trial_avg = 3
+					if self.trial_avg > 1:
+						Xtr, Ytr = self.averageTrials(Xtr, Ytr, 2)
+						Xte, Yte = self.averageTrials(Xte, Yte, 2)
 					# do actual classification
 					#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
 					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
@@ -209,9 +237,10 @@ class BDM(FolderStructure):
 			if nr_perm > 1:
 				classification[cnd].update({'perm': class_acc[1:]})
 	
+		embed()	
 		# store classification dict	
 		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, self.decoding], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode,'baseline'], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
@@ -385,10 +414,9 @@ class BDM(FolderStructure):
  
 		'''
 
-
-		nr_class = scores.shape[1]
-
 		if self.method == 'auc':
+			print 'THIS DOES NOT WORK WITH BINARY PROBLEM'
+			nr_class = scores.shape[1]
 			# shift true_scores to indices
 			true_labels = np.array([list(label_order).index(l) for l in true_labels])
 			# select all pairwise combinations of classes
@@ -456,7 +484,7 @@ class BDM(FolderStructure):
 		return auc
 
 
-	def selectMaxTrials(self,beh, cnds, cnds_header = 'condition'):
+	def selectMaxTrials(self,beh, cnds, bdm_labels = 'all', cnds_header = 'condition'):
 		''' 
 		
 		For each condition the maximum number of trials per decoding label are determined
@@ -467,6 +495,7 @@ class BDM(FolderStructure):
 		- - - - - 
 		beh (dict): contains all logged variables of interest
 		cnds (list): list of conditions for decoding analysis
+		bdm_labels(list|str): which labels will be used for decoding
 		cnds_header (str): variable name containing conditions of interest
 
 		Returns
@@ -494,7 +523,10 @@ class BDM(FolderStructure):
 
 			max_trials = min(cnd_min)
 		elif cnds == 'all':
-			labels = beh[self.decoding]
+			if bdm_labels != 'all':
+				labels = [l for l in beh[self.to_decode] if l in bdm_labels]
+			else:
+				labels = beh[self.to_decode]
 			min_tr = np.unique(labels, return_counts = True)[1]
 			max_trials = int(np.floor(min(min_tr)/N)*N)	
 

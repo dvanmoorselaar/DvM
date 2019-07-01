@@ -17,9 +17,9 @@ Especially suited to integrate EEG data with behavioural and/or eye tracking exp
 To make use of this toolbox you have to set up a virtual python environment. 
 The necessary steps are outlined below:
 
-1. install anaconda (python 2 is recommended)
+1. install anaconda (switching all code to python 3 now)
 2. launch terminal
-3. conda create -n mne python=2 pip
+3. conda create -n mne python=3 pip
 4. source activate mne
 5. conda install scipy matplotlib scikit-learn mayavi jupyter spyder
 6. pip install PySurfer mne

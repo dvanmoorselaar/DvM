@@ -23,9 +23,10 @@ from support.support import trial_exclusion
 from signals.signal_processing import *
 from IPython import embed
 
+
 class TF(FolderStructure):
 
-	def __init__(self, beh, eeg, laplacian = True):
+	def __init__(self, beh, eeg, laplacian=True):
 		''' 
 
 		Arguments
@@ -72,6 +73,61 @@ class TF(FolderStructure):
 	
 		return eegs, beh
 
+	def RESS(self, sfreq, time_oi, peakwidth = .5, neighfreq = 1, neighwidt = 1, peak_freqs = [6, 7.5], elec_oi = ['Oz','O2']):
+
+		# set FFT parameters
+		sfreq = eeg.info['sfreq']
+		nfft = np.ceil(sfreq/.1 ) # .1 Hz resolution
+		t_idx_s, t_idx_e  = [np.argmin(abs(eeg.times - t)) for t in time_oi]
+		hz = np.linspace(0,sfreq,nfft)
+
+		# extract eeg data (should be implemented in cnd loop)
+		data = eeg._data[cnd_mask,:,:]
+		dataX = np.mean(abs(fft(data[:,t_idx_s:t_idx_e, nfft, axis = 2)/ (t_idx_e - t_idx_s)), axis = 0) # This needs to be checked!!!!!
+		
+	def FGFilter(self, X, sfreq, f, fwhm):
+		"""[summary]
+		
+		Arguments:
+			X {[type]} -- [description]
+			sfreq { [type]} -- [description]
+			f {[type]} -- [description]
+			fwhm {[type]} -- [description]
+		
+		Returns:
+			[type] -- [description]
+		"""
+
+
+		
+		# compute and apply filter
+
+		# frequencies
+		hz = np.linspace(0,sfreq,X.shape[1])
+
+		# create Gaussian (CHECK THIS)
+		s  = fwhm*(2 * np.pi-1)/(4*np.pi) # normalized width
+		x  = hz-f                 		  # shifted frequencies
+		fx = np.exp(-.5*(x/s)**2)    	  # gaussian
+		fx = fx/np.max(fx)          	  # gain-normalized
+
+		# filter data
+		filtX = 2 * np.real(ifft( fft(data, [],2)* fx, [],2))
+		#filtdat = 2*real( ifft( bsxfun(@times,fft(data,[],2),fx) ,[],2) );
+		
+		# compute empirical frequency and standard deviation
+		idx = dsearchn(hz',f);
+		emp_vals[1] = hz[idx]
+
+		# find values closest to .5 after MINUS before the peak
+		emp_vals[2] = hz(idx-1+dsearchn(fx(idx:end)',.5)) - hz(dsearchn(fx(1:idx)',.5))
+
+		return filtdat, emp_vals
+
+
+
+
+
 	@staticmethod	
 	def nextpow2(i):
 		'''
@@ -83,7 +139,6 @@ class TF(FolderStructure):
 			n += 1
 		
 		return n
-
 
 	def topoFlip(self, eegs, var, ch_names, left = []):
 		''' 
@@ -240,52 +295,62 @@ class TF(FolderStructure):
 		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)
 
-	def permuted_Z(self, raw_power,ch_names, num_frex, nr_time, nr_perm = 1000):
+	def permuted_Z(self, raw_power, ch_names, num_frex, nr_time, nr_perm = 1000):
 
 
-		print('For permutation procedure it is assumed that it is as if all stimuli of interest are presented right')
+		
 		# ipsi_contra pairs
 		contra_ipsi_pair = [('Fp1','Fp2'),('AF7','AF8'),('AF3','AF4'),('F7','F8'),('F5','F6'),('F3','F4'),\
 					('F1','F2'),('FT7','FT8'),('FC5','FC6'),('FC3','FC4'),('FC1','FC2'),('T7','T8'),\
 					('C5','C6'),('C3','C4'),('C1','C2'),('TP7','TP8'),('CP5','CP6'),('CP3','CP4'),\
 					('CP1','CP2'),('P9','P10'),('P7','P8'),('P5','P6'),('P3','P4'),('P1','P2'),\
 					('PO7','PO8'),('PO3','PO4'),('O1','O2')]
+		pair_idx =  [i for i, pair in enumerate(contra_ipsi_pair) if pair[0] in ch_names]			
+		contra_ipsi_pair = np.array(contra_ipsi_pair)[pair_idx] 
 
 		# initiate Z array
-		Z = np.zeros((len(ch_names)/2, num_frex, nr_time))
-		norm = np.zeros((len(ch_names)/2, num_frex, nr_time))
+		Z = np.zeros((contra_ipsi_pair.size, num_frex, nr_time))
+		norm = np.zeros((contra_ipsi_pair.size, num_frex, nr_time))
 		Z_elec = []
-
 		# loop over contra_ipsi pairs
 		pair_idx = 0
 		for (contra_elec, ipsi_elec) in contra_ipsi_pair:
-
-			if contra_elec not in ch_names: continue	
+			
+			Z_elec.append(contra_elec)	
 			
 			# get indices of electrode pair
 			contra_idx = ch_names.index(contra_elec)
 			ipsi_idx = ch_names.index(ipsi_elec)
-
-			# get the real difference
-			real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
-
-			# create distribution of fake differences
-			fake_diff = np.zeros((nr_perm,) + real_diff.shape)
-			for p in range(nr_perm):
-				# randomly flip ipsi and contra
-				signed = np.sign(np.random.normal(size = real_diff.shape[0]))
-				permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
-				fake_diff[p] = real_diff * permuter
-
-			# Z scoring
-			print('Z scoring pair {}-{}'.format(contra_elec, ipsi_elec))
-			Z[pair_idx] = (np.mean(real_diff, axis = 0) - np.mean(fake_diff, axis = (0,1))) / np.std(np.mean(fake_diff, axis = 1), axis = 0, ddof = 1)	
 			contra_ipsi_norm = (raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx])/(raw_power[:,:,contra_idx] + raw_power[:,:,ipsi_idx])
 			norm[pair_idx] = contra_ipsi_norm.mean(axis = 0)
-			Z_elec.append(contra_elec)
+
+			# # get the real difference
+			#real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
+
+			# # create distribution of fake differences
+			#try:
+			# 	fake_diff = np.zeros((nr_perm,) + real_diff.shape)
+			#except:
+			#	embed()
+			# 	print 'Data of real_diff is averaged to reduce the size of the array of two becuase of memory problems'
+			# 	if real_diff.shape[0] % 2 == 1:
+			# 		real_diff = real_diff[:-1]
+			# 	to_split = np.random.permutation(real_diff.shape[0])%2
+			# 	real_diff = np.mean((real_diff[to_split == 0],real_diff[to_split == 1]), axis = 0)
+			# 	fake_diff = np.zeros((nr_perm,) + real_diff.shape)
+
+			#for p in range(nr_perm):
+			 	# randomly flip ipsi and contra
+			# 	signed = np.sign(np.random.normal(size = real_diff.shape[0]))
+			# 	permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
+			# 	fake_diff[p] = real_diff * permuter
+
+			# # Z scoring
+			#print('Z scoring pair {}-{}'.format(contra_elec, ipsi_elec))
+			#Z[pair_idx] = (np.mean(real_diff, axis = 0) - np.mean(fake_diff, axis = (0,1))) / np.std(np.mean(fake_diff, axis = 1), axis = 0, ddof = 1)	
 			pair_idx += 1
 
-		return Z, norm, Z_elec
+		return norm, Z_elec
 
 	def TFanalysis(self, sj, cnds, cnd_header, time_period, base_period = None, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
@@ -418,7 +483,8 @@ class TF(FolderStructure):
 				con_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
 			elif base_type == 'Z':
-				tf[cnd]['Z_power'], tf[cnd]['norm_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
+				print('For permutation procedure it is assumed that it is as if all stimuli of interest are presented right')
+				tf[cnd]['Z_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
 				tf.update(dict(z_info = z_info))
 
 			# power values can now safely be averaged

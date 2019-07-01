@@ -159,35 +159,42 @@ class PreProcessing(object):
 		for f, filt in enumerate(to_filter):
 		
 			# filter RTs step 1
-			work_data['raw_filter'] = (work_data[filt] > min_cut_off) & (work_data[filt] < max_cut_off)
+			self.work_data['raw_filter'] = (work_data[filt] > min_cut_off) & (work_data[filt] < max_cut_off)
 
 			# filter RTs step 2
-			work_data['{}_filter'.format(filt)] = False # trial is not included in analysis unless it is set to True by the RT filter
+			self.work_data['{}_filter'.format(filt)] = False # trial is not included in analysis unless it is set to True by the RT filter
 
 			filter_list = []
-
 			for sj in work_data['subject_nr'].unique():
 				print 'filtering sj {}'.format(sj)
-				for labels in product(*self.factor_labels):
-					
-					# set basis filter
-					current_filter = 'subject_nr == {} and raw_filter == True'.format(sj)
-					current_filter += filter_crit
-					
-					if cnd_sel:
+				# set basis filter
+				base_filter = 'subject_nr == {} and raw_filter == True'.format(sj)
+				base_filter += filter_crit
+
+				# filtering done for each condition seperately	
+				if cnd_sel:
+					for labels in product(*self.factor_labels):
 						for i in range(len(labels)):
 							if isinstance(labels[i],str):
-								current_filter += ' and {} == \'{}\''.format(self.factor_headers[i],labels[i])	
+								current_filter = base_filter + ' and {} == \'{}\''.format(self.factor_headers[i],labels[i])	
 							else:
-								current_filter += ' and {} == {}'.format(self.factor_headers[i],labels[i])
+								current_filter = base_filter + ' and {} == {}'.format(self.factor_headers[i],labels[i])
 					
-	 				# filter data based on current filter for this specific cell of the ANOVA
-					current_data = work_data.query(current_filter)
+	 					# filter data based on current filter for this specific cell of the ANOVA
+						current_data = self.work_data.query(current_filter)
 
-					# use filter to set RT filter to True if it is within SD range for that specific condition	
-					for index in current_data.index:
-						if (work_data.ix[index,filt] >= current_data[filt].mean() - 2.5 * current_data[filt].std()) and (work_data.ix[index,filt] <= current_data[filt].mean() + 2.5 * current_data[filt].std()):
-							work_data.ix[index,'{}_filter'.format(filt)] = True
+						# use filter to set RT filter to True if it is within SD range for that specific condition
+						self.SDtrimmer(current_data, filt)	
+						#for index in current_data.index:
+						#	if (work_data.ix[index,filt] >= current_data[filt].mean() - 2.5 * current_data[filt].std()) and (work_data.ix[index,filt] <= current_data[filt].mean() + 2.5 * current_data[filt].std()):
+						#		work_data.ix[index,'{}_filter'.format(filt)] = True
+				# filtering collapsed across conditions	
+				else:
+					current_data = self.work_data.query(base_filter)
+					self.SDtrimmer(current_data, filt)
+					#for index in current_data.index:
+					#	if (work_data.ix[index,filt] >= current_data[filt].mean() - 2.5 * current_data[filt].std()) and (work_data.ix[index,filt] <= current_data[filt].mean() + 2.5 * current_data[filt].std()):
+					#		work_data.ix[index,'{}_filter'.format(filt)] = True
 
 		# store or save data					
 		if save:
@@ -196,6 +203,22 @@ class PreProcessing(object):
 		
 		self.work_data = work_data
 
+	def SDtrimmer(self, df, filt, sd = 2.5):
+		'''
+
+		'''
+
+		lower_bound = df[filt].mean() - 2.5 * df[filt].std()
+		upper_bound = df[filt].mean() + 2.5 * df[filt].std()
+
+		for index in df.index:
+			if (self.work_data.ix[index,filt] >= lower_bound) and (self.work_data.ix[index,filt] <= upper_bound):
+				self.work_data.ix[index,'{}_filter'.format(filt)] = True
+
+
+
+
+		
 
 	def exclude_outliers(self, criteria = dict(RT = "RT_filter == True"), agg_func = 'mean', sd = 2.5):
 		'''

@@ -53,7 +53,7 @@ class FolderStructure(object):
 		return folder	
 
 
-	def loadData(self, sj, eyefilter, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None):
+	def loadData(self, sj, eyefilter, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True):
 		'''
 		loads EEG and behavior data
 
@@ -65,6 +65,7 @@ class FolderStructure(object):
 		eye_ch (str): name of channel to scan for eye movements
 		eye_thresh (int): exclude trials with an saccades exceeding threshold (in visual degrees)
 		eye_dict (dict): if not None, needs to be dict with three keys specifying parameters for sliding window detection
+		beh_file (bool): Is epoch info stored in a seperate file or within behavior file
 
 		Returns
 		- - - -
@@ -73,14 +74,17 @@ class FolderStructure(object):
 
 		'''
 
-		# read in processed behavior from pickle file
-		beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
-							filename = 'subject-{}_all.pickle'.format(sj)),'rb'))
-		beh = pd.DataFrame.from_dict(beh)
-
 		# read in processed EEG data
 		eeg = mne.read_epochs(self.FolderTracker(extension = ['processed'], 
 							filename = 'subject-{}_all-epo.fif'.format(sj)))
+
+		# read in processed behavior from pickle file
+		if beh_file:
+			beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
+								filename = 'subject-{}_all.pickle'.format(sj)),'rb'))
+			beh = pd.DataFrame.from_dict(beh)
+		else:
+			beh = pd.DataFrame({'condition': eeg.events[:,2].byteswap().newbyteorder()})	
 
 		if eyefilter:
 			beh, eeg = filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh, eye_dict)

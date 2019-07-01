@@ -80,7 +80,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
                     # print('Electrode {0} replaced by
                     # {1}'.format(e,replace[sj][session][e]))
 
-    def reReference(self, ref_channels=['EXG5', 'EXG6'], vEOG=['EXG1', 'EXG2'], hEOG=['EXG3', 'EXG4'], changevoltage=True, to_remove = ['EXG2','EXG3','EXG4','EXG6','EXG7','EXG8']):
+    def reReference(self, ref_channels=['EXG5', 'EXG6'], vEOG=['EXG1', 'EXG2'], hEOG=['EXG3', 'EXG4'], changevoltage=True, to_remove = ['EXG7','EXG8']):
         '''
         Rereference raw data to reference channels. By default data is rereferenced to the mastoids.
         Also EOG data is rerefenced. Subtraction of VEOG and HEOG results in a VEOG and an HEOG channel.
@@ -110,6 +110,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         # rereference all EEG channels to reference channels
         self.set_eeg_reference(ref_channels=ref_channels)
+        to_remove += ref_channels
         print('EEG data was rereferenced to channels {}'.format(ref_channels))
         logging.info(
             'EEG data was rereferenced to channels {}'.format(ref_channels))
@@ -124,6 +125,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
             self._data[idx_h[0]] -= self._data[idx_h[1]]
         
         ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
+        to_remove += [vEOG[1], hEOG[1]]
         self.rename_channels(ch_mapping)
         print(
             'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
