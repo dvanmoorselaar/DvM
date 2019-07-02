@@ -14,20 +14,21 @@ import copy
 import glob
 import sys
 import time
+import itertools
 #import matplotlib          # run these lines only when running sript via ssh connection
 #matplotlib.use('agg')
 
 import numpy as np
 import scipy as sp
 import pandas as pd
-#import matplotlib.pyplot as plt
-#plt.switch_backend('Qt4Agg') # run next two lines to interactively scroll through plots
-#import matplotlib
+import matplotlib.pyplot as plt
+plt.switch_backend('Qt4Agg') # run next two lines to interactively scroll through plots
+import matplotlib
 import seaborn as sns
 from matplotlib import cm
 
 from termios import tcflush, TCIFLUSH
-from EYE import *
+#from EYE import *
 from math import sqrt
 from IPython import embed
 from support.FolderStructure import *
@@ -205,7 +206,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         return events
 
-    def matchBeh(self, sj, session, events, trigger, headers):
+    def matchBeh(self, sj, session, events, event_id, headers):
         '''
         Alligns bdf file with csv file with experimental variables
 
@@ -220,7 +221,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         Returns
         - - - -
-        beh (object): panda object wwith behavioral data (triggers are alligned)
+        beh (object): panda object with behavioral data (triggers are alligned)
         missing (araray): array of missing trials (can be used when selecting eyetracking data)
         '''
 
@@ -237,7 +238,9 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         beh_triggers = beh['trigger'].values    
 
         # get triggers bdf file
-        idx_trigger = [idx for idx, tr in enumerate(events[:,2]) if tr in trigger] 
+        if type(event_id) == dict:
+            event_id = [event_id[key] for key in event_id.keys()]
+        idx_trigger = [idx for idx, tr in enumerate(events[:,2]) if tr in event_id] 
         bdf_triggers = events[idx_trigger,2] 
 
         # log number of unique triggers
@@ -468,7 +471,7 @@ class Epochs(mne.Epochs, FolderStructure):
                                 filename='noise_epochs.txt'))    
 
         if inspect:
-            print 'You can now overwrite automatic artifact detection by clicking on epochs selected as bad'
+            print('You can now overwrite automatic artifact detection by clicking on epochs selected as bad')
             bad_eegs = self[bad_epochs]
             idx_bads = bad_eegs.selection
             
@@ -728,26 +731,26 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # save behavior
         with open(self.FolderTracker(extension=['beh', 'processed'],
-        	filename='subject-{}_ses-{}.pickle'.format(self.sj, self.session)), 'wb') as handle:
+            filename='subject-{}_ses-{}.pickle'.format(self.sj, self.session)), 'wb') as handle:
             pickle.dump(beh_dict, handle)
 
         # save eeg
         self.save(self.FolderTracker(extension=[
-                  'processed'], filename='subject-{}_ses-{}-epo.fif'.format(self.sj, self.session)), split_size='2GB')
+                    'processed'], filename='subject-{}_ses-{}-epo.fif'.format(self.sj, self.session)), split_size='2GB')
 
         # update preprocessing information
         logging.info('Nr clean trials is {0} ({1:.0f}%)'.format(
             sel_tr.size, float(sel_tr.size) / beh.shape[0] * 100))
-        
-        try:
-        	cnd = beh['condition'].values
-        	min_cnd, cnd = min([sum(cnd == c) for c in np.unique(cnd)]), np.unique(cnd)[
-            	np.argmin([sum(cnd == c) for c in np.unique(cnd)])]
 
-        	logging.info(
-            	'Minimum condition ({}) number after cleaning is {}'.format(cnd, min_cnd))
+        try:
+            cnd = beh['condition'].values
+            min_cnd, cnd = min([sum(cnd == c) for c in np.unique(cnd)]), np.unique(cnd)[
+                np.argmin([sum(cnd == c) for c in np.unique(cnd)])]
+
+            logging.info(
+                'Minimum condition ({}) number after cleaning is {}'.format(cnd, min_cnd))
         except:
-			logging.info('no condition found in beh file')		
+            logging.info('no condition found in beh file')
 
         logging.info('EEG data linked to behavior file')
 
@@ -785,4 +788,4 @@ class Epochs(mne.Epochs, FolderStructure):
             logging.info('EEG sessions combined')
 
 if __name__ == '__main__':
-    print 'Please run preprocessing via a project script'
+    print('Please run preprocessing via a project script')

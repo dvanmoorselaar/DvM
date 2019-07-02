@@ -15,12 +15,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from helperFunctions import *
 from IPython import embed
 from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
 from support.FolderStructure import *
-from eeg_support import *
 
 class ERP(FolderStructure):
 
@@ -67,11 +65,11 @@ class ERP(FolderStructure):
 				beh.drop(np.where(mask)[0], inplace = True)
 				beh.reset_index(inplace = True)
 				EEG.drop(np.where(mask)[0])
-				print 'Dropped {} trials after specifying excl_factor'.format(sum(mask))
-				print 'NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN'
+				print('Dropped {} trials after specifying excl_factor'.format(sum(mask)))
+				print('NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN')
 
 			else:
-				print 'Trial exclusion: no trials selected that matched specified criteria'
+				print('Trial exclusion: no trials selected that matched specified criteria')
 				mask = np.zeros(beh.shape[0], dtype = bool)
 
 		# read in eeg data 
@@ -305,7 +303,7 @@ class ERP(FolderStructure):
 			idx_c_r = np.array([r for r in idx_c if r in idx_r], dtype = int)
 
 			if idx_c_l.size == 0 and idx_c_r.size == 0:
-				print 'no data found for {}'.format(cnd)
+				print('no data found for {}'.format(cnd))
 				continue
 
 			if self.flipped:
@@ -405,7 +403,7 @@ class ERP(FolderStructure):
 				idx_c_l = idx_c	
 
 			if idx_c_l.size == 0:
-				print 'no topo data found for {}'.format(cnd)
+				print('no topo data found for {}'.format(cnd))
 				continue				
 
 			topo = self.eeg[idx_c_l,:,:]

@@ -79,7 +79,7 @@ class PreProcessing(object):
 		# read csv file into dataframe
 		raw_data_comb = []
 		for subject in subject_files:
-			print subject
+			print(subject)
 			try:
 				csv_file = os.path.join(self.project_folder,'raw',subject)
 				raw_data = pd.read_csv(csv_file)
@@ -166,7 +166,7 @@ class PreProcessing(object):
 
 			filter_list = []
 			for sj in work_data['subject_nr'].unique():
-				print 'filtering sj {}'.format(sj)
+				print('filtering sj {}'.format(sj))
 				# set basis filter
 				base_filter = 'subject_nr == {} and raw_filter == True'.format(sj)
 				base_filter += filter_crit

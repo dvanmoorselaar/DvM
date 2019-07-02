@@ -20,10 +20,10 @@ def trial_exclusion(beh, eeg, excl_factor):
 		beh.drop(np.where(mask)[0], inplace = True)
 		beh.reset_index(inplace = True)
 		eeg.drop(np.where(mask)[0])
-		print 'Dropped {} trials after specifying excl_factor'.format(sum(mask))
-		print 'NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN'
+		print('Dropped {} trials after specifying excl_factor'.format(sum(mask)))
+		print('NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN')
 	else:
-		print 'Trial exclusion: no trials selected that matched specified criteria'
+		print('Trial exclusion: no trials selected that matched specified criteria')
 
 	return beh, eeg
 
@@ -48,7 +48,7 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict =
 	'''
 
 	nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
-	print ('Trials without reliable eyetracking data {} out of {} clean trials ({}%)'.format(nan_idx.size, beh['eye_bins'].size, nan_idx.size/float(beh['eye_bins'].size)*100))
+	print('Trials without reliable eyetracking data {} out of {} clean trials ({}%)'.format(nan_idx.size, beh['eye_bins'].size, nan_idx.size/float(beh['eye_bins'].size)*100))
 
 	# limit step algorhytm to trials without eye tracking data
 	if nan_idx.size > 0:
@@ -63,7 +63,7 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict =
 	
 	# remove trials from beh and eeg objects
 	to_drop = np.where(beh['eye_bins'] > eye_thresh)[0]	
-	print ('Dropped {} trials based on threshold criteria ({})%'.format(to_drop.size, to_drop.size/float(beh['eye_bins'].size)*100))
+	print('Dropped {} trials based on threshold criteria ({})%'.format(to_drop.size, to_drop.size/float(beh['eye_bins'].size)*100))
 	beh.drop(to_drop, inplace = True)
 	beh.reset_index(inplace = True)
 	eeg.drop(to_drop, reason='eye detection')
@@ -115,7 +115,7 @@ def eog_filt(eog, sfreq, windowsize = 50, windowstep = 25, threshold = 30):
 				break
 
 	eye_trials = np.array(eye_trials, dtype = int)			
-	print ('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(eog.shape[0]) * 100))	
+	print('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(eog.shape[0]) * 100))	
 
 	return eye_trials	
 
@@ -175,7 +175,7 @@ def permTestMask1D(diff, p_value = 0.05):
 	'''
 
 	T_obs, clusters, cluster_pv, HO = permutation_cluster_test(diff, stat_fun = paired_t)	
-	print cluster_pv
+	print(cluster_pv)
 	mask = np.zeros(diff[0].shape[1],dtype = bool)
 	sig_clusters = []
 	for cl in np.array(clusters)[np.where(cluster_pv < p_value)[0]]:
@@ -200,10 +200,10 @@ def permTestMask2D(diff, p_value = 0.05):
 	#T_obs, clusters, cluster_pv, HO = spatio_temporal_cluster_test(diff, stat_fun = paired_t, connectivity = conn)	
 	#T_obs, clusters, cluster_pv, HO = spatio_temporal_cluster_test(diff, stat_fun = paired_t)
 	T_obs_plot = np.nan * np.ones_like(T_obs)
-	print cluster_pv
+	print(cluster_pv)
 	for c, p_val in zip(clusters, cluster_pv):
 		if p_val <= p_value:
-			print c.sum()
+			print(c.sum())
 			T_obs_plot[c] = T_obs[c]
 
 	return T_obs_plot	
