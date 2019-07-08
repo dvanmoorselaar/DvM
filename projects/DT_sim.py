@@ -637,7 +637,7 @@ if __name__ == '__main__':
 
 		#PO.detectSaccades(sj = sj)
 		beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)#dict(windowsize = 200, windowstep = 10, threshold = 20))
-
+		
 		# # ERP analysis (distractor tuned)
 		#erp = ERP(eeg, beh, header = 'dist_loc', baseline = [-0.45,-0.25])
 		#erp.selectERPData(time = [-0.45, 0.55], l_filter = 30, excl_factor = dict(dist_loc = ['None'])) 

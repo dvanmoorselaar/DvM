@@ -83,7 +83,7 @@ class TF(FolderStructure):
 
 		# extract eeg data (should be implemented in cnd loop)
 		data = eeg._data[cnd_mask,:,:]
-		dataX = np.mean(abs(fft(data[:,t_idx_s:t_idx_e, nfft, axis = 2)/ (t_idx_e - t_idx_s)), axis = 0) # This needs to be checked!!!!!
+		#dataX = np.mean(abs(fft(data[:,t_idx_s:t_idx_e, nfft, axis = 2)/ (t_idx_e - t_idx_s)), axis = 0) # This needs to be checked!!!!!
 		
 	def FGFilter(self, X, sfreq, f, fwhm):
 		"""[summary]
@@ -116,11 +116,11 @@ class TF(FolderStructure):
 		#filtdat = 2*real( ifft( bsxfun(@times,fft(data,[],2),fx) ,[],2) );
 		
 		# compute empirical frequency and standard deviation
-		idx = dsearchn(hz',f);
-		emp_vals[1] = hz[idx]
+		#idx = dsearchn(hz',f);
+		#emp_vals[1] = hz[idx]
 
 		# find values closest to .5 after MINUS before the peak
-		emp_vals[2] = hz(idx-1+dsearchn(fx(idx:end)',.5)) - hz(dsearchn(fx(1:idx)',.5))
+		#emp_vals[2] = hz(idx-1+dsearchn(fx(idx:end)',.5)) - hz(dsearchn(fx(1:idx)',.5))
 
 		return filtdat, emp_vals
 

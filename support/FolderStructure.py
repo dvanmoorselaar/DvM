@@ -6,8 +6,6 @@ import pandas as pd
 from support import *
 from IPython import embed
 
-
-
 class FolderStructure(object):
 	'''
 	Creates the folder structure

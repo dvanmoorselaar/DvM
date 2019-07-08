@@ -61,12 +61,14 @@ class BDM(FolderStructure):
 		else:	 
 			self.bdm_type = 'broad'
 
-	def selectBDMData(self, time, excl_factor = None):
+	def selectBDMData(self, EEG, beh, time, excl_factor = None):
 		''' 
 
 		Arguments
 		- - - - - 
 
+		EEG (object):
+		beh (dataFrame):
 		time (tuple | list): time samples (start to end) for decoding
 		excl_factor (dict): see Classify documentation
 
@@ -77,10 +79,6 @@ class BDM(FolderStructure):
 		beh (dict): contains variables of interest for decoding
 
 		'''
-
-		# load processed behavior and eeg
-		beh = self.beh
-		EEG = self.EEG
 
 		# check whether trials need to be excluded
 		if type(excl_factor) == dict: # remove unwanted trials from beh
@@ -111,7 +109,7 @@ class BDM(FolderStructure):
 		with open(self.FolderTracker(['bdm',self.to_decode], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)						
 
-		return 	eegs, beh
+		return 	eegs, beh, times
 
 	def averageTrials(self, X, Y, trial_avg):
 
@@ -135,7 +133,7 @@ class BDM(FolderStructure):
 
 		return x_, y_
 
-	def Classify(self,sj, cnds, cnd_header, time, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
+	def Classify(self,sj, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
 
 		Arguments
@@ -150,6 +148,7 @@ class BDM(FolderStructure):
 								the following: factor = dict('cue_direc': ['right']). Mutiple column headers and multiple variables per 
 								header can be specified 
 		time (tuple | list): time samples (start to end) for decoding
+		collapse (boolean): If True also run analysis collapsed across all conditions
 		nr_perm (int): If perm = 0, run standard decoding analysis. 
 					If perm > 0, the decoding is performed on permuted labels. 
 					The number sets the number of permutations
@@ -166,7 +165,7 @@ class BDM(FolderStructure):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh = self.selectBDMData(time, excl_factor)	
+		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)	
 		
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
@@ -174,10 +173,10 @@ class BDM(FolderStructure):
 			max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
 
 		# create dictionary to save classification accuracy
-		classification = {'info': {'elec': self.elec_oi}}
+		classification = {'info': {'elec': self.elec_oi, 'times':times}}
 
-		if cnds == 'all':
-			cnds = [cnds]
+		if collapse:
+			cnds += ['collapsed']
 	
 		# loop over conditions
 		for cnd in cnds:
@@ -185,12 +184,13 @@ class BDM(FolderStructure):
 			# reset selected trials
 			bdm_info = {}
 
-			if cnd != 'all':
+			if cnd != 'collapsed':
 				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-				cnd_labels = beh[self.to_decode][cnd_idx].values
 			else:
-				cnd_idx = np.arange(beh[cnd_header].size)
-				cnd_labels = beh[self.to_decode].values
+				cnd_idx =  np.where(np.sum(
+					[(beh[cnd_header] == c).values for c in cnds], 
+					axis = 0))[0]
+			cnd_labels = beh[self.to_decode][cnd_idx].values
 
 			if bdm_labels != 'all':
 				sub_idx = [i for i,l in enumerate(cnd_labels) if l in bdm_labels]	
@@ -222,10 +222,11 @@ class BDM(FolderStructure):
 					# select train and test trials
 					train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info)
 					Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)
-					self.trial_avg = 3
-					if self.trial_avg > 1:
-						Xtr, Ytr = self.averageTrials(Xtr, Ytr, 2)
-						Xte, Yte = self.averageTrials(Xte, Yte, 2)
+					# TRIAL AVERAGING NEEDS UPDATING
+					#self.trial_avg = 3
+					#if self.trial_avg > 1:
+					#	Xtr, Ytr = self.averageTrials(Xtr, Ytr, 2)
+					#	Xte, Yte = self.averageTrials(Xte, Yte, 2)
 					# do actual classification
 					#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
 					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
@@ -237,13 +238,83 @@ class BDM(FolderStructure):
 			if nr_perm > 1:
 				classification[cnd].update({'perm': class_acc[1:]})
 	
-		embed()	
 		# store classification dict	
 		if save: 
 			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode,'baseline'], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
+
+	def localizerClassify(self, sj, loc_beh, loc_eeg, cnds, cnd_header, time, tr_header, te_header, collapse = False, loc_excl = None, test_excl = None, gat_matrix = False, save = True):
+		"""Training and testing is done on seperate/independent data files
+		
+		Arguments:
+			sj {int} -- Subject number
+			loc_beh {DataFrame} -- DataFrame that contains labels necessary for training the model
+			loc_eeg {object} -- EEG data used to train the model (MNE Epochs object)
+			cnds {list} -- List of conditions. Decoding is done for each condition seperately
+			cnd_header {str} -- Name of column that contains condition info in test behavior file
+			time {tuple} -- Time window used for decoding
+			tr_header {str} -- Name of column that contains training labels
+			te_header {[type]} -- Name of column that contains testing labels
+		
+		Keyword Arguments:
+			collapse {bool} -- If True also run analysis collapsed across all conditions
+			loc_excl {dict| None} -- Option to exclude trials from localizer. See Classify for more info (default: {None})
+			test_excl {[type]} -- Option to exclude trials from (test) analysis. See Classify for more info (default: {None})
+			gat_matrix {bool} -- If set to True, a generalization across time matrix is created (default: {False})
+			save {bool} -- Determines whether output is saved (via standard file organization) or returned (default: {True})
+		
+		Returns:
+			classification {dict} -- Decoding output (for each condition seperately)
+		"""
+
+		# set up localizer data 
+		tr_eegs, tr_beh, times = self.selectBDMData(loc_eeg, loc_beh, time, loc_excl)
+		# set up test data
+		te_eegs, te_beh, times = self.selectBDMData(self.EEG, self.beh, time, test_excl)
+		
+		# create dictionary to save classification accuracy
+		classification = {'info': {'elec': self.elec_oi, 'times':times}}
+
+		# specify training parameters (fixed for all testing conditions)
+		tr_labels = tr_beh[tr_header].values
+		min_nr_tr_labels = min(np.unique(tr_labels, return_counts = True)[1])
+		# make sure training is not biased towards a label
+		tr_idx = np.hstack([random.sample(np.where(tr_beh[tr_header] == label )[0], 
+							k = min_nr_tr_labels) for label in np.unique(tr_labels)])
+		Ytr = tr_beh[tr_header][tr_idx].values.reshape(1,-1)
+		Xtr = tr_eegs[selected_idx,:,:][np.newaxis, ...]
+
+		if collapse:
+			cnds += ['collapsed']
+
+		# loop over all conditions
+		for cnd in cnds:
+
+			# set condition mask
+			if cnd != 'collapsed':
+				test_mask = (te_beh[cnd_header] == cnd).values
+			else:
+				test_mask =  np.array(np.sum(
+					[(beh[cnd_header] == c).values for c in cnds], 
+					axis = 0), dtype = bool)	
+			# specify testing parameters
+			Yte = te_beh[te_header][test_mask].values.reshape(1,-1)
+			Xte = te_eegs[test_mask,:,:][np.newaxis, ...]
+	
+			# do actual classification
+			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
+
+			classification.update({cnd:{'standard': copy.copy(class_acc)}})
+		
+		# store classification dict	
+		if save: 
+			with open(self.FolderTracker(['bdm',self.elec_oi, 'cross'], filename = 'class_{}-{}.pickle'.format(sj,te_header)) ,'wb') as handle:
+				pickle.dump(classification, handle)
+		
+		return classification
+
 
 	def crossClassify(self, sj, cnds, cnd_header, time, tr_header, te_header,tr_te_rel = 'ind', excl_factor = None, tr_factor = None, te_factor = None, bdm_labels = 'all', gat_matrix = False, save = True):	
 		'''

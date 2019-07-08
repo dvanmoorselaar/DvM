@@ -27,16 +27,68 @@ def trial_exclusion(beh, eeg, excl_factor):
 
 	return beh, eeg
 
-# functions that support reading in data
-def select_electrodes(ch_names, subset):
-	'''
+def cnd_time_shift(EEG, beh, cnd_info, cnd_header):
+	"""This function shifts the timings of all epochs that meet a specific criteria. 
+	   Can be usefull when events of interest in different conditions are not aligned
 
-	'''
+	Arguments:
+		EEG {object} -- MNE Epochs object
+		beh {dataframe} -- Dataframe with behavior info
+		cnd_info {dict} -- For each key in cnd_info data will be shifted according to 
+							the specified time (in seconds). E.G., {neutral: 0.1}
+		cnd_header {str} -- column in beh that contains the keys specified in cnd_info
+	
+	Returns:
+		EEG {object} -- MNE Epochs object with shifted timings
+	"""
+
+	print('Data will be artificially shifted. Be carefull in selecting the window of interest for further analysis')
+	print('Original timings range from {} to {}'.format(EEG.tmin, EEG.tmax))
+	# loop over all conditions
+	for cnd in cnd_info.keys():
+		# set how much data needs to be shifted
+		to_shift = cnd_info[cnd]
+		to_shift = int(np.diff([np.argmin(abs(EEG.times - t)) for t in (0,to_shift)]))
+		if to_shift < 0:
+			print('EEG data is shifted backward in time for all {} trials'.format(cnd))
+		elif to_shift > 0:
+			print('EEG data is shifted forward in time for all {} trials'.format(cnd))	
+
+		# find indices of epochs to shift
+		mask = (beh[cnd_header] == cnd).values
+
+		# do actual shifting
+		EEG._data[mask] = np.roll(EEG._data[mask], to_shift, axis = 2)
+
+	return EEG
+
+
+
+
+def select_electrodes(ch_names, subset):
+	"""allows picking a subset of all electrodes 
+	
+	Arguments:
+		ch_names {list} -- list of all electrodes in EEG object (MNE format)
+		subset {str} -- description of subset of electrodes to be used
+	
+	Returns:
+		picks {array} -- indices of to be used electrodes 
+	"""
 
 	if subset == 'all':
 		elecs = []
 	elif subset == 'post':
-		elecs = ['Iz','Oz','O1','O2','PO7','PO8','PO3','PO4','POz','Pz','P9','P10','P7','P8','P5','P6','P3','P4','P1','P2','Pz']	
+		elecs = ['Iz','Oz','O1','O2','PO7','PO8',
+				'PO3','PO4','POz','Pz','P9','P10',
+				'P7','P8','P5','P6','P3','P4','P1','P2','Pz',
+				'TP7','CP5','CP3','CP1','CPz','CP2','CP4','CP6','TP8']
+	elif subset == 'frontal':
+		elecs = ['Fp1','Fpz','Fp2','AF7','AF3','AFz','AF4',
+				'AF8','F7','F5','F3','F1','Fz','F2','F4','F6','F8',
+				'FT7','FC5','FC3','FC1','FCz','FC2','FC4','FC6','FT8']
+	elif subset == 'mid':
+		elecs = ['T7','C5','C3','C1','Cz','C2','C4','C6','T8']					
 
 	picks = mne.pick_channels(ch_names, include = elecs)
 
