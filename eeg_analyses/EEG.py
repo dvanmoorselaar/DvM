@@ -46,11 +46,10 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
     '''
 
     def __init__(self, input_fname, montage=None, eog=None, stim_channel=-1,
-                 annot=None, annotmap=None, exclude=(), preload=True, verbose=None):
+                exclude=(), preload=True, verbose=None):
 
         super(RawBDF, self).__init__(input_fname=input_fname, montage=montage, eog=eog,
-                                     stim_channel=stim_channel, annot=annot, annotmap=annotmap,
-                                     preload=preload, verbose=verbose)
+                                     stim_channel=stim_channel, preload=preload, verbose=verbose)
 
     def replaceChannel(self, sj, session, replace):
         '''
