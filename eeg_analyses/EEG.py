@@ -647,7 +647,8 @@ class Epochs(mne.Epochs, FolderStructure):
         logging.info('Started ICA')
         picks = mne.pick_types(self.info, eeg=True, exclude='bads')
         ica = ICA(n_components=picks.size, method=method)
-        ica.fit(raw, picks=picks, decim=decim)
+        # ica is fitted on epoched data
+        ica.fit(self, picks=picks, decim=decim)
 
         # plot the components
         ica.plot_components(colorbar=True, picks=range(picks.size), show=False)
@@ -680,17 +681,17 @@ class Epochs(mne.Epochs, FolderStructure):
         time.sleep(5)
         tcflush(sys.stdin, TCIFLUSH)
         print('You are preprocessing subject {}, session {}'.format(self.sj, self.session))
-        conf = raw_input(
+        conf = input(
             'Advanced detection selected component(s) {}. Do you agree (y/n)'.format(eog_inds_a))
         if conf == 'y':
             eog_inds = eog_inds_a
         else:
             eog_inds = []
-            nr_comp = raw_input(
+            nr_comp = input(
                 'How many components do you want to select (<10)?')
             for i in range(int(nr_comp)):
                 eog_inds.append(
-                    int(raw_input('What is component nr {}?'.format(i + 1))))
+                    int(input('What is component nr {}?'.format(i + 1))))
                 if eog_inds[-1] not in eog_inds_a:
                     ica.plot_properties(eog_epochs, picks=eog_inds[-1], psd_args={
                                         'fmax': 35.}, image_args={'sigma': 1.}, show=False)
