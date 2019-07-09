@@ -191,7 +191,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         self._data[-1, :] -= binary # Make universal
    
-        events = mne.find_events(self, stim_channel='STI 014', consecutive=consecutive, min_duration=min_duration)    
+        events = mne.find_events(self, stim_channel=None, consecutive=consecutive, min_duration=min_duration)    
 
         # Check for consecutive 
         if not consecutive:
