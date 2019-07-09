@@ -284,7 +284,7 @@ class BDM(FolderStructure):
 		tr_idx = np.hstack([random.sample(np.where(tr_beh[tr_header] == label )[0], 
 							k = min_nr_tr_labels) for label in np.unique(tr_labels)])
 		Ytr = tr_beh[tr_header][tr_idx].values.reshape(1,-1)
-		Xtr = tr_eegs[selected_idx,:,:][np.newaxis, ...]
+		Xtr = tr_eegs[tr_idx,:,:][np.newaxis, ...]
 
 		if collapse:
 			cnds += ['collapsed']

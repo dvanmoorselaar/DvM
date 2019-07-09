@@ -94,7 +94,7 @@ class EYE(FolderStructure):
 
 		# check whether each beh trial is logged within eye 
 		if eye.shape[0] < beh.shape[0]:
-			print 'Trials in beh and eye do not match. Trials removed from beh'
+			print('Trials in beh and eye do not match. Trials removed from beh')
 			eye_trials = []
 
 			for i, trial in enumerate(eye):
@@ -104,7 +104,7 @@ class EYE(FolderStructure):
 						# control for OpenSesame trial counter
 						eye_trials.append(trial_nr + 1)
 						if trial_nr + 1 not in beh['nr_trials'].values:
-							print trial_nr
+							print(trial_nr)
 
 			eye_mask = np.in1d(beh['nr_trials'].values, eye_trials)
 			beh = beh[np.array(eye_mask)]		
@@ -898,7 +898,7 @@ class SaccadeGlissadeDetection(object):
 				flip += 1 
 				if flip > 50:
 					# ADD CODE TO COMBINE ALL OLD PEAK THESH????
-					print 'Peak_thresh kept flipping, broke from infinite loop'
+					print('Peak_thresh kept flipping, broke from infinite loop')
 					break
 
 			old_thresh = peak_thresh
@@ -910,7 +910,7 @@ class SaccadeGlissadeDetection(object):
 			if sum(np.array([s.size/self.sfreq for s in fix_seg]) >= min_fix) == 0:
 				peak_thresh = None
 				sacc_thresh = None
-				print ('Segment does not contain sufficient samples for event detection')
+				print('Segment does not contain sufficient samples for event detection')
 				break
 			
 			# loop over all possible fixations
@@ -1154,7 +1154,7 @@ if __name__ == '__main__':
 	eye = EYE()
 
 	for sj in [2,3,4,5,6,7,8,9,10,11,12,13,15,17,18,19,20,21,22,23,24]:
-		print sj
+		print(sj)
 		eye.saccadeVector(sj)
 		#eye.eyeBinEEG(17, '1', -300, 800, drift_correct = (-300,0))
 		#eye.eyeDetectEEG(sj, sessions = [1, 2],start = -300, end = 800, drift_correct = (-300,0))

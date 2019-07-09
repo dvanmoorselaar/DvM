@@ -25,8 +25,7 @@ The necessary steps are outlined below:
 6. pip install PySurfer mne
 7. conda install seaborn
 8. pip install opencv-python
-9. Within the virtual environment install pygazeanalyser by copying it into the following folder (ananconda2/envs/mne/lib/python2.7/site-packages).
-pygazeanalyser can be downloaded here: https://github.com/esdalmaijer/PyGazeAnalyser 
+
 
 ## Folderstructure
 
@@ -42,3 +41,13 @@ Also make sure that the system is pointed to the folder where you stored the ANA
 For any questions or suggestions, please email me: dirkvanmoorselaar@gmail.com
 
 NOTE: The scipts, documentation and instructions are still being developed
+
+## Citation
+
+Please cite:
+
+Gramfort, A., Luessi, M., Larson, E., Engemann, D. A., Strohmeier, D., Brodbeck, C., ... & Hämäläinen, M. S. (2014). MNE software for processing MEG and EEG data. Neuroimage, 86, 446-460.
+
+If you use the pygazeanalyser functionality to analyse eyetracker data in any way please cite:
+
+Dalmaijer, E.S., Mathôt, S., & Van der Stigchel, S. (2013). PyGaze: an open-source, cross-platform toolbox for minimal-effort programming of eye tracking experiments. Behaviour Research Methods. doi:10.3758/s13428-013-0422-2
