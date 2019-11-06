@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from helperFunctions import *
 from support.FolderStructure import *
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from mne.decoding import (SlidingEstimator, GeneralizingEstimator,
@@ -90,7 +89,7 @@ class BDM(FolderStructure):
                       		  method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))
 
 		if self.downsample != int(EEG.info['sfreq']):
-			print 'downsampling data'
+			print('downsampling data')
 			EEG.resample(self.downsample)
 
 		# select time window and EEG electrodes
@@ -370,10 +369,10 @@ class BDM(FolderStructure):
 			else:
 				if cnd != 'all':
 					cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-					cnd_labels = beh[self.decoding][cnd_idx].values
+					cnd_labels = beh[self.to_decode][cnd_idx].values
 				else:
 					cnd_idx = np.arange(beh[cnd_header].size)
-					cnd_labels = beh[self.decoding].values
+					cnd_labels = beh[self.to_decode].values
 
 				# select train and test trials	
 				train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, max_tr, {})
@@ -430,7 +429,7 @@ class BDM(FolderStructure):
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
-			print '\r Fold {} out of {} folds'.format(n + 1,N),
+			print('\r Fold {} out of {} folds'.format(n + 1,N),)
 			Ytr_ = Ytr[n]
 			Yte_ = Yte[n]
 			
@@ -486,10 +485,16 @@ class BDM(FolderStructure):
 		'''
 
 		if self.method == 'auc':
-			print 'THIS DOES NOT WORK WITH BINARY PROBLEM'
-			nr_class = scores.shape[1]
+			
 			# shift true_scores to indices
 			true_labels = np.array([list(label_order).index(l) for l in true_labels])
+			# check whether it is a more than two class problem
+			if scores.ndim > 1:
+				nr_class = scores.shape[1]
+			else:
+				scores = np.reshape(scores, (-1,1)) 
+				nr_class = 2	
+
 			# select all pairwise combinations of classes
 			pairs = list(itertools.combinations(range(nr_class), 2))
 			if len(pairs) > 1: # do this both ways in case of multi class problem
@@ -521,7 +526,7 @@ class BDM(FolderStructure):
 
 		Calculates the AUC - area under the curve.
 
-		Besides being the area under the ROC curve, AUC is has a slightly less known interpretation:
+		Besides being the area under the ROC curve, AUC has a slightly less known interpretation:
 		If you choose a random pair of samples which is one positive and one negative - AUC is the probabilty 
 		that the positive-sample score is above the negative-sample score.
 		
@@ -583,7 +588,7 @@ class BDM(FolderStructure):
 		
 				# select condition trials and get their decoding labels
 				trials = np.where(beh[cnds_header] == cnd)[0]
-				labels = beh[self.decoding][trials]
+				labels = beh[self.to_decode][trials]
 
 				# select the minimum number of trials per label for BDM procedure
 				# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
@@ -746,7 +751,7 @@ class BDM(FolderStructure):
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
-			print '\r Fold {} out of {} folds'.format(n + 1,N),
+			print('\r Fold {} out of {} folds'.format(n + 1,N),)
 			
 			for tr_t in range(nr_time):
 				for te_t in range(nr_test_time):
@@ -828,7 +833,7 @@ if __name__ == '__main__':
 	session = BDM('all_channels', to_decode, nr_folds = 10)
 
 	for sj in subject_id:
-		print sj
+		print(sj)
 		session.Classify(sj, conditions = conditions, bdm_matrix = True)
 		#session.Classify(sj, conditions = conditions, nr_perm = 500, bdm_matrix = True)
 		

@@ -159,15 +159,15 @@ def eog_filt(eog, sfreq, windowsize = 50, windowstep = 25, threshold = 30):
 		for idx in window_idx:
 			window = x[idx[0]:idx[1]]
 
-			w1 = np.mean(window[:window.size/2])
-			w2 = np.mean(window[window.size/2:])
+			w1 = np.mean(window[:int(window.size/2)])
+			w2 = np.mean(window[int(window.size/2):])
 
 			if abs(w1 - w2) > threshold:
 				eye_trials.append(i)
 				break
 
 	eye_trials = np.array(eye_trials, dtype = int)			
-	print('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(eog.shape[0]) * 100))	
+	#print('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(eog.shape[0]) * 100))	
 
 	return eye_trials	
 

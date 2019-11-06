@@ -100,7 +100,7 @@ def clusterBasedPermutation(X1, X2, p_val = 0.05, cl_p_val = 0.05, paired = True
 
 	for p in range(nr_perm):
 
-		print "\r{0}% of permutations".format((float(p)/nr_perm)*100),
+		#print("\r{0}% of permutations".format((float(p)/nr_perm)*100),)
 
 		# create random partitions
 		if paired: # keep observations paired under permutation

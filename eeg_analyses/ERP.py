@@ -8,8 +8,9 @@ import os
 import mne
 import pickle
 import math
-#import matplotlib
-#matplotlib.use('agg') # now it works via ssh connection
+import matplotlib
+import warnings
+matplotlib.use('agg') # now it works via ssh connection
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ from IPython import embed
 from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
 from support.FolderStructure import *
+from support.support import select_electrodes, trial_exclusion
 
 class ERP(FolderStructure):
 
@@ -40,8 +42,11 @@ class ERP(FolderStructure):
 		self.baseline = baseline
 		self.flipped = False
 
-	def selectERPData(self, time = [-0.3, 0.8], l_filter = False, excl_factor = None):
+
+	def selectERPData(self, time, l_filter = False, excl_factor = None):
 		''' 
+
+		THIS NEEDS TO BE ADJUSTED FOR TIMINGS
 
 		Arguments
 		- - - - - 
@@ -57,43 +62,24 @@ class ERP(FolderStructure):
 
 		# check whether trials need to be excluded
 		if type(excl_factor) == dict: # remove unwanted trials from beh
-			mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
-			for m in mask: 
-				mask[0] = np.logical_or(mask[0],m)
-			mask = mask[0]
-			if mask.sum() > 0:
-				beh.drop(np.where(mask)[0], inplace = True)
-				beh.reset_index(inplace = True)
-				EEG.drop(np.where(mask)[0])
-				print('Dropped {} trials after specifying excl_factor'.format(sum(mask)))
-				print('NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN')
-
-			else:
-				print('Trial exclusion: no trials selected that matched specified criteria')
-				mask = np.zeros(beh.shape[0], dtype = bool)
+			beh, EEG = trial_exclusion(beh, EEG, excl_factor)
 
 		# read in eeg data 
-		self.flipped = False
 		if l_filter:
 			EEG.filter(l_freq = None, h_freq = l_filter)
-
+	
 		# select time window and EEG electrodes
-		s, e = [np.argmin(abs(EEG.times - t)) for t in time]
-		picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
-		eegs = EEG._data[:,picks,s:e]
-		times = EEG.times[s:e]
+		EEG = EEG.crop(tmin = time[0],tmax = time[1])    
 		ch_names = EEG.ch_names
 
+		self.eeg = EEG 
+
 		# store dictionary with variables for plotting
-		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
+		plot_dict = {'ch_names': ch_names, 'times': EEG.times, 'info':EEG.info}
 
 		with open(self.FolderTracker(['erp',self.header], filename = 'plot_dict.pickle'.format(self.header)),'wb') as handle:
 			pickle.dump(plot_dict, handle)	
 
-		self.eeg = eegs
-		self.beh = beh	
-		self.ch_names = ch_names
-		self.times = times	
 
 	@staticmethod	
 	def baselineCorrect(X, times, base_period):
@@ -158,7 +144,7 @@ class ERP(FolderStructure):
 		return max_trial
 
 
-	def topoFlip(self, left = []):
+	def topoFlip(self, left , header):
 		''' 
 		Flips the topography of trials where the stimuli of interest was presented 
 		on the left (i.e. right hemifield). After running this function it is as if 
@@ -167,6 +153,7 @@ class ERP(FolderStructure):
 		Arguments
 		- - - - - 
 		left (list): list containing stimulus labels indicating spatial position 
+		header (string): column name used for flipping
 
 		Returns
 		- - - -
@@ -174,31 +161,26 @@ class ERP(FolderStructure):
 
 		'''	
 
-
+		picks = mne.pick_types(self.eeg.info, eeg=True, exclude='bads')   
 		# dictionary to flip topographic layout
 		flip_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8','F5':'F6','F3':'F4',\
 					'F1':'F2','FT7':'FT8','FC5':'FC6','FC3':'FC4','FC1':'FC2','T7':'T8',\
 					'C5':'C6','C3':'C4','C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',\
 					'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4','P1':'P2',\
-					'PO7':'PO8','PO3':'PO4','O1':'O2','Fpz':'Fpz','AFz':'AFz','Fz':'Fz',\
-					'FCz':'FCz','Cz':'Cz','CPz':'CPz','Pz':'Pz','POz':'POz','Oz':'Oz',\
-					'Fp2':'Fp1','AF8':'AF7','AF4':'AF3','F8':'F7','F6':'F5','F4':'F3',\
-					'F2':'F1','FT8':'FT7','FC6':'FC5','FC4':'FC3','FC2':'FC1','T8':'T7',\
-					'C6':'C5','C4':'C3','C2':'C1','TP7':'TP8','CP5':'CP6','CP3':'CP4',\
-					'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4','P1':'P2','PO8':'PO7',\
-					'PO4':'PO3','O2':'O1'}
+					'PO7':'PO8','PO3':'PO4','O1':'O2'}
 
-		idx_l = np.sort(np.hstack([np.where(self.beh[self.header] == l)[0] for l in left]))
+		idx_l = np.sort(np.hstack([np.where(self.beh[header] == l)[0] for l in left]))
 
 		# left stimuli are flipped as if presented right
-		pre_flip = self.eeg[idx_l,:,:]
-		flipped = np.zeros(pre_flip.shape)
+		pre_flip = np.copy(self.eeg._data[idx_l][:,picks])
 
 		# do actual flipping
-		for key in flip_dict.keys():
-			flipped[:,self.ch_names.index(flip_dict[key]),:] = pre_flip[:,self.ch_names.index(key),:]
+		for l_elec, r_elec in flip_dict.items():
+			l_elec_data = pre_flip[:,self.eeg.ch_names.index(l_elec)]
+			r_elec_data = pre_flip[:,self.eeg.ch_names.index(r_elec)]
+			self.eeg._data[idx_l,self.eeg.ch_names.index(l_elec)] = r_elec_data
+			self.eeg._data[idx_l,self.eeg.ch_names.index(r_elec)] = l_elec_data
 
-		self.eeg[idx_l,:,:] = flipped
 		self.flipped = True	
 
 	def ipsiContraElectrodeSelection(self):
@@ -222,8 +204,45 @@ class ERP(FolderStructure):
 
 		return idx_l_elec, idx_r_elec
 
+	def cndSplit(self, beh, conditions, cnd_header):
+		'''
+		splits condition data in fast and slow data based on median split	
 
-	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, balance = False, erp_name = ''):
+		Arguments
+		- - - - - 
+		beh (dataframe): pandas dataframe with trial specific info
+		conditions (list): list of conditions. Each condition will be split individually
+		cnd_header (str): string of column in beh that contains conditions
+		'''	
+
+		for cnd in conditions:
+			median_rt = np.median(beh.RT[beh[cnd_header] == cnd])
+			beh.loc[(beh.RT < median_rt) & (beh[cnd_header] == cnd), cnd_header] = '{}_{}'.format(cnd, 'fast')
+			beh.loc[(beh.RT > median_rt) & (beh[cnd_header] == cnd), cnd_header] = '{}_{}'.format(cnd, 'slow')
+
+		return beh	
+
+	def createERP(self, beh, eeg, idx, fname, RT_split = False):
+
+
+		beh = self.beh.iloc[idx]
+		eeg = eeg[idx]
+
+		# create evoked objects using mne functionality and save file
+		evoked = eeg.average().apply_baseline(baseline = self.baseline)
+		evoked.save(self.FolderTracker(['erp', self.header],'{}-ave.fif'.format(fname)))
+
+		if RT_split:
+			median_rt = np.median(beh.RT)
+			beh.loc[beh.RT < median_rt, 'RT_split'] = 'fast'
+			beh.loc[beh.RT > median_rt, 'RT_split'] = 'slow'
+			for rt in ['fast', 'slow']:
+				mask = beh['RT_split'] == rt
+				# create evoked objects using mne functionality and save file
+				evoked = eeg[mask].average().apply_baseline(baseline = self.baseline)
+				evoked.save(self.FolderTracker(['erp', self.header],'{}_{}-ave.fif'.format(fname, rt)))
+
+	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, balance = False, erp_name = '', RT_split = False):
 		''' 
 
 		Creates laterilized ERP's by cross pairing left and right electrodes with left and right position labels.
@@ -241,6 +260,7 @@ class ERP(FolderStructure):
 		midline (None | dict): Can be used to limit analysis to trials where a specific 
 								stimulus (key of dict) was presented on the midline (value of dict)
 		erp_name (str): name of the pickle file to store erp data
+		RT_split (bool): If true each condition is also analyzed seperately for slow and fast RT's (based on median split)
 
 		Returns
 		- - - -
@@ -248,6 +268,7 @@ class ERP(FolderStructure):
 
 		'''
 
+		ch_names = self.eeg.ch_names
 		file = self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name))
 
 		if os.path.isfile(file):
@@ -277,16 +298,17 @@ class ERP(FolderStructure):
 			idx_l = np.array([idx for idx in idx_l if idx in idx_m])
 			idx_r = np.array([idx for idx in idx_r if idx in idx_m])
 
+
 		if balance:
 			max_trial = self.selectMaxTrial(np.hstack((idx_l, idx_r)), conditions, self.beh[cnd_header])
 
 		# select indices of left and right electrodes
-		idx_l_elec = np.sort([self.ch_names.index(e) for e in l_elec])
-		idx_r_elec = np.sort([self.ch_names.index(e) for e in r_elec])
+		idx_l_elec = np.sort([ch_names.index(e) for e in l_elec])
+		idx_r_elec = np.sort([ch_names.index(e) for e in r_elec])
 
 		if conditions == 'all':
 			conditions = ['all'] + list(np.unique(self.beh[cnd_header]))
-	
+
 		for cnd in conditions:
 
 			erps[str(sj)].update({cnd:{}})
@@ -307,17 +329,22 @@ class ERP(FolderStructure):
 				continue
 
 			if self.flipped:
+				embed()
+				fname = 'sj_{}-{}-{}-ave.fif'.format(sj, erp_name, cnd)
+				idx = np.hstack((idx_c_l, idx_c_r))
+				self.createERP(self.beh, self.eeg, idx, fname, RT_split = RT_split)
+
 				# as if all stimuli presented right: left electrodes are contralateral, right electrodes are ipsilateral
-				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec], self.eeg[idx_c_r,:,:][:,idx_r_elec]))
-				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec], self.eeg[idx_c_r,:,:][:,idx_l_elec]))
+				ipsi = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_r_elec], self.eeg._data[idx_c_r,:,:][:,idx_r_elec]))
+				contra = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_l_elec], self.eeg._data[idx_c_r,:,:][:,idx_l_elec]))
 			else:
 				# stimuli presented bilataral
-				ipsi = np.vstack((self.eeg[idx_c_l,:,:][:,idx_l_elec], self.eeg[idx_c_r,:,:][:,idx_r_elec]))
-				contra = np.vstack((self.eeg[idx_c_l,:,:][:,idx_r_elec], self.eeg[idx_c_r,:,:][:,idx_l_elec]))
+				ipsi = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_l_elec], self.eeg._data[idx_c_r,:,:][:,idx_r_elec]))
+				contra = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_r_elec], self.eeg._data[idx_c_r,:,:][:,idx_l_elec]))
 
 			# baseline correct data	
-			ipsi = self.baselineCorrect(ipsi, self.times, self.baseline)
-			contra = self.baselineCorrect(contra, self.times, self.baseline)
+			ipsi = self.baselineCorrect(ipsi, self.eeg.times, self.baseline)
+			contra = self.baselineCorrect(contra, self.eeg.times, self.baseline)
 
 			# create erp (nr_elec X nr_timepoints)
 			if cnd != 'all' and balance:
@@ -331,12 +358,12 @@ class ERP(FolderStructure):
 			# also store matching topodata
 			if self.flipped == True:
 				print('Also calculate corresponding topoplots')
-				topo = self.baselineCorrect(self.eeg[np.hstack((idx_c_l, idx_c_r))], self.times, self.baseline)
+				topo = self.baselineCorrect(self.eeg._data[np.hstack((idx_c_l, idx_c_r))], self.eeg.times, self.baseline)
 				topo = topo.mean(axis = 0)
 			else:
 				print('No topoplots created, because data was not flipped. Run topoSelection instead')	
 
-			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'diff_wave':contra - ipsi, 'elec': [l_elec, r_elec], 'topo':topo})	
+			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'diff_wave':contra - ipsi, 'elec': [l_elec, r_elec]})	
 
 		# save erps	
 		with open(self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name)) ,'wb') as handle:

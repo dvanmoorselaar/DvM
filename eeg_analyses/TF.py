@@ -164,25 +164,19 @@ class TF(FolderStructure):
 					'F1':'F2','FT7':'FT8','FC5':'FC6','FC3':'FC4','FC1':'FC2','T7':'T8',\
 					'C5':'C6','C3':'C4','C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',\
 					'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4','P1':'P2',\
-					'PO7':'PO8','PO3':'PO4','O1':'O2','Fpz':'Fpz','AFz':'AFz','Fz':'Fz',\
-					'FCz':'FCz','Cz':'Cz','CPz':'CPz','Pz':'Pz','POz':'POz','Oz':'Oz',\
-					'Fp2':'Fp1','AF8':'AF7','AF4':'AF3','F8':'F7','F6':'F5','F4':'F3',\
-					'F2':'F1','FT8':'FT7','FC6':'FC5','FC4':'FC3','FC2':'FC1','T8':'T7',\
-					'C6':'C5','C4':'C3','C2':'C1','TP7':'TP8','CP5':'CP6','CP3':'CP4',\
-					'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4','P1':'P2','PO8':'PO7',\
-					'PO4':'PO3','O2':'O1'}
+					'PO7':'PO8','PO3':'PO4','O1':'O2'}
 
 		idx_l = np.sort(np.hstack([np.where(var == l)[0] for l in left]))
 
 		# left stimuli are flipped as if presented right
-		pre_flip = eegs[idx_l,:,:]
-		flipped = np.zeros(pre_flip.shape)
+		pre_flip = np.copy(eegs[idx_l])
 
 		# do actual flipping
-		for key in flip_dict.keys():
-			flipped[:,ch_names.index(flip_dict[key]),:] = pre_flip[:,ch_names.index(key),:]
-
-		eegs[idx_l,:,:] = flipped
+		for l_elec, r_elec in flip_dict.items():
+			l_elec_data = pre_flip[:,ch_names.index(l_elec)]
+			r_elec_data = pre_flip[:,ch_names.index(r_elec)]
+			eegs[idx_l,ch_names.index(l_elec)] = r_elec_data
+			eegs[idx_l,ch_names.index(r_elec)] = l_elec_data
 		
 		return eegs
 
@@ -314,6 +308,7 @@ class TF(FolderStructure):
 		Z_elec = []
 		# loop over contra_ipsi pairs
 		pair_idx = 0
+
 		for (contra_elec, ipsi_elec) in contra_ipsi_pair:
 			
 			Z_elec.append(contra_elec)	
@@ -325,32 +320,31 @@ class TF(FolderStructure):
 			norm[pair_idx] = contra_ipsi_norm.mean(axis = 0)
 
 			# # get the real difference
-			#real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
+			real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
 
-			# # create distribution of fake differences
-			#try:
-			# 	fake_diff = np.zeros((nr_perm,) + real_diff.shape)
-			#except:
-			#	embed()
-			# 	print 'Data of real_diff is averaged to reduce the size of the array of two becuase of memory problems'
-			# 	if real_diff.shape[0] % 2 == 1:
-			# 		real_diff = real_diff[:-1]
-			# 	to_split = np.random.permutation(real_diff.shape[0])%2
-			# 	real_diff = np.mean((real_diff[to_split == 0],real_diff[to_split == 1]), axis = 0)
-			# 	fake_diff = np.zeros((nr_perm,) + real_diff.shape)
+			# create distribution of fake differences
+			try:
+				fake_diff = np.zeros((nr_perm,) + real_diff.shape)
+			except:
+				print('Data of real_diff is averaged to reduce the size of the array of two becuase of memory problems')
+				if real_diff.shape[0] % 2 == 1:
+					real_diff = real_diff[:-1]
+				to_split = np.random.permutation(real_diff.shape[0])%2
+				real_diff = np.mean((real_diff[to_split == 0],real_diff[to_split == 1]), axis = 0)
+				fake_diff = np.zeros((nr_perm,) + real_diff.shape)
 
-			#for p in range(nr_perm):
+			for p in range(nr_perm):
 			 	# randomly flip ipsi and contra
-			# 	signed = np.sign(np.random.normal(size = real_diff.shape[0]))
-			# 	permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
-			# 	fake_diff[p] = real_diff * permuter
+				signed = np.sign(np.random.normal(size = real_diff.shape[0]))
+				permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
+				fake_diff[p] = real_diff * permuter
 
 			# # Z scoring
-			#print('Z scoring pair {}-{}'.format(contra_elec, ipsi_elec))
-			#Z[pair_idx] = (np.mean(real_diff, axis = 0) - np.mean(fake_diff, axis = (0,1))) / np.std(np.mean(fake_diff, axis = 1), axis = 0, ddof = 1)	
+			print('Z scoring pair {}-{}'.format(contra_elec, ipsi_elec))
+			Z[pair_idx] = (np.mean(real_diff, axis = 0) - np.mean(fake_diff, axis = (0,1))) / np.std(np.mean(fake_diff, axis = 1), axis = 0, ddof = 1)	
 			pair_idx += 1
 
-		return norm, Z_elec
+		return Z, Z_elec
 
 	def TFanalysis(self, sj, cnds, cnd_header, time_period, base_period = None, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
@@ -402,7 +396,7 @@ class TF(FolderStructure):
 
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
-			key = flip.keys()[0]
+			key = list(flip.keys())[0]
 			eegs = self.topoFlip(eegs, beh[key], self.EEG.ch_names, left = flip.get(key))
 
 		# get parameters
@@ -429,6 +423,7 @@ class TF(FolderStructure):
 
 		# loop over conditions
 		for c, cnd in enumerate(cnds):
+			print(cnd)
 			tf.update({cnd: {}})
 			base.update({cnd: np.zeros((num_frex, nr_chan))})
 
@@ -445,7 +440,7 @@ class TF(FolderStructure):
 				# find ch_idx
 				ch_idx = self.EEG.ch_names.index(ch)
 
-				print '\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),
+				print('\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),)
 
 				# fft decomposition
 				if method == 'wavelet':
@@ -458,7 +453,8 @@ class TF(FolderStructure):
 						# convolve and get analytic signal (OUTPUT DIFFERS SLIGHTLY FROM MATLAB!!! DOUBLE CHECK)
 						m = ifft(eeg_fft * fft(wavelets[f], l_conv), l_conv)
 						m = m[:nr_time * cnd_idx.size + nr_time - 1]
-						m = np.reshape(m[(nr_time-1)/2 - 1:-(nr_time-1)/2-1], (nr_time, -1), order = 'F').T 
+						m = np.reshape(m[math.ceil((nr_time-1)/2 - 1):int(-(nr_time-1)/2-1)], 
+									  (nr_time, -1), order = 'F').T 
 					elif method == 'hilbert': # NEEDS EXTRA CHECK
 						X = eegs[cnd_idx,ch_idx].ravel()
 						m = self.hilbertMethod(X, frex[f][0], frex[f][1], s_freq)

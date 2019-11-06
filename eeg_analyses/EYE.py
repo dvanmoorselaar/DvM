@@ -9,12 +9,9 @@ import glob
 import os
 import pickle
 import warnings
-import matplotlib
-matplotlib.use('agg')
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 from IPython import embed
@@ -30,6 +27,7 @@ from pygazeanalyser.edfreader import *
 from pygazeanalyser.eyetribereader import *
 from pygazeanalyser.detectors import *
 from pygazeanalyser.gazeplotter import *
+from support.support import eog_filt
 
 warnings.filterwarnings('ignore')
 
@@ -351,7 +349,7 @@ class EYE(FolderStructure):
 		# check whether eye tracking data is availabe
 		eye_file = glob.glob(self.FolderTracker(extension = ['eye','raw'], \
 					filename = 'sub_{}_session_{}*.{}'.format(sj,session, extension)))
-		
+
 		# only run eye analysis if data is available for this session
 		if eye_file == []: 
 			bins = np.array([])
@@ -359,7 +357,7 @@ class EYE(FolderStructure):
 		else:	
 			# read eye and beh file (with removed practice trials from .asc file)
 			beh_file = self.FolderTracker(extension = ['beh','raw'], \
-										filename = 'subject-{}_ses_{}.csv'.format(sj,session))
+										filename = 'subject-{}_session_{}.csv'.format(sj,session))
 			eye, beh = self.readEyeData(sj, eye_file, [beh_file])
 
 			# collect x, y data 
@@ -367,10 +365,13 @@ class EYE(FolderStructure):
 
 			# create deviation bins for for each trial(after correction for drifts in fixation period)	
 			x, y = self.setXY(x,y, times, drift_correct)
-			bins = np.array(self.createAngleBins(x,y, 0,3,0.25, 40))
+			bins, angles = np.array(self.createAngleBins(x,y, 0,3,0.25, 40))
+			# temp test code
+			window_bins = eog_filt( np.vstack(angles), 500, windowsize = 100, windowstep = 10, threshold = 0.5) 
 			trial_nrs = beh['nr_trials'].values
 
-		return bins, trial_nrs
+		return bins, window_bins, trial_nrs
+
 
 	def createAngleBins(self, x, y, start, stop, step, min_segment):
 		''' 
@@ -393,18 +394,23 @@ class EYE(FolderStructure):
 		- - - -
 
 		bins (list): list with for each epoch in x, y the max bin in degrees
+		angles (list): list with for each epoch in x, y the angles per sample
 
 		'''
 
 		min_segment *= self.sfreq/1000.0
 
-		bins = []
+		bins, angles = [], []
 
 		for i, (x_, y_) in enumerate(zip(x, y)):
 
+			
 			angle = self.calculateAngle(x = x_, y = y_, xc = self.scr_res[0]/2, \
 										yc = self.scr_res[1]/2, screen_h = self.scr_h,
-										pix_v = self.scr_res[1],dist = self.view_dist)
+										pix_v = self.scr_res[1], dist = self.view_dist)
+
+			angles.append(angle)
+
 			trial_bin = []
 			for b in np.arange(start,stop,step):
 				# get segments of data where deviation from fixation (angle) is larger than the current bin value (b)
@@ -421,7 +427,7 @@ class EYE(FolderStructure):
 			else:
 				bins.append(np.nan)
 
-		return bins	
+		return bins, angles
 
 	@staticmethod	
 	def pointAngle(p1, p2):
