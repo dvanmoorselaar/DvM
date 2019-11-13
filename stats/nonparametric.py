@@ -220,6 +220,17 @@ def computeClusterSizes(X1, X2, p_val, paired, tail, mask, conn):
 
 	return pos_sizes, neg_sizes, pos_labels, neg_labels, p_vals	
 
+def clusterMask(X1, X2, p_val):
+    '''
+   	add docstring
+    '''	
+
+    # indicate significant clusters of individual timecourses
+    sig_cl = clusterBasedPermutation(X1, X2, p_val = p_val)
+    cluster_mask = ~np.array(sig_cl, dtype = bool)
+
+    return cluster_mask
+
 
 def permTTest(X_real, X_perm, p_thresh = 0.05):
 	'''

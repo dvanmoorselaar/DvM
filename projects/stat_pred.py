@@ -55,6 +55,9 @@ sj_info = {'1': {'replace':{}}, # example replace: replace = {'15': {'session_1'
 			'19': {'replace':{}},
 			'20': {'replace':{}},
 			'21': {'replace':{}},
+			'22': {'replace':{}},
+			'23': {'replace':{}},
+			'24': {'replace':{}},
 							}
 
 # project specific info
@@ -231,48 +234,58 @@ if __name__ == '__main__':
 				project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 
-	for sj in [1,2,3,5,6,7,8,9,10,11,13,14,15,16,17,18,19,20,21]:	
+	for sj in [12]:	
 
 		
-		# read in preprocessed data
+		# read in preprocessed data for main ERP analysis
 		beh, eeg = PO.loadData(sj, False, (-1,0.6),'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+
 
 		# ERP ANALYSIS pipeline (flip all electrodes as if all stimuli are presented right)
 		# distractor tuned (no spatial bias)
 		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
 		erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = None)
-		erp.topoFlip(left = ['2'], header = 'dist_loc')
-		erp.ipsiContra(sj = sj, left = [2], right = [6], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
-                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, balance = False, erp_name = 'main_dist_no_bias', RT_split = True)
+		#erp.topoFlip(left = ['2'], header = 'dist_loc')
+		erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, balance = False, erp_name = 'dist', RT_split = True)
 
 		
 		# target tuned (no spatial bias)
 		erp = ERP(eeg, beh, 'target_loc', (-0.1,0))
-		erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = None)
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = False, excl_factor = None) # data is already filtered
 		erp.topoFlip(left = [2], header = 'target_loc')
 		erp.ipsiContra(sj = sj, left = [2], right = [6], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
-                       r_elec = ['PO8'], midline = {'dist_loc': ['0','4']}, balance = False, erp_name = 'main_target_no_bias', RT_split = True)
-
-
-		# # # read in preprocessed data
-		# beh, eeg = PO.loadData(sj, False, (-1,0.6),'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
-
-		# # distractor tuned (distractor at high probability location)
-		# erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
-		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = dict(dist_high = ['no']))
-		# erp.topoFlip(left = [2], header = 'high_loc')
-		# erp.ipsiContra(sj = sj, left = [2], right = [6], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
-  #                      r_elec = ['PO8'], midline = {'target_loc': [0,4]}, balance = False, erp_name = 'main_dist_bias')
+                       r_elec = ['PO8'], midline = {'dist_loc': ['0','4','None']}, balance = False, erp_name = 'target', RT_split = True)
 
 		# # read in preprocessed data
-		# beh, eeg = PO.loadData(sj, False, (-1,0.6),'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+		beh, eeg = PO.loadData(sj, False, (-1,0.6),'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+
+		# distractor tuned (distractor at high probability location)
+		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = dict(dist_high = ['no'])) # exclude all trials with distractor at low probability location (or without distractor)
+		erp.topoFlip(left = [2], header = 'high_loc') # as if all high probabilty locations are on the right
+		erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
+                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, balance = False, erp_name = 'dist')
+
+		# read in preprocessed data
+		beh, eeg = PO.loadData(sj, False, (-1,0.6),'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
 		
-		# # target tuned (target at high probability location)
-		# erp = ERP(eeg, beh, 'target_loc', (-0.1,0))
-		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = dict(target_high = ['no']))
-		# erp.topoFlip(left = [2], header = 'high_loc')
-		# erp.ipsiContra(sj = sj, left = [2], right = [6], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
-  #                      r_elec = ['PO8'], midline = {'dist_loc': ['0','4']}, balance = False, erp_name = 'main_target_no_bias')
+		# target tuned (target at high probability location)
+		erp = ERP(eeg, beh, 'target_loc', (-0.1,0))
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = dict(target_high = ['no']))
+		erp.topoFlip(left = [2], header = 'high_loc')
+		erp.ipsiContra(sj = sj, left = [2], right = [6], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
+                       r_elec = ['PO8'], midline = {'dist_loc': ['0','4','None']}, balance = False, erp_name = 'target')
+
+		# read in preprocessed data
+		beh, eeg = PO.loadData(sj, False, (-1,0.6),'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+		
+		# neutral tuned (target and distractor at midline or absent)
+		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = None)
+		erp.topoFlip(left = [2], header = 'high_loc')
+		erp.ipsiContra(sj = sj, left = ['0', 'None'], right = ['4'], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias', 'pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, balance = False, erp_name = 'neutral')
 
 		# # read in preprocessed data
 		# beh, eeg = PO.loadData(sj, False, (-1,0.6),'HEOG', 1, eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))

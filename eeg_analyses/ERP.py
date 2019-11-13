@@ -281,13 +281,11 @@ class ERP(FolderStructure):
 		if str(sj) not in erps.keys():
 			erps.update({str(sj):{}})
 
-		# filthy hack to get rid of 'None' in index array
-		if self.beh[self.header].dtype != 'int64':
-			self.beh[self.header][self.beh[self.header] == 'None'] = np.nan
+		# report that left right specification contains invalid values
+		# ADD WARNING!!!!!!
 
-		# select left and right trials
-		idx_l = np.sort(np.hstack([np.where(np.array(self.beh[self.header], dtype = float) == l)[0] for l in left]))
-		idx_r = np.sort(np.hstack([np.where(np.array(self.beh[self.header], dtype = float) == r)[0] for r in right]))
+		idx_l = np.sort(np.hstack([np.where(self.beh[self.header] == l)[0] for l in left]))
+		idx_r = np.sort(np.hstack([np.where(self.beh[self.header] == r)[0] for r in right]))
 
 		# if midline, only select midline trials
 		if midline != None:
@@ -297,7 +295,6 @@ class ERP(FolderStructure):
 			idx_m = np.hstack(idx_m)
 			idx_l = np.array([idx for idx in idx_l if idx in idx_m])
 			idx_r = np.array([idx for idx in idx_r if idx in idx_m])
-
 
 		if balance:
 			max_trial = self.selectMaxTrial(np.hstack((idx_l, idx_r)), conditions, self.beh[cnd_header])
@@ -329,8 +326,7 @@ class ERP(FolderStructure):
 				continue
 
 			if self.flipped:
-				embed()
-				fname = 'sj_{}-{}-{}-ave.fif'.format(sj, erp_name, cnd)
+				fname = 'sj_{}-{}-{}'.format(sj, erp_name, cnd)
 				idx = np.hstack((idx_c_l, idx_c_r))
 				self.createERP(self.beh, self.eeg, idx, fname, RT_split = RT_split)
 
@@ -338,6 +334,7 @@ class ERP(FolderStructure):
 				ipsi = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_r_elec], self.eeg._data[idx_c_r,:,:][:,idx_r_elec]))
 				contra = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_l_elec], self.eeg._data[idx_c_r,:,:][:,idx_l_elec]))
 			else:
+				embed()
 				# stimuli presented bilataral
 				ipsi = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_l_elec], self.eeg._data[idx_c_r,:,:][:,idx_r_elec]))
 				contra = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_r_elec], self.eeg._data[idx_c_r,:,:][:,idx_l_elec]))
