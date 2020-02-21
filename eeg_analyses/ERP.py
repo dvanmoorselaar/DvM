@@ -222,10 +222,88 @@ class ERP(FolderStructure):
 
 		return beh	
 
+	def createDWave(self, data, idx_l, idx_r, idx_l_elec, idx_r_elec):
+		"""Creates a baseline corrected difference wave (contralateral - ipsilateral).
+		For this function stimuli need not have been artificially shifted to the same hemifield
+		
+		Arguments:
+			data {array}  -- eeg data (epochs X electrodes X time)
+			idx_l {array} -- Indices of trials where stimuli of interest is presented left 
+			idx_r {array} -- Indices of trials where stimuli of interest is presented right 
+			l_elec {array} -- list of indices of left electrodes
+			r_elec {array} -- list of indices from right electrodes
+		
+		Returns:
+			d_wave {array} -- contralateral vs. ipsilateral difference waveform
+		"""
+
+		# create ipsi and contra waveforms
+		ipsi = np.vstack((data[idx_l,:,:][:,idx_l_elec], data[idx_r,:,:][:,idx_r_elec]))
+		contra = np.vstack((data[idx_l,:,:][:,idx_r_elec], data[idx_r,:,:][:,idx_l_elec]))
+	
+		# baseline correct data	
+		ipsi = self.baselineCorrect(ipsi, self.eeg.times, self.baseline)
+		contra = self.baselineCorrect(contra, self.eeg.times, self.baseline)
+
+		# create ipsi and contra ERP
+		ipsi = np.mean(ipsi, axis = (0,1)) 
+		contra = np.mean(contra, axis = (0,1))
+
+		d_wave = contra - ipsi
+
+		return d_wave
+
+	def permuteIpsiContra(self, eeg, contra_idx, ipsi_idx, nr_perm = 1000):
+		"""Calls upon createDWave to create permuted difference waveforms. Can for example be used to calculate 
+		permuted area under the curve to establish reliability of a component. Function assumes that it is if all 
+		stimuli are presented within one hemifield
+		
+		Arguments:
+			eeg {mne object}  -- epochs object mne
+			contra_idx {array} -- Indices of contralateral electrodes 
+			ipsi_idx {array} -- Indices of ipsilateral electrodes
+		
+		Keyword Arguments:
+			nr_perm {int} -- number of permutations (default: {1000})
+		
+		Returns:
+			d_wave {array} -- contralateral vs. ipsilateral difference waveform (can be used as sanity check)
+			d_waves_p {array} -- permuted contralateral vs. ipsilateral difference waveforms (nr_perms X timepoints)
+		"""		
+
+		data = eeg._data
+		nr_epochs = data.shape[0]
+
+		# create evoked objects using mne functionality
+		evoked = eeg.average().apply_baseline(baseline = self.baseline)
+		d_wave = np.mean(evoked._data[contra_idx] - evoked._data[ipsi_idx], axis = 0)
+
+		# initiate empty array for shuffled waveforms
+		d_waves_p = np.zeros((nr_perm, eeg.times.size))
+
+		for p in range(nr_perm):
+			idx_p = np.random.permutation(nr_epochs)
+			idx_left = idx_p[::2]
+			idx_right = idx_p[1::2]
+			d_waves_p[p] = self.createDWave(data, idx_left, idx_right, contra_idx, ipsi_idx)
+
+		return d_wave, d_waves_p
+
+
 	def createERP(self, beh, eeg, idx, fname, RT_split = False):
+		"""Uses mne evoked functionality to create and save ERPs
+		
+		Arguments:
+			beh {dataFrame} -- trial specific info
+			eeg {mne object} -- Epochs object MNE
+			idx {array} -- indices of trials of interest
+			fname {str} -- fname to store evoked object
+		
+		Keyword Arguments:
+			RT_split {bool} -- If True data will also be analyzed seperately for fast and slow trials (default: {False})
+		"""
 
-
-		beh = self.beh.iloc[idx]
+		beh = beh.iloc[idx]
 		eeg = eeg[idx]
 
 		# create evoked objects using mne functionality and save file
@@ -242,7 +320,7 @@ class ERP(FolderStructure):
 				evoked = eeg[mask].average().apply_baseline(baseline = self.baseline)
 				evoked.save(self.FolderTracker(['erp', self.header],'{}_{}-ave.fif'.format(fname, rt)))
 
-	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, balance = False, erp_name = '', RT_split = False):
+	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, erp_name = '', RT_split = False, permute = False):
 		''' 
 
 		Creates laterilized ERP's by cross pairing left and right electrodes with left and right position labels.
@@ -261,6 +339,7 @@ class ERP(FolderStructure):
 								stimulus (key of dict) was presented on the midline (value of dict)
 		erp_name (str): name of the pickle file to store erp data
 		RT_split (bool): If true each condition is also analyzed seperately for slow and fast RT's (based on median split)
+		permute (bool | int): If true (in case of a number), randomly flip the hemifield of the stimulus of interest and calculate ERPs
 
 		Returns
 		- - - -
@@ -268,24 +347,21 @@ class ERP(FolderStructure):
 
 		'''
 
-		ch_names = self.eeg.ch_names
-		file = self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name))
-
-		if os.path.isfile(file):
-			with open(file ,'rb') as handle:
-				erps = pickle.load(handle)
+		# make sure it is as if all stimuli of interest are presented right from fixation	
+		if not self.flipped:
+			print('Flipping is done based on {} column in beh and relative to values {}. \
+				If not correct please flip trials beforehand'.format(self.header, left))
+			self.topoFlip(left , self.header)
 		else:
-			erps = {}
-
-		# update dictionary
-		if str(sj) not in erps.keys():
-			erps.update({str(sj):{}})
+			print('It is assumed as if all stimuli are presented right')
 
 		# report that left right specification contains invalid values
 		# ADD WARNING!!!!!!
-
-		idx_l = np.sort(np.hstack([np.where(self.beh[self.header] == l)[0] for l in left]))
-		idx_r = np.sort(np.hstack([np.where(self.beh[self.header] == r)[0] for r in right]))
+		idx_l, idx_r = [],[]
+		if len(left)>0:
+			idx_l = np.sort(np.hstack([np.where(self.beh[self.header] == l)[0] for l in left]))
+		if len(right)>0:	
+			idx_r = np.sort(np.hstack([np.where(self.beh[self.header] == r)[0] for r in right]))
 
 		# if midline, only select midline trials
 		if midline != None:
@@ -296,19 +372,17 @@ class ERP(FolderStructure):
 			idx_l = np.array([idx for idx in idx_l if idx in idx_m])
 			idx_r = np.array([idx for idx in idx_r if idx in idx_m])
 
-		if balance:
-			max_trial = self.selectMaxTrial(np.hstack((idx_l, idx_r)), conditions, self.beh[cnd_header])
+		#if balance:
+		#	max_trial = self.selectMaxTrial(np.hstack((idx_l, idx_r)), conditions, self.beh[cnd_header])
 
 		# select indices of left and right electrodes
-		idx_l_elec = np.sort([ch_names.index(e) for e in l_elec])
-		idx_r_elec = np.sort([ch_names.index(e) for e in r_elec])
+		idx_l_elec = np.sort([self.eeg.ch_names.index(e) for e in l_elec])
+		idx_r_elec = np.sort([self.eeg.ch_names.index(e) for e in r_elec])
 
 		if conditions == 'all':
 			conditions = ['all'] + list(np.unique(self.beh[cnd_header]))
 
 		for cnd in conditions:
-
-			erps[str(sj)].update({cnd:{}})
 
 			# select left and right trials for current condition
 			# first select condition indices
@@ -324,47 +398,27 @@ class ERP(FolderStructure):
 			if idx_c_l.size == 0 and idx_c_r.size == 0:
 				print('no data found for {}'.format(cnd))
 				continue
+			
+			fname = 'sj_{}-{}-{}'.format(sj, erp_name, cnd)
+			idx = np.hstack((idx_c_l, idx_c_r))
+			self.createERP(self.beh, self.eeg, idx, fname, RT_split = RT_split)
 
-			if self.flipped:
-				fname = 'sj_{}-{}-{}'.format(sj, erp_name, cnd)
-				idx = np.hstack((idx_c_l, idx_c_r))
-				self.createERP(self.beh, self.eeg, idx, fname, RT_split = RT_split)
+			if permute:
+				# STILL NEEDS DOUBLE CHECKING AGAINST MNE OUTPUT (looks ok!)
+				# make it as if stumuli were presented left and right
+				eeg = self.eeg[idx]
+				d_wave, d_waves_p = self.permuteIpsiContra(eeg, idx_l_elec, idx_r_elec, nr_perm = permute)
 
-				# as if all stimuli presented right: left electrodes are contralateral, right electrodes are ipsilateral
-				ipsi = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_r_elec], self.eeg._data[idx_c_r,:,:][:,idx_r_elec]))
-				contra = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_l_elec], self.eeg._data[idx_c_r,:,:][:,idx_l_elec]))
-			else:
-				embed()
-				# stimuli presented bilataral
-				ipsi = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_l_elec], self.eeg._data[idx_c_r,:,:][:,idx_r_elec]))
-				contra = np.vstack((self.eeg._data[idx_c_l,:,:][:,idx_r_elec], self.eeg._data[idx_c_r,:,:][:,idx_l_elec]))
-
-			# baseline correct data	
-			ipsi = self.baselineCorrect(ipsi, self.eeg.times, self.baseline)
-			contra = self.baselineCorrect(contra, self.eeg.times, self.baseline)
+				# save results
+				perm_erps = {'d_wave': d_wave, 'd_waves_p': d_waves_p}
+				pickle.dump(perm_erps, open(self.FolderTracker(['erp',self.header],'sj_{}_{}_{}_perm.pickle'.format(sj, erp_name, cnd)) ,'wb'))
 
 			# create erp (nr_elec X nr_timepoints)
-			if cnd != 'all' and balance:
-				idx_balance = np.random.permutation(ipsi.shape[0])[:max_trial]
-				ipsi = ipsi[idx_balance,:,:]
-				contra = contra[idx_balance,:,:]
+			#if cnd != 'all' and balance:
+			#	idx_balance = np.random.permutation(ipsi.shape[0])[:max_trial]
+			#	ipsi = ipsi[idx_balance,:,:]
+			#	contra = contra[idx_balance,:,:]
 			
-			ipsi = np.mean(ipsi, axis = (0,1)) 
-			contra = np.mean(contra, axis = (0,1))
-
-			# also store matching topodata
-			if self.flipped == True:
-				print('Also calculate corresponding topoplots')
-				topo = self.baselineCorrect(self.eeg._data[np.hstack((idx_c_l, idx_c_r))], self.eeg.times, self.baseline)
-				topo = topo.mean(axis = 0)
-			else:
-				print('No topoplots created, because data was not flipped. Run topoSelection instead')	
-
-			erps[str(sj)][cnd].update({'ipsi':ipsi,'contra':contra,'diff_wave':contra - ipsi, 'elec': [l_elec, r_elec]})	
-
-		# save erps	
-		with open(self.FolderTracker(['erp',self.header],'{}.pickle'.format(erp_name)) ,'wb') as handle:
-			pickle.dump(erps, handle)	
 
 	def topoSelection(self, sj, conditions = 'all', loc = 'all', midline = None, balance = False, topo_name = ''):
 		''' 

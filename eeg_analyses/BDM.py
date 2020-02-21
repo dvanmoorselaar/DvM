@@ -168,6 +168,7 @@ class BDM(FolderStructure):
 		
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
+
 		if downscale:
 			max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
 
@@ -175,6 +176,7 @@ class BDM(FolderStructure):
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
 
 		if collapse:
+			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
 	
 		# loop over conditions
@@ -185,7 +187,11 @@ class BDM(FolderStructure):
 
 			if cnd != 'collapsed':
 				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
+				if collapse:
+					beh['collapsed'][cnd_idx] = 'yes'
 			else:
+				# reset max_tr again such that analysis is not underpowered
+				max_tr = [self.selectMaxTrials(beh, ['yes'], bdm_labels,'collapsed')]
 				cnd_idx =  np.where(np.sum(
 					[(beh[cnd_header] == c).values for c in cnds], 
 					axis = 0))[0]
@@ -197,7 +203,7 @@ class BDM(FolderStructure):
 				cnd_labels = cnd_labels[sub_idx]
 
 			labels = np.unique(cnd_labels)
-			print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(cnd_labels, return_counts = True)))
+			print ('\nYou are decoding {}. The nr of trials used for folding is set to {}'.format(cnd, max_tr[0]))
 			
 			# initiate decoding array
 			if gat_matrix:
@@ -230,7 +236,7 @@ class BDM(FolderStructure):
 					#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
 					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
 					if i == 0:
-						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'info': bdm_info})
+						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'bdm_info': bdm_info})
 					else:
 						classification[cnd]['{}-nrlabels'.format(n)] = copy.copy(class_acc[0])
 								
@@ -239,7 +245,7 @@ class BDM(FolderStructure):
 	
 		# store classification dict	
 		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode,'baseline'], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
@@ -315,7 +321,7 @@ class BDM(FolderStructure):
 		return classification
 
 
-	def crossClassify(self, sj, cnds, cnd_header, time, tr_header, te_header,tr_te_rel = 'ind', excl_factor = None, tr_factor = None, te_factor = None, bdm_labels = 'all', gat_matrix = False, save = True):	
+	def crossClassify(self, sj, cnds, cnd_header, time, tr_header, te_header, tr_te_rel = 'ind', excl_factor = None, tr_factor = None, te_factor = None, bdm_labels = 'all', gat_matrix = False, save = True, bdm_name = 'cross'):	
 		'''
 		UPdate function but it does the trick
 		'''
@@ -323,47 +329,49 @@ class BDM(FolderStructure):
 		# read in data 
 		print ('NR OF TRAIN LABELS DIFFER PER CONDITION!!!!')
 		print ('DOES NOT YET CONTAIN FACTOR SELECTION FOR DEPENDENT DATA')
-		eegs, beh = self.selectBDMData(time, excl_factor)	
-		nr_time = eegs.shape[-1]
 
-		max_tr = self.selectMaxTrials(beh, cnds, cnd_header)
-
+		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)		
+		nr_time = times.size
+		
 		if cnds == 'all':
 			cnds = [cnds]
 
 		if tr_te_rel == 'ind':	
-			# use train and test factor to select independent trials!!!
-			beh = pd.DataFrame.from_dict(beh)	
+			# use train and test factor to select independent trials!!!	
 			tr_mask = [(beh[key] == f).values for  key in tr_factor.keys() for f in tr_factor[key]]
 			for m in tr_mask: 
-					tr_mask[0] = np.logical_or(tr_mask[0],m)
+				tr_mask[0] = np.logical_or(tr_mask[0],m)
 			tr_eegs = eegs[tr_mask[0]]
 			tr_beh = beh.drop(np.where(~tr_mask[0])[0])
-			tr_beh.reset_index(inplace = True)
+			tr_beh.reset_index(inplace = True, drop = True)
 			
 			te_mask = [(beh[key] == f).values for  key in te_factor.keys() for f in te_factor[key]]
 			for m in te_mask: 
 				te_mask[0] = np.logical_or(te_mask[0],m)
 			te_eegs = eegs[te_mask[0]]
 			te_beh = beh.drop(np.where(~te_mask[0])[0])
-			te_beh.reset_index(inplace = True)
+			te_beh.reset_index(inplace = True, drop = True)
 
 		# create dictionary to save classification accuracy
-		classification = {'info': {'elec': self.elec_oi}}
+		classification = {'info': {'elec': self.elec_oi, 'times': times}}
 
 		if cnds == 'all':
 			cnds = [cnds]
 	
 		# loop over conditions
 		for cnd in cnds:
+			if type(cnd) == tuple:
+				tr_cnd, te_cnd = cnd
+			else:
+				tr_cnd = te_cnd = cnd	
 
 			#print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(tr_beh[self.decoding], return_counts = True)))
 			if tr_te_rel == 'ind':
-				tr_mask = (tr_beh[cnd_header] == cnd).values
+				tr_mask = (tr_beh[cnd_header] == tr_cnd).values
 				Ytr = tr_beh[tr_header][tr_mask].values.reshape(1,-1)
 				Xtr = tr_eegs[tr_mask,:,:][np.newaxis, ...]
 
-				te_mask = (te_beh[cnd_header] == cnd).values
+				te_mask = (te_beh[cnd_header] == te_cnd).values
 				Yte = te_beh[te_header][te_mask].values.reshape(1,-1)
 				Xte = te_eegs[te_mask,:,:][np.newaxis, ...]
 			else:
@@ -381,10 +389,10 @@ class BDM(FolderStructure):
 			# do actual classification
 			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
 	
-			classification.update({cnd:{'standard': copy.copy(class_acc)}})
+			classification.update({tr_cnd:{'standard': copy.copy(class_acc)}})
 		# store classification dict	
 		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, 'cross'], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+			with open(self.FolderTracker(['bdm', self.elec_oi, 'cross', bdm_name], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
@@ -429,7 +437,7 @@ class BDM(FolderStructure):
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
-			print('\r Fold {} out of {} folds'.format(n + 1,N),)
+			print('\r Fold {} out of {} folds'.format(n + 1,N),end='')
 			Ytr_ = Ytr[n]
 			Yte_ = Yte[n]
 			
@@ -443,9 +451,9 @@ class BDM(FolderStructure):
 
 					# train model and predict
 					lda.fit(Xtr_,Ytr_)
-					conf_scores = lda.decision_function(Xte_)
+					scores = lda.predict_proba(Xte_) # get posteriar probability estimates
 					predict = lda.predict(Xte_)
-					class_perf = self.computeClassPerf(conf_scores, Yte_, np.unique(Ytr_), predict) # 
+					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) # 
 
 					if not gat_matrix:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
@@ -579,16 +587,20 @@ class BDM(FolderStructure):
 		max_trials (int): max number unique labels
 		'''
 
-		N = self.nr_folds
+		# make sure selection is based on corrrect trials
+		if bdm_labels == 'all':
+			bdm_labels = np.unique(beh[self.to_decode]) 
 
+		N = self.nr_folds
 		cnd_min = []
+
 		# trials for decoding
 		if cnds != 'all':
 			for cnd in cnds:
 		
 				# select condition trials and get their decoding labels
 				trials = np.where(beh[cnds_header] == cnd)[0]
-				labels = beh[self.to_decode][trials]
+				labels = [l for l in beh[self.to_decode][trials] if l in bdm_labels]
 
 				# select the minimum number of trials per label for BDM procedure
 				# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
@@ -599,12 +611,12 @@ class BDM(FolderStructure):
 
 			max_trials = min(cnd_min)
 		elif cnds == 'all':
-			if bdm_labels != 'all':
-				labels = [l for l in beh[self.to_decode] if l in bdm_labels]
-			else:
-				labels = beh[self.to_decode]
+			labels = [l for l in beh[self.to_decode] if l in bdm_labels]
 			min_tr = np.unique(labels, return_counts = True)[1]
 			max_trials = int(np.floor(min(min_tr)/N)*N)	
+
+		if max_trials == 0:
+			print('At least one condition does not contain sufficient info for current nr of folds')
 
 		return max_trials
 
@@ -704,12 +716,6 @@ class BDM(FolderStructure):
 
 		return train_tr, test_tr, bdm_info	
 
-	def ROCcurve(self, ):
-		'''
-
-		'''	
-
-		pass 
 
 	def linearClassification(self, X, train_tr, test_tr, max_tr, labels, gat_matrix = False):
 		''' 

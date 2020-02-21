@@ -8,7 +8,7 @@ import glob
 import pickle
 #sys.path.append('/home/jalilov1/DvM')
 #sys.path.append('/home/jalilov1/BB/AB_R/DvM')
-sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM')
+sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
 
 import numpy as np
 import seaborn as sns
@@ -19,11 +19,11 @@ from scipy.signal import argrelextrema
 from IPython import embed
 from beh_analyses.PreProcessing import *
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from eeg_analyses.TF import * 
+#from eeg_analyses.TF import * 
 from eeg_analyses.EEG import * 
-from eeg_analyses.ERP import * 
+#from eeg_analyses.ERP import * 
 from eeg_analyses.BDM import * 
-from eeg_analyses.CTF import * 
+#from eeg_analyses.CTF import * 
 #from eeg_analyses.Spatial_EM import * 
 from visuals.visuals import MidpointNormalize
 #from support.FolderStructure import *
@@ -91,6 +91,35 @@ class Josipa(FolderStructure):
 		beh.to_csv(self.FolderTracker(extension=[
                     'beh', 'raw'], filename='subject-{}_ses_1-upd.csv'.format(sj)))
 
+	def updatePickleSeenUnseen(self):
+		'''
+
+		'''
+
+		for sj in [1,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,29,30,31,32,33,34,35]:
+			behs = []
+			for session in [2,3]:
+				# read in behavior
+				beh_p = pickle.load(open(self.FolderTracker(extension=[
+                    'AB', 'beh','processed'], filename='subject-{}_ses-{}-new.pickle'.format(sj, session)), "rb" ), encoding='latin1')
+				beh_p = pd.DataFrame.from_dict(beh_p)
+				beh_m = pd.read_csv(self.FolderTracker(extension=['beh_matlab'], filename='abr_datamat_{}_sb{}.csv'.format(session - 1,sj)))
+
+				# find matching trials between behavior in python and matlab
+				nr_trials = beh_m['trial'].values
+				split_trials = np.split(nr_trials, np.where(np.diff(nr_trials) < 0)[0]+ 1)  
+				to_add = [split[-1] for split in split_trials]
+				for i in range(1, len(to_add)):
+					split_trials[i] += sum(to_add[:i]) 
+				nr_trials = np.hstack(split_trials)
+				trial_idx = np.array([list(nr_trials).index(tr) for tr in beh_p['nr_trials']])
+				beh_p['T2_seen'] = beh_m['t2_ide_correct'].values[trial_idx]
+				behs.append(beh_p)
+			behs = pd.concat(behs, ignore_index = True).to_dict(orient = 'series') 
+			# save combined pickle file
+			pickle.dump(behs, open(self.FolderTracker(extension=['AB','beh', 'processed'],
+            	filename='subject-{}_all.pickle'.format(sj)), 'wb' ) )
+
 	def matchBehnew(self, sj, events, trigger, task):
 		'''
 
@@ -121,7 +150,7 @@ class Josipa(FolderStructure):
 			beh['condition'][(triggers > 30) * (triggers < 39)] = 'letter'
 			beh['nr_trials'] = range(triggers.size)
 		
-			print 'detected {} epochs'.format(triggers.size)
+			print('detected {} epochs'.format(triggers.size))
 			
 		elif task == 'AB':
 
@@ -175,7 +204,7 @@ class Josipa(FolderStructure):
 			beh['D1'][cnds == 67] = events[np.where(events[:,2] == 67)[0] + 7,2]
 			beh['D2'][cnds == 67] = events[np.where(events[:,2] == 67)[0] + 10,2]			
 
-			print 'detected {} epochs'.format(idx_end.size)
+			print('detected {} epochs'.format(idx_end.size))
 
 		return beh, missing
 
@@ -201,14 +230,14 @@ class Josipa(FolderStructure):
 		# store timing info for each condition (now only logs pos 5 - 9)
 		t_factor = 1000/512.0
 		for i, idx in enumerate(idx_trigger):
-			print "\r{0}% of trial timings updated".format((float(i)/idx_trigger.size)*100),
+			print("\r{0}% of trial timings updated".format((float(i)/idx_trigger.size)*100),)
 			beh['timing'][i] = {'p5':(events[idx,0] - events[idx-14,0]) * t_factor,
 					  'p6':(events[idx,0] - events[idx-13,0]) * t_factor,
 					  'p7':(events[idx,0] - events[idx-12,0]) * t_factor,
 					  'p8':(events[idx,0] - events[idx-11,0]) * t_factor,
 					  'p9':(events[idx,0] - events[idx-10,0]) * t_factor}
 		
-		print 'The number of missing trials is {}'.format(nr_miss)
+		print('The number of missing trials is {}'.format(nr_miss))
 
 		return beh, missing
 
@@ -424,7 +453,7 @@ class Josipa(FolderStructure):
 		train_labels = beh_loc[to_decode_tr][identity_idx] # select the labels used for training
 		nr_tr_labels = np.unique(train_labels).size 
 		min_tr_labels = min(np.unique(train_labels, return_counts= True)[1])
-		print 'You are using {}s to train, with {} as unique labels'.format(to_decode_tr, np.unique(train_labels))
+		print('You are using {}s to train, with {} as unique labels'.format(to_decode_tr, np.unique(train_labels)))
 		train_idx = np.sort(np.hstack([random.sample(np.where(beh_loc[to_decode_tr] == l)[0],min_tr_labels) for l in np.unique(train_labels)]))
 
 		# set test labels
@@ -442,7 +471,7 @@ class Josipa(FolderStructure):
 		label_info = np.zeros((nr_time, nr_test_time, nr_tr_labels))
 	
 		for tr_t in range(nr_time):
-			print tr_t
+			print(tr_t)
 			for te_t in range(nr_test_time):
 				if not gat_matrix:
 					te_t = tr_t
@@ -636,7 +665,7 @@ class Josipa(FolderStructure):
 		 # plt.close()
 
 			X = np.stack([bdm[i][header]['standard'] for i in range(len(bdm))])
-			print X.shape
+			print(X.shape)
 			X = X.mean(axis = 0)
 			
 			# plot diagonal
@@ -672,6 +701,23 @@ if __name__ == '__main__':
 
 	# initiate current project
 	PO = Josipa()
+
+	# seen vs unseen decoding Python test
+	#PO.updatePickleSeenUnseen()
+
+	for sj in [1,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,29,30,31,32,33,34,35]:
+		beh = pickle.load(open(PO.FolderTracker(extension=[
+                    'AB', 'beh','processed'], filename='subject-{}_all.pickle'.format(sj)), "rb" ))
+		beh = pd.DataFrame.from_dict(beh)
+		eeg = mne.read_epochs(PO.FolderTracker(extension = ['AB','processed'], 
+							filename = 'subject-{}_all-epo.fif'.format(sj)))
+		# shift timings
+		eeg =  cnd_time_shift(eeg, beh, cnd_info = {'TDTDD': -0.083*2,'TDDTD': -0.083*3}, cnd_header = 'condition')
+		bdm = BDM(beh, eeg, to_decode = 'T2_seen', nr_folds = 10, elec_oi = 'all', downsample = 128, method = 'auc')
+		bdm.Classify(sj, cnds = ['TDDTD', 'TDTDD'], cnd_header = 'condition', collapse = True,
+		 			bdm_labels = [1,2], time = (-0.2, 0.8), nr_perm = 0, gat_matrix = False)
+
+
 
 
 	# STEP 1: run task specific preprocessing 

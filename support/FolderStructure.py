@@ -3,7 +3,7 @@ import mne
 import pickle
 
 import pandas as pd
-from support import *
+from support.support import *
 from IPython import embed
 
 class FolderStructure(object):
@@ -51,7 +51,7 @@ class FolderStructure(object):
 		return folder	
 
 
-	def loadData(self, sj, eyefilter, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True):
+	def loadData(self, sj, eyefilter, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
 		'''
 		loads EEG and behavior data
 
@@ -64,6 +64,7 @@ class FolderStructure(object):
 		eye_thresh (int): exclude trials with an saccades exceeding threshold (in visual degrees)
 		eye_dict (dict): if not None, needs to be dict with three keys specifying parameters for sliding window detection
 		beh_file (bool): Is epoch info stored in a seperate file or within behavior file
+		use_tracker (bool): specifies whether eye tracker data should be used (i.e., is reliable)
 
 		Returns
 		- - - -
@@ -85,7 +86,7 @@ class FolderStructure(object):
 			beh = pd.DataFrame({'condition': eeg.events[:,2].byteswap().newbyteorder()})	
 
 		if eyefilter:
-			beh, eeg = filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh, eye_dict)
+			beh, eeg = filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh, eye_dict, use_tracker)
 
 		return beh, eeg
 

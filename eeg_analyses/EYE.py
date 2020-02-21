@@ -353,7 +353,8 @@ class EYE(FolderStructure):
 		# only run eye analysis if data is available for this session
 		if eye_file == []: 
 			bins = np.array([])
-			trial_nrs = [] # CHECK THIS
+			trial_nrs = np.array([]) # CHECK THIS
+			window_bins = np.array([])# CHECK THIS
 		else:	
 			# read eye and beh file (with removed practice trials from .asc file)
 			beh_file = self.FolderTracker(extension = ['beh','raw'], \

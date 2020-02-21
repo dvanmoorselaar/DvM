@@ -94,11 +94,28 @@ def select_electrodes(ch_names, subset):
 
 	return picks	
 
-def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None):
-	'''
+def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, use_tracker = True):
+	"""Filters out data based on eye movements. Either based on eye tracker data 
+	as stored in the beh file or using a step like algorhythm
 
-	'''
+	
+	Arguments:
+		beh {dataframe}  -- behavioral info after preprocessing
+		eeg {epochs object} -- preprocessed eeg data
+		eye_window {tuple | list} -- Time window used for step algorhythm
+		eye_ch {str} -- Name of channel used to detect eye movements
+		eye_thresh {array} -- threshold in visual degrees. Used for eye tracking data
+		eye_dict (dict) -- dictionry with three parameters (specified as keys) for step algorhytm: 
+						windowsize (in ms), windowstep (in ms), threshold (in microV)
+		use_tracker (bool) -- specifies whether eye tracker data should be used (i.e., is reliable)				
+	
+	Returns:
+		beh {dataframe}  -- behavioral info with trials with eye movements removed
+		eeg {epochs object} -- preprocessed eeg data with eye movements removed
+		"""
 
+	if not use_tracker:
+		beh['eye_bins'][:] = np.nan
 	nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
 	print('Trials without reliable eyetracking data {} out of {} clean trials ({}%)'.format(nan_idx.size, beh['eye_bins'].size, nan_idx.size/float(beh['eye_bins'].size)*100))
 

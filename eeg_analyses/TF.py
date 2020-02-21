@@ -18,6 +18,7 @@ from mne.time_frequency import tfr_array_morlet
 from mne.baseline import rescale
 from scipy.signal import hilbert
 from numpy.fft import fft, ifft,rfft, irfft
+
 from support.FolderStructure import *
 from support.support import trial_exclusion
 from signals.signal_processing import *
@@ -303,8 +304,8 @@ class TF(FolderStructure):
 		contra_ipsi_pair = np.array(contra_ipsi_pair)[pair_idx] 
 
 		# initiate Z array
-		Z = np.zeros((contra_ipsi_pair.size, num_frex, nr_time))
-		norm = np.zeros((contra_ipsi_pair.size, num_frex, nr_time))
+		Z = np.zeros((contra_ipsi_pair.shape[0], num_frex, nr_time))
+		norm = np.zeros((contra_ipsi_pair.shape[0], num_frex, nr_time))
 		Z_elec = []
 		# loop over contra_ipsi pairs
 		pair_idx = 0
@@ -323,15 +324,14 @@ class TF(FolderStructure):
 			real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
 
 			# create distribution of fake differences
-			try:
-				fake_diff = np.zeros((nr_perm,) + real_diff.shape)
-			except:
-				print('Data of real_diff is averaged to reduce the size of the array of two becuase of memory problems')
-				if real_diff.shape[0] % 2 == 1:
-					real_diff = real_diff[:-1]
-				to_split = np.random.permutation(real_diff.shape[0])%2
-				real_diff = np.mean((real_diff[to_split == 0],real_diff[to_split == 1]), axis = 0)
-				fake_diff = np.zeros((nr_perm,) + real_diff.shape)
+			fake_diff = np.zeros((nr_perm,) + real_diff.shape)
+			#except:
+			#	print('Data of real_diff is averaged to reduce the size of the array of two becuase of memory problems')
+			#	if real_diff.shape[0] % 2 == 1:
+			#		real_diff = real_diff[:-1]
+			#	to_split = np.random.permutation(real_diff.shape[0])%2
+			#	real_diff = np.mean((real_diff[to_split == 0],real_diff[to_split == 1]), axis = 0)
+			#	fake_diff = np.zeros((nr_perm,) + real_diff.shape)
 
 			for p in range(nr_perm):
 			 	# randomly flip ipsi and contra
@@ -346,7 +346,7 @@ class TF(FolderStructure):
 
 		return Z, Z_elec
 
-	def TFanalysis(self, sj, cnds, cnd_header, time_period, base_period = None, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
+	def TFanalysis(self, sj, cnds, cnd_header, time_period, tf_name, base_period = None, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
 		'''
 		Time frequency analysis using either morlet waveforms or filter-hilbert method for time frequency decomposition
 
@@ -360,6 +360,7 @@ class TF(FolderStructure):
 		cnd_header (str): key in behavior file that contains condition info
 		base_period (tuple | list): time window used for baseline correction. 
 		time_period (tuple | list): time window of interest
+		tf_name (str): name of analysis. Used to create unique file location
 		elec_oi (str | list): If not all, analysis are limited to specified electrodes 
 		factor (dict): limit analysis to a subset of trials. Key(s) specifies column header
 		method (str): specifies whether hilbert or wavelet convolution is used for time-frequency decomposition
@@ -440,7 +441,7 @@ class TF(FolderStructure):
 				# find ch_idx
 				ch_idx = self.EEG.ch_names.index(ch)
 
-				print('\r Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)),)
+				print('Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)), end='\r')
 
 				# fft decomposition
 				if method == 'wavelet':
@@ -482,12 +483,13 @@ class TF(FolderStructure):
 				print('For permutation procedure it is assumed that it is as if all stimuli of interest are presented right')
 				tf[cnd]['Z_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
 				tf.update(dict(z_info = z_info))
+			tf[cnd]['base_power'] = np.mean(tf[cnd]['base_power'], axis = 0)
 
 			# power values can now safely be averaged
 			tf[cnd]['power'] = np.mean(tf[cnd]['power'], axis = 0)
 
 		# save TF matrices
-		with open(self.FolderTracker(['tf',method,'proactive'],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
+		with open(self.FolderTracker(['tf',method,tf_name],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
 			pickle.dump(tf, handle)		
 	
 	def createMorlet(self, min_freq, max_freq, num_frex, cycle_range, freq_scaling, nr_time, s_freq):

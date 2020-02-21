@@ -76,7 +76,7 @@ def clusterBasedPermutation(X1, X2, p_val = 0.05, cl_p_val = 0.05, paired = True
 	# if no mask is provided include all datapoints in analysis
 	if mask == None:
 		mask = np.array(np.ones(X1.shape[1:]),dtype = bool)
-		print('\nUsing all {} datapoints in cluster based permutation'.format(mask.size))
+		print('\nUsing all {} datapoints in cluster based permutation'.format(mask.size), end = '\r')
 	elif mask.shape != X1[0].shape:
 		print('\nMask does not have the same shape as X1. Adjust mask!')
 	else:
@@ -387,7 +387,7 @@ def FDR(p_vals, q = 0.05, method = 'pdep', adjust_p = False, report = True):
 
 	return h, crit_p, adj_ci_cvrg, adj_p	
 
-def threshArray(X, chance, method = 'ttest', p_value = 0.05):	
+def threshArray(X, chance, method = 'ttest', paired = True, p_value = 0.05):	
 	'''
 	Two step thresholding of a two dimensional data array.
 	Step 1: use group level testing for each individual data point
@@ -401,6 +401,7 @@ def threshArray(X, chance, method = 'ttest', p_value = 0.05):
 				measure (e.g classification accuracy or power)
 	chance (int | float): chance value. All non-significant values will be reset to this value
 	method (str): statistical test used in first step of thresholding
+	paired (bool): specifies whether ttest is a paired sampled test or not
 	p_value (float) | p_value used for thresholding
 
 
@@ -413,7 +414,7 @@ def threshArray(X, chance, method = 'ttest', p_value = 0.05):
 	X_ = np.copy(X) # make sure original data remains unchanged
 	p_vals = signedRankArray(X_, chance, method)
 	X_[:,p_vals > p_value] = chance
-	p_vals = clusterBasedPermutation(X_,chance)
+	p_vals = clusterBasedPermutation(X_,chance, paired = paired)
 	X_ = X_.mean(axis = 0)
 	X_[p_vals > p_value] = chance
 
