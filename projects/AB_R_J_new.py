@@ -1177,8 +1177,8 @@ class Josipa(FolderStructure):
 					# # ALL CONDITIONS 
 					if decoding == 'T2':	
 				
-						# excl_factor = None
-						# beh = PO.correct_T2_filter_beh(sj,beh)
+						excl_factor = None
+						beh = PO.correct_T2_filter_beh(sj,beh)
 
 						cnds = ['T..DDDT', 'TTDDD','TDTDD','TDDTD','TTTDD','TTDTD','TDTTD']
 						eeg =  PO.cnd_time_shift_variablepos(eeg, beh, cnd_info = {'T..DDDT': 0,'TTDDD': -0.083, 'TDTDD': -0.083*2,'TDDTD': -0.083*3,'TTTDD': -0.083,'TTDTD': -0.083,'TDTTD': -0.083*2}, 

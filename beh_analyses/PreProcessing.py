@@ -154,18 +154,16 @@ class PreProcessing(object):
 
 		"""
 		
-		work_data = self.work_data 
-
 		for f, filt in enumerate(to_filter):
 		
 			# filter RTs step 1
-			self.work_data['raw_filter'] = (work_data[filt] > min_cut_off) & (work_data[filt] < max_cut_off)
+			self.work_data['raw_filter'] = (self.work_data[filt] > min_cut_off) & (self.work_data[filt] < max_cut_off)
 
 			# filter RTs step 2
 			self.work_data['{}_filter'.format(filt)] = False # trial is not included in analysis unless it is set to True by the RT filter
 
 			filter_list = []
-			for sj in work_data['subject_nr'].unique():
+			for sj in self.work_data['subject_nr'].unique():
 				print('filtering sj {}'.format(sj))
 				# set basis filter
 				base_filter = 'subject_nr == {} and raw_filter == True'.format(sj)
@@ -199,10 +197,8 @@ class PreProcessing(object):
 		# store or save data					
 		if save:
 			print('saving filtered data')
-			work_data.to_excel(os.path.join(self.project_folder,'analysis','data_comb_filter.xlsx'), sheet_name ='data_comb_filter')		
+			self.work_data.to_excel(os.path.join(self.project_folder,'analysis','data_comb_filter.xlsx'), sheet_name ='data_comb_filter')		
 		
-		self.work_data = work_data
-
 	def SDtrimmer(self, df, filt, sd = 2.5):
 		'''
 

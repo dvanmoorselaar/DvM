@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from math import sqrt
-from scipy.stats import ttest_rel, ttest_ind, wilcoxon
+from scipy.stats import ttest_rel, ttest_ind, wilcoxon, ttest_1samp
 from IPython import embed 
 
 def permutationTTest(X1, X2, nr_perm):
@@ -220,13 +220,13 @@ def computeClusterSizes(X1, X2, p_val, paired, tail, mask, conn):
 
 	return pos_sizes, neg_sizes, pos_labels, neg_labels, p_vals	
 
-def clusterMask(X1, X2, p_val):
+def clusterMask(X1, X2, p_val, paired = True):
     '''
    	add docstring
     '''	
 
     # indicate significant clusters of individual timecourses
-    sig_cl = clusterBasedPermutation(X1, X2, p_val = p_val)
+    sig_cl = clusterBasedPermutation(X1, X2, p_val = p_val, paired = paired)
     cluster_mask = ~np.array(sig_cl, dtype = bool)
 
     return cluster_mask
@@ -420,7 +420,7 @@ def threshArray(X, chance, method = 'ttest', paired = True, p_value = 0.05):
 
 	return X_
 
-def signedRankArray(X, Y, method = 'ttest'):
+def signedRankArray(X, Y, method = 'ttest_rel'):
 	'''
 
 	Arguments
@@ -444,8 +444,10 @@ def signedRankArray(X, Y, method = 'ttest'):
 		for j in range(p_vals.shape[1]):
 			if method == 'wilcoxon':
 				_, p_vals[i,j] = wilcoxon(X[:,i,j], Y[:,i,j]) 
-			elif method == 'ttest':
+			elif method == 'ttest_rel':
 				_, p_vals[i,j] = ttest_rel(X[:,i,j], Y[:,i,j]) 
+			elif method == 	'ttest_1samp':
+				_, p_vals[i,j] = ttest_1samp(X[:,i,j], Y[0,i,j]) 
 
 	return p_vals		
 
@@ -476,7 +478,7 @@ def bootstrap(X, b_iter = 1000):
 	return error, mean
 
 
-def jacklatency(x1, x2, thresh_1, thresh_2, times):
+def jacklatency(x1, x2, thresh_1, thresh_2, times, info = False):
 	'''
 	Helper function of jackknife. Calculates the latency difference between
 	threshold crosses using linear interpolation
@@ -505,7 +507,9 @@ def jacklatency(x1, x2, thresh_1, thresh_2, times):
 	lat_2 = times[idx_2 - 1] + (times[idx_2] - times[idx_2 - 1]) * \
 			(thresh_2 - x2[idx_2 - 1])/(x2[idx_2] - x2[idx_2-1])
 
-	D = lat_2 - lat_1	
+	D = lat_2 - lat_1
+	if info:
+		print('Estimated onset latency X1 = {0:.2f} and X2: {1:.2f}'.format(lat_1, lat_2))	
 
 	return D	
 
@@ -552,14 +556,14 @@ def jackknife(X1, X2, times, peak_window, percent_amp = 50, timing = 'onset'):
 	t = times[s:e]
 
 	# slice data containing the peak average 
-	x1 = np.mean(abs(X1[:,s:e]), axis = 0)
-	x2 = np.mean(abs(X2[:,s:e]), axis = 0)
+	x1 = np.mean(X1[:,s:e], axis = 0)
+	x2 = np.mean(X2[:,s:e], axis = 0)
 	
 	# get the criterion based on peak amplitude percentage
 	c_1 = max(x1) * percent_amp/ 100.0 
 	c_2 = max(x2) * percent_amp/ 100.0 
 
-	onset = jacklatency(x1, x2, c_1, c_2, t) 
+	onset = jacklatency(x1, x2, c_1, c_2, t, info = True) 
 
 	# repeat previous steps but exclude all data points once
 	D = []

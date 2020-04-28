@@ -28,17 +28,25 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None):
+	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None, avg = 0):
 		''' 
 
 		Arguments
 		- - - - - 
 
+		beh (dataFrame):
+		EEG (object):
+		to_decode (str):
+		nr_folds (int):
 		method (str): the method used to compute classifier performance. Available methods are:
 					acc (default) - computes balanced accuracy (number of correct classifications per class,
 %                   averaged over all classes)
 					auc - computes Area Under the Curve 
-
+		elec_oi (str):
+		downsample (int):
+		bdm_filter ():
+		baseline ():
+		avg (int): Specifies number of trials to average over before running decoding
 
 		Returns
 		- - - -
@@ -54,6 +62,7 @@ class BDM(FolderStructure):
 		self.downsample = downsample
 		self.bdm_filter = bdm_filter
 		self.method = method
+		self.avg = avg
 		if bdm_filter != None:
 			self.bdm_type = bdm_filter.keys()[0]
 			self.bdm_band = bdm_filter[self.bdm_type]
@@ -110,27 +119,45 @@ class BDM(FolderStructure):
 
 		return 	eegs, beh, times
 
-	def averageTrials(self, X, Y, trial_avg):
+	def averageEpochs(self, X, Y_label, Y_cnd, trial_avg):
+		'''
 
+		Averages subsets of trials and reduced the size of the label array accordingly. 
+		
 
-		# DOWNSIDE OF ONLY AVERAGING AT THIS STAGE AND WHIT PRSENT METHOD IS THAT TRIALS ARE LOSSED
+		Arguments
+		- - - - - 
+
+		X (array): data (nr folds X nr_epochs X elecs X timepoints) 
+		Y_label (array): labels for each epoch in X
+		Y_cnd (array): condition info for each epoch in X
+		trial_avg (int): specifies the number of epochs that are averaged together. If nr epochs cannot be divided by
+						 trial_avg, discards the remaining epochs after division. 
+	
+		Returns
+		- - - -
+		x_ (array): averaged data in X
+		y_ (array): labels in Y with size adjusted to averaged data in x_
+		'''
+
 		# initiate arrays
-		x_, y_ = [], []
+		x_, y_cnd, y_label = [], [], []
 
 		# loop over each label in Y
-		for label in np.unique(Y):
-			idx = np.where(Y[0] == label)[0]
-			# note that trial order is shuffled 
-			list_of_groups = zip(*(iter(idx),) * trial_avg)
-			for sub in list_of_groups:
-				x_.append(X[:,np.array(sub)].mean(axis = 1))
-				y_.append(label)
+		for cnd in np.unique(Y_cnd):
+			for label in np.unique(Y_label):
+				idx = np.where(np.logical_and(Y_label == label,Y_cnd == cnd) )[0]
+				# note that trial order is NOT shuffled!!!! 
+				list_of_groups = zip(*(iter(idx),) * trial_avg)
+				for sub in list_of_groups:
+					x_.append(X[np.array(sub)].mean(axis = 1))
+					y_label.append(label)
+					y_cnd.append(cnd)
 
 		# create averaged x and y arrays
-		x_ = np.swapaxes(np.stack(x_),0,1)
-		y_ = np.array([y_,]*Y.shape[0])
+		x_ = np.stack(x_)
 
-		return x_, y_
+		return x_, np.array(y_label), np.array(y_cnd)
 
 	def Classify(self,sj, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
@@ -165,43 +192,52 @@ class BDM(FolderStructure):
 
 		# read in data 
 		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)	
-		
-		# select minumum number of trials given the specified conditions
-		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
 
+		# reduce to data of interest (based on condition and label info)
+		idx = np.hstack([np.where(beh[cnd_header] == cnd)[0] for cnd in cnds])
+		if bdm_labels == 'all':
+			bdm_labels = np.unique(beh[self.to_decode].values)  
+		idx = np.array([i for i in idx if beh[self.to_decode].values[i] in bdm_labels])  
+		
+		eegs = eegs[idx]
+		beh = beh[beh.index.isin(idx)]
+		
+		# average data (if specified)
+		if self.avg:
+			print('DATA IS NOT SHUFFLED BEFORE AVERAGING')
+			X, Y_label, Y_cnd = self.averageEpochs(eegs, beh[self.to_decode].values, beh[cnd_header].values, self.avg)
+		else:
+			X, Y_label, Y_cnd = eegs, beh[self.to_decode].values, beh[cnd_header].values
+			
+		# select minumum number of trials given the specified conditions
+		max_tr = [self.selectMaxTrials(Y_label, Y_cnd, N = self.nr_folds)]
+		
 		if downscale:
-			max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
+			max_tr = [(i+1)*self.nr_folds for i in range(int(max_tr[0]/self.nr_folds))][::-1]
 
 		# create dictionary to save classification accuracy
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
 
+		# check whether decoding should also be done collapsed across conditions
 		if collapse:
-			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
-	
+
 		# loop over conditions
 		for cnd in cnds:
 
 			# reset selected trials
 			bdm_info = {}
 
+			# select trials of interest
 			if cnd != 'collapsed':
-				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-				if collapse:
-					beh['collapsed'][cnd_idx] = 'yes'
+				cnd_idx = np.where(Y_cnd == cnd)[0]
 			else:
 				# reset max_tr again such that analysis is not underpowered
-				max_tr = [self.selectMaxTrials(beh, ['yes'], bdm_labels,'collapsed')]
-				cnd_idx =  np.where(np.sum(
-					[(beh[cnd_header] == c).values for c in cnds], 
-					axis = 0))[0]
-			cnd_labels = beh[self.to_decode][cnd_idx].values
-
-			if bdm_labels != 'all':
-				sub_idx = [i for i,l in enumerate(cnd_labels) if l in bdm_labels]	
-				cnd_idx = cnd_idx[sub_idx]
-				cnd_labels = cnd_labels[sub_idx]
-
+				max_tr = [self.selectMaxTrials(Y_label, np.ones(Y_label.size), N = self.nr_folds)]
+				cnd_idx = np.arange(Y_label.size)
+			
+			# select labels of interest
+			cnd_labels = Y_label[cnd_idx]
 			labels = np.unique(cnd_labels)
 			print ('\nYou are decoding {}. The nr of trials used for folding is set to {}'.format(cnd, max_tr[0]))
 			
@@ -226,15 +262,11 @@ class BDM(FolderStructure):
 
 					# select train and test trials
 					train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info)
-					Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)
-					# TRIAL AVERAGING NEEDS UPDATING
-					#self.trial_avg = 3
-					#if self.trial_avg > 1:
-					#	Xtr, Ytr = self.averageTrials(Xtr, Ytr, 2)
-					#	Xte, Yte = self.averageTrials(Xte, Yte, 2)
+					Xtr, Xte, Ytr, Yte = self.trainTestSelect(Y_label, X, train_tr, test_tr)
+				
 					# do actual classification
-					#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
 					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
+					embed()
 					if i == 0:
 						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'bdm_info': bdm_info})
 					else:
@@ -308,6 +340,12 @@ class BDM(FolderStructure):
 			Yte = te_beh[te_header][test_mask].values.reshape(1,-1)
 			Xte = te_eegs[test_mask,:,:][np.newaxis, ...]
 	
+			# check whether epochs are averaged before decoding
+			if self.avg:
+				print('Epochs are averaged in subsets of {}'.format(self.avg))
+				Xtr, Ytr = self.averageTrials(Xtr, Ytr, self.avg)
+				Xte, Yte = self.averageTrials(Xte, Yte, self.avg)
+
 			# do actual classification
 			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
 
@@ -385,6 +423,12 @@ class BDM(FolderStructure):
 				# select train and test trials	
 				train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, max_tr, {})
 				Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[tr_header], eegs, train_tr, test_tr)
+
+				# check whether epochs are averaged before decoding
+				if self.avg:
+					print('Epochs are averaged in subsets of {}'.format(self.avg))
+					Xtr, Ytr = self.averageTrials(Xtr, Ytr, self.avg)
+					Xte, Yte = self.averageTrials(Xte, Yte, self.avg)
 	
 			# do actual classification
 			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
@@ -568,7 +612,7 @@ class BDM(FolderStructure):
 		return auc
 
 
-	def selectMaxTrials(self,beh, cnds, bdm_labels = 'all', cnds_header = 'condition'):
+	def selectMaxTrials(self,Y_labels, Y_cnds, N = 10):
 		''' 
 		
 		For each condition the maximum number of trials per decoding label are determined
@@ -577,43 +621,53 @@ class BDM(FolderStructure):
 
 		Arguments
 		- - - - - 
-		beh (dict): contains all logged variables of interest
-		cnds (list): list of conditions for decoding analysis
-		bdm_labels(list|str): which labels will be used for decoding
-		cnds_header (str): variable name containing conditions of interest
+
+		Y_labels(array| list): labels used for decoding
+		Y_(array| list): condition info per label
 
 		Returns
 		- - - -
 		max_trials (int): max number unique labels
 		'''
 
-		# make sure selection is based on corrrect trials
-		if bdm_labels == 'all':
-			bdm_labels = np.unique(beh[self.to_decode]) 
 
-		N = self.nr_folds
 		cnd_min = []
-
-		# trials for decoding
-		if cnds != 'all':
-			for cnd in cnds:
+		# loop over all conditions
+		for cnd in np.unique(Y_cnds):
 		
-				# select condition trials and get their decoding labels
-				trials = np.where(beh[cnds_header] == cnd)[0]
-				labels = [l for l in beh[self.to_decode][trials] if l in bdm_labels]
+			# select condition trials and get their decoding labels
+			idx = np.where(Y_cnds == cnd)[0]
+			cnd_labels = Y_labels[idx]
 
-				# select the minimum number of trials per label for BDM procedure
-				# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
-				min_tr = np.unique(labels, return_counts = True)[1]
-				min_tr = int(np.floor(min(min_tr)/N)*N)	
+			# select the minimum number of trials per label for BDM procedure
+			# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
+			min_tr = np.unique(cnd_labels, return_counts = True)[1]
+			min_tr = int(np.floor(min(min_tr)/N)*N)	
 
-				cnd_min.append(min_tr)
+			cnd_min.append(min_tr)
 
-			max_trials = min(cnd_min)
-		elif cnds == 'all':
-			labels = [l for l in beh[self.to_decode] if l in bdm_labels]
-			min_tr = np.unique(labels, return_counts = True)[1]
-			max_trials = int(np.floor(min(min_tr)/N)*N)	
+		max_trials = min(cnd_min)
+
+		# # trials for decoding
+		# if cnds != 'all':
+		# 	for cnd in cnds:
+		
+		# 		# select condition trials and get their decoding labels
+		# 		trials = np.where(beh[cnds_header] == cnd)[0]
+		# 		labels = [l for l in beh[self.to_decode][trials] if l in bdm_labels]
+
+		# 		# select the minimum number of trials per label for BDM procedure
+		# 		# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
+		# 		min_tr = np.unique(labels, return_counts = True)[1]
+		# 		min_tr = int(np.floor(min(min_tr)/N)*N)	
+
+		# 		cnd_min.append(min_tr)
+
+		# 	max_trials = min(cnd_min)
+		# elif cnds == 'all':
+		# 	labels = [l for l in beh[self.to_decode] if l in bdm_labels]
+		# 	min_tr = np.unique(labels, return_counts = True)[1]
+		# 	max_trials = int(np.floor(min(min_tr)/N)*N)	
 
 		if max_trials == 0:
 			print('At least one condition does not contain sufficient info for current nr of folds')

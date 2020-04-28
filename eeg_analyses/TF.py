@@ -68,6 +68,7 @@ class TF(FolderStructure):
 		eegs = EEG._data[:,picks,:]
 
 		if laplacian:
+			embed()
 			x,y,z = np.vstack([EEG.info['chs'][i]['loc'][:3] for i in picks]).T
 			leg_order = 10 if picks.size <=100 else 12
 			eegs = laplacian_filter(eegs, x, y, z, leg_order = leg_order, smoothing = 1e-5)
@@ -141,7 +142,8 @@ class TF(FolderStructure):
 		
 		return n
 
-	def topoFlip(self, eegs, var, ch_names, left = []):
+	@staticmethod
+	def topoFlip(eegs, var, ch_names, left = []):
 		''' 
 		Flips the topography of trials where the stimuli of interest was presented 
 		on the left (i.e. right hemifield). After running this function it is as if 
@@ -247,7 +249,7 @@ class TF(FolderStructure):
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = flip.keys()[0]
-			eegs = self.topoFlip(eegs, beh[key], ch_names, left = [flip.get(key)])
+			eegs = topoFlip(eegs, beh[key], ch_names, left = [flip.get(key)])
 
 		# get parameters
 		nr_time = eegs.shape[-1]
@@ -325,13 +327,6 @@ class TF(FolderStructure):
 
 			# create distribution of fake differences
 			fake_diff = np.zeros((nr_perm,) + real_diff.shape)
-			#except:
-			#	print('Data of real_diff is averaged to reduce the size of the array of two becuase of memory problems')
-			#	if real_diff.shape[0] % 2 == 1:
-			#		real_diff = real_diff[:-1]
-			#	to_split = np.random.permutation(real_diff.shape[0])%2
-			#	real_diff = np.mean((real_diff[to_split == 0],real_diff[to_split == 1]), axis = 0)
-			#	fake_diff = np.zeros((nr_perm,) + real_diff.shape)
 
 			for p in range(nr_perm):
 			 	# randomly flip ipsi and contra
@@ -398,7 +393,7 @@ class TF(FolderStructure):
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = list(flip.keys())[0]
-			eegs = self.topoFlip(eegs, beh[key], self.EEG.ch_names, left = flip.get(key))
+			eegs = topoFlip(eegs, beh[key], self.EEG.ch_names, left = flip.get(key))
 
 		# get parameters
 		nr_time = eegs.shape[-1]
@@ -419,6 +414,7 @@ class TF(FolderStructure):
 
 		# initiate dicts
 		tf = {'ch_names':ch_names, 'times':times[idx_2_save], 'frex': frex}
+		tf_base = {'ch_names':ch_names, 'times':times[idx_2_save], 'frex': frex}
 		base = {}
 		plot_dict = {}
 
@@ -426,6 +422,7 @@ class TF(FolderStructure):
 		for c, cnd in enumerate(cnds):
 			print(cnd)
 			tf.update({cnd: {}})
+			tf_base.update({cnd: {}})
 			base.update({cnd: np.zeros((num_frex, nr_chan))})
 
 			if cnd != 'all':
@@ -475,15 +472,16 @@ class TF(FolderStructure):
 		# baseline normalization
 		for cnd in cnds:
 			if base_type == 'conspec': #db convert: condition specific baseline
-				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(base[cnd][:,:,np.newaxis],idx_2_save.size,axis = 2))
+				tf_base[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(base[cnd][:,:,np.newaxis],idx_2_save.size,axis = 2))
 			elif base_type == 'conavg':	
 				con_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
-				tf[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
+				tf_base[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
 			elif base_type == 'Z':
 				print('For permutation procedure it is assumed that it is as if all stimuli of interest are presented right')
-				tf[cnd]['Z_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
-				tf.update(dict(z_info = z_info))
-			tf[cnd]['base_power'] = np.mean(tf[cnd]['base_power'], axis = 0)
+				tf_base[cnd]['Z_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
+				tf_base.update(dict(z_info = z_info))
+			if base_type in ['conspec','conavg']:
+				tf[cnd]['base_power'] = np.mean(tf[cnd]['base_power'], axis = 0)
 
 			# power values can now safely be averaged
 			tf[cnd]['power'] = np.mean(tf[cnd]['power'], axis = 0)
@@ -491,6 +489,9 @@ class TF(FolderStructure):
 		# save TF matrices
 		with open(self.FolderTracker(['tf',method,tf_name],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
 			pickle.dump(tf, handle)		
+
+		with open(self.FolderTracker(['tf',method,tf_name],'{}-tf_base.pickle'.format(sj)) ,'wb') as handle:
+			pickle.dump(tf_base, handle)	
 	
 	def createMorlet(self, min_freq, max_freq, num_frex, cycle_range, freq_scaling, nr_time, s_freq):
 		''' 

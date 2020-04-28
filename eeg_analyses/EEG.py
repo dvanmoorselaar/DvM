@@ -247,6 +247,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
         logging.info('{} trials will be removed from beh file'.format(nr_miss))
+
         while nr_miss > 0:
             stop = True
             # continue to remove beh trials until data files are lined up

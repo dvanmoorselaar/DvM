@@ -23,7 +23,7 @@ def contraIpsiPlotter(contra_X, ipsi_X, times, labels, colors, sig_mask = False,
 	sns.despine(offset=10, trim = False)
 
 
-def plotTimeCourse(times, X, color = 'blue', label = None, mask = False, mask_p_val = 0.05, errorbar = False):
+def plotTimeCourse(times, X, color = 'blue', label = None, mask = False, mask_p_val = 0.05, paired = False, errorbar = False):
 	'''
 
 	'''
@@ -45,13 +45,13 @@ def plotTimeCourse(times, X, color = 'blue', label = None, mask = False, mask_p_
 		plt.plot(times, x, label = label, color = color)
 
 
-def plotSignificanceBars(X1, X2, times, y, color, p_val = 0.05, show_descriptives = False, lw = 2, ls = '-'):
+def plotSignificanceBars(X1, X2, times, y, color, p_val = 0.05, paired = True, show_descriptives = False, lw = 2, ls = '-'):
 	'''
 
 	'''
 
 	# find significance mask
-	mask = clusterMask(X1, X2, p_val)
+	mask = clusterMask(X1, X2, p_val, paired = paired)
 	y_sig = np.ma.masked_where(~mask, np.ones(mask.size) * y)
 	plt.plot(times, y_sig, color = color, ls = ls, lw = lw)
 	if show_descriptives:

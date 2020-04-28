@@ -2,15 +2,15 @@ import matplotlib          # run these lines only when running sript via ssh con
 matplotlib.use('agg')
 
 import sys
-sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM')
+sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
 
 import seaborn as sns
 
 from IPython import embed
 from beh_analyses.PreProcessing import *
-from eeg_analyses.EEG import * 
-from eeg_analyses.ERP import * 
-from eeg_analyses.BDM import * 
+#from eeg_analyses.EEG import * 
+#from eeg_analyses.ERP import * 
+#from eeg_analyses.BDM import * 
 from eeg_analyses.TF import * 
 from support.FolderStructure import *
 from support.support import *
@@ -66,9 +66,7 @@ flt_pad = 0.5
 eeg_runs = [1]
 binary = 3840
 
-# set general plotting parameters
-sns.set(font_scale=2.5)
-sns.set_style('ticks', {'xtick.major.size': 10, 'ytick.major.size': 10})
+
 
 class WholevsPartial(FolderStructure):
 
@@ -553,7 +551,7 @@ class WholevsPartial(FolderStructure):
 		files = glob.glob(self.FolderTracker(['bdm','cue_loc'], filename = 'class_*_perm-False-broad.pickle'))
 		bdm = []
 		for file in files:
-			print file
+			print(file)
 			with open(file ,'rb') as handle:
 				bdm.append(pickle.load(handle))
 
@@ -613,7 +611,7 @@ if __name__ == '__main__':
 	# eye analysis
 	#PO.anticipatoryEye(sj_info,  nr_bins = 40, start = -500, end = 850)
 
-	for sj in [23]:
+	for sj in range(1,25):
 		pass
 		
 		# PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
@@ -648,8 +646,16 @@ if __name__ == '__main__':
 		# 		  time_period = (0,0.85), method = 'wavelet', flip = dict(cue_loc = '1'), downsample = 4)
 
 	
+		# read in preprocessed data
+		beh, eeg = PO.loadData(sj, True, (-0.2,0.85),'HEOG', 1,
+				 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = True)
+		# do TF analysis
+		tf = TF(beh, eeg, laplacian=False)
+		tf.TFanalysis(sj, cnds = ['partial','whole'], cnd_header = 'block_type', base_period = (-0.2,0), base_type = 'conspec',
+		 			time_period = (-0.2,0.85), tf_name = 'cue_power', elec_oi = 'all', method = 'wavelet', flip = dict(cue_loc = ['1']), factor = dict(cue_loc = ['None','0']))
+
 	#PO.behExp1() 
-	PO.plotCDA()
+	#PO.plotCDA()
 	#PO.bdmBlock()
 	#PO.bdmCue()
 	#PO.plotTF()

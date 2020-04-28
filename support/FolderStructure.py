@@ -80,7 +80,7 @@ class FolderStructure(object):
 		# read in processed behavior from pickle file
 		if beh_file:
 			beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
-								filename = 'subject-{}_all.pickle'.format(sj)),'rb'))
+								filename = 'subject-{}_all.pickle'.format(sj)),'rb'), encoding='latin1')
 			beh = pd.DataFrame.from_dict(beh)
 		else:
 			beh = pd.DataFrame({'condition': eeg.events[:,2].byteswap().newbyteorder()})	

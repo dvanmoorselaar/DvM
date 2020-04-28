@@ -597,6 +597,23 @@ class DT_sim(FolderStructure):
 
 		embed()
 
+	def primingBeh(self, beh):
+		'''
+
+		'''
+
+		priming =[0] 
+		for i in range(1, beh.shape[0]): 
+			if beh['dist_loc'][i] == beh['dist_loc'][i - 1] \
+			and beh['dist_loc'][i] == str(beh['high_loc'][i]): 
+				priming.append(1) 
+			else: 
+				priming.append(0) 
+
+		beh['high_loc_priming'] = priming
+
+		return beh
+
 if __name__ == '__main__':
 
 	os.environ['MKL_NUM_THREADS'] = '5' 
@@ -639,7 +656,7 @@ if __name__ == '__main__':
 	#PO.countEyeEpochs(np.arange(1,25))
 
 	# # run preprocessing
-	for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]:
+	for sj in range(1,25):
 		print('starting subject {}'.format(sj))
 
 		#for session in [2]:
@@ -654,47 +671,92 @@ if __name__ == '__main__':
 
 		# # # ERP analysis (distractor tuned)
 		# erp = ERP(eeg, beh, 'dist_loc', (-.45,-0.25))
-		# erp.selectERPData(time = [-.45, 0.6], l_filter = 30, excl_factor = None)
-		# erp.topoFlip(left = [2], header = 'high_loc')
+		# erp.selectERPData(time = [-.45, 0.55], l_filter = 30, excl_factor = dict(dist_loc = ['None']))
+		# erp.topoFlip(left = [2], header = 'high_loc') # flip as if high probability location is always on the right
 		# erp.ipsiContra(sj = sj, left = ['2'], right = ['4'], l_elec = ['PO7','PO3','O1'], conditions = 'all', cnd_header = 'condition',
   #                      r_elec = ['PO8','PO4','O2'], midline = {'target_loc': [0,3]}, erp_name = 'dist_place', RT_split = True, permute = 1000)
 
 		# # # target tuned (distractor on midline or absent)
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
 		# erp = ERP(eeg, beh, 'target_loc', (-.45,-0.25))
-		# erp.selectERPData(time = [-.45, 0.6], l_filter = 30, excl_factor = None) 
-		# erp.topoFlip(left = [2], header = 'high_loc') # flipping not necessary
+		# erp.selectERPData(time = [-.45, 0.55], l_filter = 30, excl_factor = None) 
+		# erp.topoFlip(left = [2], header = 'high_loc') # flip as if high probability location is always on the right
 		# erp.ipsiContra(sj = sj, left = [2], right = [4], l_elec = ['PO7','PO3','O1'], conditions ='all', cnd_header = 'target_info',
-  #                      r_elec = ['PO8','PO 4','O2'], midline = {'dist_loc': ['0','3','None']}, erp_name = 'target_place', RT_split = True, permute = 1000)
+  #                      r_elec = ['PO8','PO4','O2'], midline = {'dist_loc': ['0','3','None']}, erp_name = 'target_place', RT_split = True, permute = 1000)
+
+
+		# # # high probability tuned (early Pd)
+		#beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# erp = ERP(eeg, beh, 'high_loc', (-.45,-0.25))
+		# erp.selectERPData(time = [-.45, 0], l_filter = 30, excl_factor = None) 
+		# erp.topoFlip(left = [2], header = 'high_loc') # flip as if high probability location is always on the right
+		# erp.ipsiContra(sj = sj, left = [], right = [2,4], l_elec = ['PO7','PO3','O1'], conditions ='all', cnd_header = 'block_type',
+  #                      r_elec = ['PO8','PO4','O2'], midline = None, erp_name = 'early_pd', RT_split = False)
+
+		# # # # high probability tuned (control for priming)
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# beh = PO.primingBeh(beh)
+		# erp = ERP(eeg, beh, 'high_loc', (-.45,-0.25))
+		# erp.selectERPData(time = [-.45, 0], l_filter = 30, excl_factor = None) 
+		# erp.topoFlip(left = [2], header = 'high_loc') # flip as if high probability location is always on the right
+		# erp.ipsiContra(sj = sj, left = [], right = [2,4], l_elec = ['PO7','PO3','O1'], conditions ='all', cnd_header = 'block_type',
+  #                      r_elec = ['PO8','PO4','O2'], midline = {'high_loc_priming': [0]}, erp_name = 'early_pd_nopriming', RT_split = False)		
+
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# beh = PO.primingBeh(beh)
+		# erp = ERP(eeg, beh, 'high_loc', (-.45,-0.25))
+		# erp.selectERPData(time = [-.45, 0], l_filter = 30, excl_factor = None) 
+		# erp.topoFlip(left = [2], header = 'high_loc') # flip as if high probability location is always on the right
+		# erp.ipsiContra(sj = sj, left = [], right = [2,4], l_elec = ['PO7','PO3','O1'], conditions ='all', cnd_header = 'block_type',
+  #                      r_elec = ['PO8','PO4','O2'], midline = {'high_loc_priming': [1]}, erp_name = 'early_pd_priming', RT_split = False)
 
 		# BDM analysis 
 		beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
 		# feature decoding distractor irrespective of location / no distractor absent trials
 		bdm = BDM(beh, eeg, to_decode = 'dist_type', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
 		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-		 			excl_factor = dict(dist_loc = ['None']), gat_matrix = False)
+		   			excl_factor = dict(dist_loc = ['None']), gat_matrix = False)
 
 		# feature decoding target irrespective of location / no distractor absent trials
-		bdm = BDM(beh, eeg, to_decode= 'target_type', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
-		bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-					excl_factor = None, gat_matrix = False)
+		#bdm = BDM(beh, eeg, to_decode= 'target_type', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
+		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		#			excl_factor = None, gat_matrix = False)
 		
+
 		# # # read in data again for cross-task decoding
 		beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
-		bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55) )
-		bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-		 				tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
-		 				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = False, bdm_name = 'dist-target')
+		bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55), avg = 3)
+		bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type',
+						time = (-0.75, 0.55), tr_header = 'target_type', te_header = 'target_type', tr_te_rel = 'ind', 
+						excl_factor = None, tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor =dict(dist_loc = ['None']), 
+						bdm_name = 'target_target_avg')
 
 		beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
-		bdm = BDM(beh, eeg, to_decode = 'dist_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55) )
-		bdm.crossClassify(sj, cnds = [('DTdisDP','DTdisP')], cnd_header = 'block_type', time = (-0.75, 0.55), excl_factor = dict(dist_loc = ['None']),
-		  				tr_factor = dict(block_type = ['DTdisDP']), te_factor = dict(block_type = ['DTdisP']),
-		  				tr_header = 'dist_type', te_header = 'dist_type', gat_matrix = False, bdm_name = 'dist-dist')
+		bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55), avg = 3)
+		bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type',
+						time = (-0.75, 0.55), tr_header = 'dist_type', te_header = 'target_type', tr_te_rel = 'ind', 
+						excl_factor = None, tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor =dict(dist_loc = ['None']), 
+						bdm_name = 'dist_target_avg')
 
-		bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc', downsample = 128, baseline = (-0.75, -0.55))
-		bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-						tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
-		 				tr_header = 'target_type', te_header = 'target_type', gat_matrix = False, bdm_name = 'target-target')
+		# # # read in data again for cross-task decoding
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55), avg = 3)
+		# bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		#  				tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
+		#  				tr_header = 'dist_type', te_header = 'target_type', gat_matrix = False, bdm_name = 'dist-target_avg')
+
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# bdm = BDM(beh, eeg, to_decode = 'dist_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55), avg = 3)
+		# bdm.crossClassify(sj, cnds = [('DTdisDP','DTdisP')], cnd_header = 'block_type', time = (-0.75, 0.55), excl_factor = dict(dist_loc = ['None']),
+		#   				tr_factor = dict(block_type = ['DTdisDP']), te_factor = dict(block_type = ['DTdisP']),
+		#   				tr_header = 'dist_type', te_header = 'dist_type', gat_matrix = False, bdm_name = 'dist-dist_avg')
+
+
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc', downsample = 128, baseline = (-0.75, -0.55))
+		# bdm.crossClassify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 				tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor = dict(dist_loc = ['None']),
+		#  				tr_header = 'target_type', te_header = 'target_type', gat_matrix = False, bdm_name = 'target-target')
 
 
 		#bdm = BDM(beh, eeg, decoding = 'target_type', nr_folds = 10, elec_oi = 'all', downsample = 128)
@@ -757,10 +819,12 @@ if __name__ == '__main__':
 		#			bdm_labels = ['0','1','2','3','4','5'], time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)
 
 		# TF analysis (first analyse anticipatory; collapsed across all trials)
-		#tf = TF(beh, eeg, laplacian = True)
+		#tf = TF(beh, eeg, laplacian = False)
 		#tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 	
-		# 		  	cnd_header ='block_type', elec_oi = 'all', base_period = None, 
-		# 			base_type = 'Z', time_period = (-0.6,0), min_freq = 1, method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
+		# 		  	cnd_header ='block_type', elec_oi = 'all', base_type = 'Z', min_freq = 1,
+		# 		  	time_period = (-0.75,0), base_period = None, method = 'wavelet',flip = dict(high_loc = [2]), 
+		# 		  	tf_name = 'no_lapl_1-40', downsample = 4)
+
 		
 		# analyse reactive only for bottom left and right distractors
 		#tf = TF(beh, eeg, laplacian = True)
@@ -769,12 +833,13 @@ if __name__ == '__main__':
 		# 			base_type = 'Z', time_period = (0,0.55), min_freq = 1,factor = dict(dist_loc = ['0','3','None'], target_loc = [1,2,4,5]), method = 'wavelet',flip = dict(high_loc = [2]), downsample = 4)
 
 	#	#TF analysis (proactive)
-		# tf = TF(beh, eeg, laplacian = True)
-		# tf.TFanalysis(sj = sj, cnds = ['DTdisDP', 'DTdisP', 'DTsim'], 
-		# 		  cnd_header ='block_type', base_period = None, 
-		# 		  time_period = (-0.6,0.5), min_freq = 1, max_freq = 40,
-		# 		  elec_oi = ['PO7','PO3','O1','PO8','PO4','O2'], 
-		# 		  base_type = 'Z', method = 'wavelet', flip = dict(high_loc = [2]), downsample = 4)
+		#beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		#tf = TF(beh, eeg, laplacian = False)
+		#tf.TFanalysis(sj = sj, cnds = ['DTdisDP', 'DTdisP', 'DTsim'], 
+		#		  cnd_header ='block_type', base_period = None, 
+		#		  time_period = (-0.75,0), min_freq = 1, max_freq = 40,
+		#		  elec_oi = 'all', base_type = 'Z', method = 'wavelet', 
+		#		  flip = dict(high_loc = [2]), downsample = 4, tf_name = 'no_lapl')
 
 
 	#	#TF analysis (reactive)
