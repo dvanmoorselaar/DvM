@@ -201,6 +201,9 @@ class BDM(FolderStructure):
 		
 		eegs = eegs[idx]
 		beh = beh[beh.index.isin(idx)]
+		#check_idx = lambda a, b: True if a in b else False
+		#beh_mask = np.array([check_idx(x, idx) for x in beh.index.values]) #hack to prevent big endian buffer error
+		#beh = beh[beh_mask]
 		
 		# average data (if specified)
 		if self.avg:

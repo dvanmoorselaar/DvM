@@ -83,7 +83,7 @@ class FolderStructure(object):
 								filename = 'subject-{}_all.pickle'.format(sj)),'rb'), encoding='latin1')
 			beh = pd.DataFrame.from_dict(beh)
 		else:
-			beh = pd.DataFrame({'condition': eeg.events[:,2].byteswap().newbyteorder()})	
+			beh = pd.DataFrame({'condition': eeg.events[:,2]})	
 
 		if eyefilter:
 			beh, eeg = filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh, eye_dict, use_tracker)
