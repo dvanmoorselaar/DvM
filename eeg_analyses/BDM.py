@@ -4,6 +4,7 @@ import pickle
 import random
 import copy
 import itertools
+import math
 #import matplotlib
 #matplotlib.use('agg') # now it works via ssh connection
 
@@ -19,6 +20,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
+from sklearn.decomposition import PCA
 from support.support import select_electrodes, trial_exclusion
 from scipy.stats import rankdata
 
@@ -28,7 +30,8 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None, avg = 0):
+	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None, 
+				sliding_window = 0, avg = 0, use_pca = 0):
 		''' 
 
 		Arguments
@@ -47,6 +50,8 @@ class BDM(FolderStructure):
 		bdm_filter ():
 		baseline ():
 		avg (int): Specifies number of trials to average over before running decoding
+		sliding_window (int): Size of the sliding window. By default do not use a sliding window approach 
+		use_pca (int): 
 
 		Returns
 		- - - -
@@ -63,6 +68,8 @@ class BDM(FolderStructure):
 		self.bdm_filter = bdm_filter
 		self.method = method
 		self.avg = avg
+		self.slide_wind = sliding_window
+		self.use_pca = use_pca
 		if bdm_filter != None:
 			self.bdm_type = bdm_filter.keys()[0]
 			self.bdm_band = bdm_filter[self.bdm_type]
@@ -159,6 +166,35 @@ class BDM(FolderStructure):
 
 		return x_, np.array(y_label), np.array(y_cnd)
 
+	def reshapeSlidingWindow(self, X):
+		'''
+
+		Sliding window approach that concatenates EEG patterns across timepoints into a sigle vector, in effect increasing the amount of features in the 
+		decoding analysis by a factor of the specified window size. 
+
+		Arguments
+		- - - - - 
+
+		X (ndarray): epochs by channels by time
+
+		Returns
+		- - - - - 
+
+		X (ndarray): demeaned EEG data (epochs by features)	
+
+		'''
+
+		# demean features within the sliding window
+		X_demeaned = np.zeros(X.shape) * np.nan
+		for i in range(X.shape[-1]):
+			X_demeaned[:,:,i] = X[:,:,i] - X.mean(axis = 2)
+
+		# reshape int trials by features* times
+		X = X_demeaned.reshape(X.shape[0], -1)
+
+		return X
+
+
 	def Classify(self,sj, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
 
@@ -191,7 +227,7 @@ class BDM(FolderStructure):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)	
+		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)
 
 		# reduce to data of interest (based on condition and label info)
 		idx = np.hstack([np.where(beh[cnd_header] == cnd)[0] for cnd in cnds])
@@ -220,6 +256,7 @@ class BDM(FolderStructure):
 
 		# create dictionary to save classification accuracy
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
+		tuning_curves = {}
 
 		# check whether decoding should also be done collapsed across conditions
 		if collapse:
@@ -246,11 +283,11 @@ class BDM(FolderStructure):
 			
 			# initiate decoding array
 			if gat_matrix:
-				class_acc = np.empty((nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
-				label_info = np.empty((nr_perm, eegs.shape[2], eegs.shape[2], labels.size)) * np.nan
+				class_acc = np.empty((nr_perm, eegs.shape[2] - self.slide_wind, eegs.shape[2] - self.slide_wind)) * np.nan
+				t_curves = np.empty((nr_perm, eegs.shape[2] - self.slide_wind, eegs.shape[2] - self.slide_wind, labels.size)) * np.nan
 			else:	
-				class_acc = np.empty((nr_perm, eegs.shape[2])) * np.nan	
-				label_info = np.empty((nr_perm, eegs.shape[2], labels.size)) * np.nan
+				class_acc = np.empty((nr_perm, eegs.shape[2] - self.slide_wind)) * np.nan	
+				t_curves = np.empty((nr_perm, labels.size, eegs.shape[2]- self.slide_wind)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -268,10 +305,11 @@ class BDM(FolderStructure):
 					Xtr, Xte, Ytr, Yte = self.trainTestSelect(Y_label, X, train_tr, test_tr)
 				
 					# do actual classification
-					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
-					embed()
+					class_acc[p], t_curves[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
+
 					if i == 0:
 						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'bdm_info': bdm_info})
+						tuning_curves.update({cnd:t_curves})
 					else:
 						classification[cnd]['{}-nrlabels'.format(n)] = copy.copy(class_acc[0])
 								
@@ -282,6 +320,9 @@ class BDM(FolderStructure):
 		if save: 
 			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
+
+			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode], filename = 'curves_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+				pickle.dump(tuning_curves, handle)	
 		else:
 			return classification	
 
@@ -368,7 +409,7 @@ class BDM(FolderStructure):
 		'''
 
 		# read in data 
-		print ('NR OF TRAIN LABELS DIFFER PER CONDITION!!!!')
+		print ('NR OF TRAIN LABELS DIFFER PER CONDITION in DEPENDENT DATA ANALYSIS!!!!')
 		print ('DOES NOT YET CONTAIN FACTOR SELECTION FOR DEPENDENT DATA')
 
 		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)		
@@ -385,6 +426,7 @@ class BDM(FolderStructure):
 			tr_eegs = eegs[tr_mask[0]]
 			tr_beh = beh.drop(np.where(~tr_mask[0])[0])
 			tr_beh.reset_index(inplace = True, drop = True)
+			max_tr = self.selectMaxTrials(tr_beh[tr_header], tr_beh[cnd_header], N = 1)
 			
 			te_mask = [(beh[key] == f).values for  key in te_factor.keys() for f in te_factor[key]]
 			for m in te_mask: 
@@ -401,6 +443,7 @@ class BDM(FolderStructure):
 	
 		# loop over conditions
 		for cnd in cnds:
+			print(cnd)
 			if type(cnd) == tuple:
 				tr_cnd, te_cnd = cnd
 			else:
@@ -408,9 +451,12 @@ class BDM(FolderStructure):
 
 			#print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(tr_beh[self.decoding], return_counts = True)))
 			if tr_te_rel == 'ind':
-				tr_mask = (tr_beh[cnd_header] == tr_cnd).values
-				Ytr = tr_beh[tr_header][tr_mask].values.reshape(1,-1)
-				Xtr = tr_eegs[tr_mask,:,:][np.newaxis, ...]
+				tr_mask = (tr_beh[cnd_header] == tr_cnd)
+				tr_idx = np.hstack([np.random.choice(np.where(tr_mask * (tr_beh[tr_header] == label))[0],
+							max_tr, replace = False) for label in np.unique(tr_beh[tr_header])])
+
+				Ytr = tr_beh[tr_header][tr_idx].values.reshape(1,-1)
+				Xtr = tr_eegs[tr_idx,:,:][np.newaxis, ...]
 
 				te_mask = (te_beh[cnd_header] == te_cnd).values
 				Yte = te_beh[te_header][te_mask].values.reshape(1,-1)
@@ -437,6 +483,7 @@ class BDM(FolderStructure):
 			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
 	
 			classification.update({tr_cnd:{'standard': copy.copy(class_acc)}})
+
 		# store classification dict	
 		if save: 
 			with open(self.FolderTracker(['bdm', self.elec_oi, 'cross', bdm_name], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
@@ -472,50 +519,78 @@ class BDM(FolderStructure):
 		N = self.nr_folds
 		nr_elec, nr_time = Xtr.shape[-2], Xtr.shape[-1]
 		if gat_matrix:
-			nr_test_time = nr_time
+			nr_test_time, end_te_time, nr_te_output  = nr_time, nr_time, nr_time - self.slide_wind
 		else:
-			nr_test_time = 1	
+			nr_test_time, end_te_time, nr_te_output = 1, self.slide_wind + 1, 1	
 
 		# initiate linear classifier
 		lda = LinearDiscriminantAnalysis()
 
 		# inititate decoding arrays
-		class_acc = np.zeros((N,nr_time, nr_test_time))
-		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
+		class_acc = np.zeros((N,nr_time - self.slide_wind, nr_te_output))
+		single_tr_evidence = np.zeros((np.prod(Yte.shape),labels.size, nr_time - self.slide_wind)) * np.nan # not used for GAT analysis
+		#label_info = np.zeros((N, nr_time, nr_test_time, nr_labels)) # NEEDS TO BE ADJUSTED
 
 		for n in range(N):
 			print('\r Fold {} out of {} folds'.format(n + 1,N),end='')
 			Ytr_ = Ytr[n]
 			Yte_ = Yte[n]
-			
-			for tr_t in range(nr_time):
-				for te_t in range(nr_test_time):
+			idx_tr = 0
+			for tr_t in range(self.slide_wind, nr_time):
+				idx_te = 0
+				for te_t in range(self.slide_wind, end_te_time): 
 					if not gat_matrix:
 						te_t = tr_t
 
-					Xtr_ = Xtr[n,:,:,tr_t]
-					Xte_ = Xte[n,:,:,te_t]
+					if self.slide_wind:
+						Xtr_ = self.reshapeSlidingWindow(Xtr[n,:,:,tr_t-self.slide_wind:tr_t])
+						Xte_ = self.reshapeSlidingWindow(Xte[n,:,:,te_t-self.slide_wind:te_t])
+					else:
+						Xtr_ = Xtr[n,:,:,tr_t]
+						Xte_ = Xte[n,:,:,te_t]
+
+
+					if self.use_pca:
+						pca = PCA(n_components = 0.95)
+						X = pca.fit_transform(np.vstack((Xtr_, Xte_)))
+						Xtr_ = X[:Xtr_.shape[0]]
+						Xte_ = X[Xtr_.shape[0]:]
+
+					# standardisation
+					scaler = StandardScaler().fit(Xtr_)	
+					Xtr_ = scaler.transform(Xtr_)
+					Xte_ = scaler.transform(Xte_)
 
 					# train model and predict
 					lda.fit(Xtr_,Ytr_)
-					scores = lda.predict_proba(Xte_) # get posteriar probability estimates
+					scores = lda.predict_proba(Xte_) # get posterior probability estimates
+					single_tr_evidence[n*Yte.shape[1]:n*Yte.shape[1]+Yte.shape[1],:,idx_tr] = scores
 					predict = lda.predict(Xte_)
 					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) # 
 
 					if not gat_matrix:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
-						label_info[n, tr_t, :] = [sum(predict == l) for l in labels]
-						class_acc[n,tr_t,:] = class_perf # 
+						#label_info[n, idx_tr, :] = [sum(predict == l) for l in labels]
+						class_acc[n,idx_tr,:] = class_perf # 
 
 					else:
 						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
-						label_info[n, tr_t, te_t] = [sum(predict == l) for l in labels]	
-						class_acc[n,tr_t, te_t] = class_perf
+						#label_info[n, idx_tr, idx_te] = [sum(predict == l) for l in labels]	
+						class_acc[n,idx_tr, idx_te] = class_perf
 
+					# update idx
+					idx_te += 1
+
+				# update idx
+				idx_tr += 1
+
+		# create tuning curve
+		t_curves = self.createTuningCurve(single_tr_evidence, labels, np.hstack(Yte))
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
-		label_info = np.squeeze(np.mean(label_info, axis = 0))
+		#label_info = np.squeeze(np.mean(label_info, axis = 0))
 
-		return class_acc, label_info
+		return class_acc, t_curves
+
 
 	def computeClassPerf(self, scores, true_labels, label_order, predict):
 		'''
@@ -772,6 +847,26 @@ class BDM(FolderStructure):
 				test_tr[i,j,:] = np.sort(bdm_info[key][idx_test])
 
 		return train_tr, test_tr, bdm_info	
+
+
+	def createTuningCurve(self, scores, labels, y):	
+
+
+
+		if y.dtype != 'int64':
+			y = np.array([list(labels).index(ch) for ch in y]) 
+		
+		# for each sample shift the to be predicted class to the center
+		t_curves = np.zeros((labels.size, scores.shape[-1]))
+		r, c, _ = scores.shape 
+		for s in range(scores.shape[2]):
+			matrix = scores[:,:,s] 
+			matrix_shift = np.zeros((r,c))
+			for row in range(0,r):
+				matrix_shift[row,:] = np.roll(matrix[row,:],round(labels.size/2)-y[row])
+			t_curves[:,s] = matrix_shift.mean(axis = 0)
+
+		return t_curves
 
 
 	def linearClassification(self, X, train_tr, test_tr, max_tr, labels, gat_matrix = False):

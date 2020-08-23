@@ -5,6 +5,7 @@ Copyright (c) 2014 DvM. All rights reserved.
 
 import os
 import ast
+import glob
 
 import numpy as np
 import pandas as pd
@@ -60,9 +61,9 @@ class PreProcessing(object):
 			os.makedirs (os.path.join(self.project_folder,'analysis'))
 			os.makedirs (os.path.join(self.project_folder,'analysis','figs'))
 
-	def combine_single_subject_files(self, save = False):
+	def combine_single_subject_files(self,  ext = '.csv', save = False):
 		"""
-		Combines all csv files into a single xlsx file. The resulting xlsx file has a single header row and contains experiment data from all participants
+		Combines all data files into a single xlsx file. The resulting xlsx file has a single header row and contains experiment data from all participants
 		
 		Arguments
 		- - - - - 
@@ -72,19 +73,20 @@ class PreProcessing(object):
 
 		# I want a statement here that raises an error when the raw and analysis folder do not exist in the project folder
 
-		# get all csv files from raw data folder (make sure only csv files are selected)
-		filenames = os.listdir(os.path.join(self.project_folder,'raw'))
-		subject_files = [filename for filename in filenames if filename.endswith('.csv')]
-	
+		# get all data files from raw data folder 
+		subject_files = glob.glob(os.path.join(self.project_folder,'raw','*{}'.format(ext)))
+
 		# read csv file into dataframe
 		raw_data_comb = []
-		for subject in subject_files:
-			print(subject)
+		for file in subject_files:
+			print(file)
 			try:
-				csv_file = os.path.join(self.project_folder,'raw',subject)
-				raw_data = pd.read_csv(csv_file)
+				if ext == '.csv':
+					raw_data = pd.read_csv(file)
+				elif ext == '.xlsx':
+					raw_data = pd.read_excel(file)	
 			except:
-				print(csv_file)	
+				print('Crash?????',file)	
 			raw_data_comb.append(raw_data)
 		
 		raw_data_comb = pd.concat(raw_data_comb,ignore_index = True)
@@ -124,7 +126,7 @@ class PreProcessing(object):
 		except:
 			print('??')
 
-		# store or save data	
+		# store or save data
 		if save:
 			print('saving selected data')
 			data_comb.to_excel(os.path.join(self.project_folder,'analysis','data_combined.xlsx'), sheet_name ='data_combined')		
@@ -193,6 +195,7 @@ class PreProcessing(object):
 					#for index in current_data.index:
 					#	if (work_data.ix[index,filt] >= current_data[filt].mean() - 2.5 * current_data[filt].std()) and (work_data.ix[index,filt] <= current_data[filt].mean() + 2.5 * current_data[filt].std()):
 					#		work_data.ix[index,'{}_filter'.format(filt)] = True
+
 
 		# store or save data					
 		if save:

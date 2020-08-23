@@ -43,7 +43,7 @@ class ERP(FolderStructure):
 		self.flipped = False
 
 
-	def selectERPData(self, time, l_filter = False, excl_factor = None):
+	def selectERPData(self, time, l_filter = None, h_filter = None, excl_factor = None):
 		''' 
 
 		THIS NEEDS TO BE ADJUSTED FOR TIMINGS
@@ -56,7 +56,7 @@ class ERP(FolderStructure):
 		- - - -
 
 		'''
-
+ 
 		beh = self.beh
 		EEG = self.eeg
 
@@ -65,8 +65,8 @@ class ERP(FolderStructure):
 			beh, EEG = trial_exclusion(beh, EEG, excl_factor)
 
 		# read in eeg data 
-		if l_filter:
-			EEG.filter(l_freq = None, h_freq = l_filter)
+		if l_filter != None or h_filter != None:
+			EEG.filter(l_freq = l_filter, h_freq = h_filter)
 	
 		# select time window and EEG electrodes
 		EEG = EEG.crop(tmin = time[0],tmax = time[1])    

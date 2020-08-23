@@ -34,6 +34,7 @@ from mne.filter import filter_data
 from mne.preprocessing import ICA
 from mne.preprocessing import create_eog_epochs, create_ecg_epochs
 from math import ceil, floor
+from autoreject import Ransac
 
 
 class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
@@ -153,8 +154,6 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         # drop channels and get montage
         self.drop_channels(ch_remove)
 
-        montage = mne.channels.read_montage(kind=montage)
-
         # create mapping dictionary
         idx = 0
         ch_mapping = {}
@@ -166,7 +165,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
                     idx += 1
 
         self.rename_channels(ch_mapping)
-        self.set_montage(montage)
+        self.set_montage(montage=montage)
 
         print('Channels renamed to 10-20 system, and montage added')
         logging.info('Channels renamed to 10-20 system, and montage added')
@@ -230,7 +229,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         if 'practice' in headers:
             beh = beh[beh['practice'] == 'no']
             beh = beh.drop(['practice'], axis=1)
-        beh_triggers = beh['trigger'].values    
+        beh_triggers = beh['trigger'].values  
 
         # get triggers bdf file
         if type(event_id) == dict:
@@ -247,6 +246,10 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
         logging.info('{} trials will be removed from beh file'.format(nr_miss))
+
+        # check whether trial info is present in beh file
+        if nr_miss > 0 and 'nr_trials' not in beh.columns:
+            raise ValueError('Behavior file does not contain a column with trial info named nr_trials. Please adjust')
 
         while nr_miss > 0:
             stop = True
@@ -265,6 +268,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
                  
             # check whether there are missing trials at end of beh file        
             if beh_triggers.size > bdf_triggers.size and stop:
+
                 # drop the last items from the beh file
                 missing_trials = np.hstack((missing_trials, beh['nr_trials'].iloc[-nr_miss:].values))
                 beh.drop(beh.index[-nr_miss], inplace=True)
@@ -309,7 +313,27 @@ class Epochs(mne.Epochs, FolderStructure):
         self.nr_events = len(self)
         logging.info('{} epochs created'.format(len(self)))
 
-    def selectBadChannels(self, channel_plots=True, inspect=True, n_epochs=10, n_channels=32, RT = None):
+    def applyRansac(self):
+        '''
+        Implements RAndom SAmple Consensus (RANSAC) method to detect bad channels.
+
+        Returns
+        - - - -
+        self.info['bads']: list with all bad channels detected by the RANSAC algorithm
+
+        '''
+        # select channels to display
+        picks = mne.pick_types(self.info, eeg=True, exclude='bads')
+
+        # use Ransac, interpolating bads and append bad channels to self.info['bads']
+        ransac = Ransac(verbose='progressbar', picks=picks, n_jobs=1)
+        epochs_clean = ransac.fit_transform(self)
+        print('The following electrodes are selected as bad by Ransac:')
+        print('\n'.join(ransac.bad_chs_))
+        self.info['bads'] = ransac.bad_chs_
+
+
+    def selectBadChannels(self, run_ransac = True, channel_plots=True, inspect=True, n_epochs=10, n_channels=32, RT = None):
         '''
 
         '''
@@ -348,6 +372,8 @@ class Epochs(mne.Epochs, FolderStructure):
                         'preprocessing', 'subject-{}'.format(self.sj), self.session], filename='psd_topomap.pdf'))
             plt.close()
 
+        if run_ransac:
+            self.applyRansac()
 
         if inspect:
             # display raw eeg with 50mV range

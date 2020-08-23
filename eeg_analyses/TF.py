@@ -249,7 +249,7 @@ class TF(FolderStructure):
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = flip.keys()[0]
-			eegs = topoFlip(eegs, beh[key], ch_names, left = [flip.get(key)])
+			eegs = self.topoFlip(eegs, beh[key], ch_names, left = [flip.get(key)])
 
 		# get parameters
 		nr_time = eegs.shape[-1]
@@ -292,7 +292,7 @@ class TF(FolderStructure):
 		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)
 
-	def permuted_Z(self, raw_power, ch_names, num_frex, nr_time, nr_perm = 1000):
+	def permuted_Z(self, raw_power, ch_names, num_frex, nr_time, nr_perm = 1500):
 
 
 		
@@ -393,7 +393,7 @@ class TF(FolderStructure):
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = list(flip.keys())[0]
-			eegs = topoFlip(eegs, beh[key], self.EEG.ch_names, left = flip.get(key))
+			eegs = self.topoFlip(eegs, beh[key], self.EEG.ch_names, left = flip.get(key))
 
 		# get parameters
 		nr_time = eegs.shape[-1]
@@ -481,7 +481,7 @@ class TF(FolderStructure):
 				tf_base[cnd]['Z_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
 				tf_base.update(dict(z_info = z_info))
 			if base_type in ['conspec','conavg']:
-				tf[cnd]['base_power'] = np.mean(tf[cnd]['base_power'], axis = 0)
+				tf[cnd]['base_power'] = np.mean(tf_base[cnd]['base_power'], axis = 0)
 
 			# power values can now safely be averaged
 			tf[cnd]['power'] = np.mean(tf[cnd]['power'], axis = 0)
