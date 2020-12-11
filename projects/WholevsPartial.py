@@ -1,9 +1,9 @@
-import matplotlib          # run these lines only when running sript via ssh connection
-matplotlib.use('agg')
+#import matplotlib          # run these lines only when running sript via ssh connection
+#matplotlib.use('agg')
 
 import sys
 import logging
-sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
+sys.path.append('/Users/dvm/DvM')
 
 import seaborn as sns
 
@@ -107,7 +107,7 @@ class WholevsPartial(FolderStructure):
 
 		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
 		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
-		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
+		                                  preload=True, eog=eog) for run in eeg_runs])
 
 		#EEG.replaceChannel(sj, session, replace)
 		EEG.reReference(ref_channels=ref, vEOG=eog[
@@ -129,11 +129,12 @@ class WholevsPartial(FolderStructure):
 
 		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
-		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
+		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad, reject_by_annotation = True) 
 
 		# ARTIFACT DETECTION
 		#epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
-		epochs.artifactDetection(inspect=False, run = False)
+		epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
+		#epochs.artifactDetectionOLD(inspect=True, run = True)
 
 		# ICA
 		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
@@ -601,7 +602,7 @@ class WholevsPartial(FolderStructure):
 if __name__ == '__main__':
 	
 	# Specify project parameters
-	project_folder = '/home/dvmoors1/BB/Cue-whole/wholevspartial'
+	project_folder = '/Users/dvm/Desktop/Whole_partial'
 	os.chdir(project_folder)
 	PO =  WholevsPartial()
 

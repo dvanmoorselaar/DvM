@@ -22,6 +22,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib import cm
+from scipy.stats import zscore
 
 from termios import tcflush, TCIFLUSH
 from eeg_analyses.EYE import *
@@ -45,7 +46,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
     def __init__(self, input_fname, montage=None, eog=None, stim_channel=-1,
                 exclude=(), preload=True, verbose=None):
 
-        super(RawBDF, self).__init__(input_fname=input_fname, montage=montage, eog=eog,
+        super(RawBDF, self).__init__(input_fname=input_fname, eog=eog,
                                      stim_channel=stim_channel, preload=preload, verbose=verbose)
 
     def replaceChannel(self, sj, session, replace):
@@ -399,12 +400,16 @@ class Epochs(mne.Epochs, FolderStructure):
         logging.info('{} channels marked as bad: {}'.format(
             len(self.info['bads']), self.info['bads']))
 
-    def artifactDetectionTEST(self, z_thresh=4, band_pass=[110, 140], plot=True, inspect=True):
-        """ Detect artifacts based on FieldTrip's automatic artifact detection. 
+    def artifactDetection(self, z_thresh=4, band_pass=[110, 140], plot=True, inspect=True):
+        """ Detect artifacts> modification of FieldTrip's automatic artifact detection procedure 
+        (https://www.fieldtriptoolbox.org/tutorial/automatic_artifact_rejection/). 
         Artifacts are detected in three steps:
-        1. Filtering the data 
-        2. Z-transforming the filtered data and normalize it over channels
+        1. Filtering the data within specified frequency range
+        2. Z-transforming the filtered data across channels and normalize it over channels
         3. Threshold the accumulated z-score
+
+        Counter to fieldtrip the z_threshold is ajusted based on the noise level within the data
+        Note: all data included for filter padding is now taken into consideration to calculate z values
 
         Afer running this function, Epochs contains information about epeochs marked as bad (self.marked_epochs)
         
@@ -427,24 +432,33 @@ class Epochs(mne.Epochs, FolderStructure):
 
         #filter data and apply Hilbert
         self_copy.filter(band_pass[0], band_pass[1], fir_design='firwin', pad='reflect_limited') 
+        #self_copy.filter(band_pass[0], band_pass[1], method='iir', iir_params=dict(order=6, ftype='butter'))    
         self_copy.apply_hilbert(envelope=True)
-        # no box smoothing applied yet
 
-        # get the data and z_score per epoch
+        # get the data and apply box smoothing
         data = self_copy.get_data()
-        z_score = [zscore(ep, axis = 1) for ep in data]
+        nr_epochs = data.shape[0]
+        for i in range(data.shape[0]):
+            data[i] = self.boxSmoothing(data[i])
 
-        # threshold z-score per epoch (data driven)
-        z_score = np.stack([z.sum(axis = 0)/sqrt(data.shape[1]) for z in z_score])
-        z_score = filter_data(z_score, self.info['sfreq'], None, 4, pad='reflect_limited')
+        # get the data and z_score over electrodes
+        data = data.swapaxes(0,1).reshape(data.shape[1],-1) 
+        z_score = zscore(data, axis = 1) # check whether axis is correct!!!!!!!!!!!
+
+        # normalize z_score
+        z_score = z_score.sum(axis = 0)/sqrt(data.shape[0]) 
+        z_score = filter_data(z_score, self.info['sfreq'], None, 4, pad='reflect_limited') 
+
+        # adjust threshold (data driven)    
+        z_thresh += np.median(z_score) + abs(z_score.min() - np.median(z_score)) 
+        
+        # transform back into epochs
+        z_score = z_score.reshape(nr_epochs, -1) 
 
         # control for filter padding
         if self.flt_pad > 0:
             idx_ep = self.time_as_index([self.tmin + self.flt_pad, self.tmax - self.flt_pad])
             z_score = z_score[:, slice(*idx_ep)]
-
-        z_thresh += np.median(z_score.flatten()) + \
-                             abs(z_score.flatten().min() - np.median(z_score.flatten())) 
 
         # mark bad epochs
         bad_epochs = []
@@ -454,19 +468,18 @@ class Epochs(mne.Epochs, FolderStructure):
             if noise_smp.size > 0:
                 bad_epochs.append(ep)
 
-
         if inspect:
-            print('You can now overwrite automatic artifact detection by clicking on epochs selected as bad')
-            bad_eegs = self_copy[bad_epochs]
+            print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
+            bad_eegs = self[bad_epochs]
             idx_bads = bad_eegs.selection
             # display bad eegs with 50mV range
             bad_eegs.plot(
-                n_epochs=5, n_channels=picks.size, picks=picks, scalings=dict(eeg = 50))
+                n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
             plt.show()
             plt.close()
             missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection])
             logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
-                            missing.size, bad_epochs.size,100 * round(missing.size / float(bad_epochs.size), 2)))
+                            missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
             bad_epochs = np.delete(bad_epochs, missing)
         
         if plot:
@@ -494,12 +507,11 @@ class Epochs(mne.Epochs, FolderStructure):
         self.drop(np.array(bad_epochs), reason='art detection ecg')
         logging.info('{} epochs left after artifact detection'.format(len(self)))
 
-        if run:
-            np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
+        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
                    ['Artifact detection z threshold set to {}. \n{} epochs dropped ({}%)'.
                     format(round(z_thresh, 1), len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2))], fmt='%.100s')
 
-    def artifactDetection(self, z_cutoff=4, band_pass=[110, 140], min_dur = 0.05, min_nr_art = 1, run = True, plot=True, inspect=True):
+    def artifactDetectionOLD(self, z_cutoff=4, band_pass=[110, 140], min_dur = 0.05, min_nr_art = 1, run = True, plot=True, inspect=True):
         """ Detect artifacts based on FieldTrip's automatic artifact detection. 
         Artifacts are detected in three steps:
         1. Filtering the data (6th order butterworth filter)
@@ -653,6 +665,7 @@ class Epochs(mne.Epochs, FolderStructure):
         data = data_smooth[:, pad:(data_smooth.shape[1] - pad)]
  
         return data
+
 
     def detectEye(self, missing, events, nr_events, time_window, threshold=20, windowsize=100, windowstep=10, channel='HEOG', tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500, screen_res = (1680, 1050), viewing_dist = 60, screen_h = 29):
         '''
