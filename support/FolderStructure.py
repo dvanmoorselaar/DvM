@@ -51,7 +51,7 @@ class FolderStructure(object):
 		return folder	
 
 
-	def loadData(self, sj, eyefilter, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
+	def loadData(self, sj, name = 'all', eyefilter = False, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
 		'''
 		loads EEG and behavior data
 
@@ -75,12 +75,12 @@ class FolderStructure(object):
 
 		# read in processed EEG data
 		eeg = mne.read_epochs(self.FolderTracker(extension = ['processed'], 
-							filename = 'subject-{}_all-epo.fif'.format(sj)))
+							filename = 'subject-{}_{}-epo.fif'.format(sj, name)))
 
 		# read in processed behavior from pickle file
 		if beh_file:
 			beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
-								filename = 'subject-{}_all.pickle'.format(sj)),'rb'), encoding='latin1')
+								filename = 'subject-{}_{}.pickle'.format(sj, name)),'rb'), encoding='latin1')
 			beh = pd.DataFrame.from_dict(beh)
 		else:
 			beh = pd.DataFrame({'condition': eeg.events[:,2]})	

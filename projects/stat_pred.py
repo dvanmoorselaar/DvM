@@ -163,6 +163,44 @@ class StatPred(FolderStructure):
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, event_id)
 
+	def getEOG(self,t_min, t_max, flt_pad):
+		'''
+		Get the HEOG and VEOG to control for potential eyemovement confound
+		'''
+
+		for sj in range(1,25):
+			print('starting subject {}'.format(sj))
+
+			all_epochs = []
+			for session in [1,2]:
+				if (sj % 2 == 0 and session == 2) or (sj % 2 == 1 and session == 1):
+					event_id = [10,20,30,40,12,13,14,21,23,24,31,32,34,41,42,43]
+				else:
+					event_id = [110,120,130,140,112,113,114,121,123,124,131,132,134,141,142,143]
+				
+				# read in preprocessed behavior
+				beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
+									filename = 'subject-{}_ses-{}.pickle'.format(sj, session)),'rb'), encoding='latin1')
+				clean_idx = beh['clean_idx']
+
+				# set subject specific parameters
+				file = 'subject_{}_session_{}_'.format(sj, session)
+
+				# READ IN RAW DATA and create epochs
+				EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
+				                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
+				eog_idx = mne.pick_types(EEG.info, eog = True)
+				
+				events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
+				epochs = Epochs(sj, session, EEG, events, event_id=event_id,
+				         tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad, picks = eog_idx) 
+				epochs = epochs[clean_idx]
+				all_epochs.append(epochs)
+
+			all_epochs = mne.concatenate_epochs(all_epochs)
+			all_epochs.save(self.FolderTracker(extension=[
+	                         'processed'], filename='subject-{}_eog-epo.fif'.format(sj)), split_size='2GB')
+		
 
 	def updateBEH(self, beh, session):
 		'''
@@ -237,6 +275,7 @@ if __name__ == '__main__':
 
 	# initiate current project
 	PO = StatPred()
+	#PO.getEOG(t_min, t_max, flt_pad)
 
 	# analyze behavior
 	# behavioral experiment 1 
@@ -248,19 +287,20 @@ if __name__ == '__main__':
 	#behavioral experiment 3 (eeg)
 	#PO.prepareBEH('stat_pred', 'beh', ['trial_type','block_type','dist_high'], [['distractor','single_target'],['unpred', 'pred'],['yes','no']], project_param, to_filter)
 
-	# Run preprocessing behavior
-	# for sj in [10]:
-	# 	print('starting subject {}'.format(sj))
-	# 	session = 2
-	# 	if (sj % 2 == 0 and session == 2) or (sj % 2 == 1 and session == 1):
-	# 		event_id = [10,20,30,40,12,13,14,21,23,24,31,32,34,41,42,43]
-	# 	else:
-	# 		event_id = [110,120,130,140,112,113,114,121,123,124,131,132,134,141,142,143]
+	#Run preprocessing behavior
+	for sj in range(0):
+		print('starting subject {}'.format(sj))
+		for session in range(1,3):
+			if (sj % 2 == 0 and session == 2) or (sj % 2 == 1 and session == 1):
+				event_id = [10,20,30,40,12,13,14,21,23,24,31,32,34,41,42,43]
+			else:
+				event_id = [110,120,130,140,112,113,114,121,123,124,131,132,134,141,142,143]
 
-	# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-	# 			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-	# 			event_id = event_id, project_param = project_param, 
-	# 			project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+			#PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+			#	t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+			#	event_id = event_id, project_param = project_param, 
+			#	project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+			
 
  
 	# get preprocessing descriptives
@@ -281,9 +321,9 @@ if __name__ == '__main__':
 			use_tracker = True	
 		
 		# read in preprocessed data for main ERP analysis
-		beh, eeg = PO.loadData(sj, True, (-1,0.6),'HEOG', 1,
-				 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20) , use_tracker = use_tracker)
-		beh = PO.updatePrimingBeh(beh)
+		# beh, eeg = PO.loadData(sj, True, (-1,0.6),'HEOG', 1,
+		# 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20) , use_tracker = use_tracker)
+		#beh = PO.updatePrimingBeh(beh)
 
 		# ERP ANALYSIS pipeline (flip all electrodes as if all stimuli are presented right)
 		# distractor tuned (no spatial bias)
@@ -292,6 +332,15 @@ if __name__ == '__main__':
 		# erp.topoFlip(left = ['2'], header = 'dist_loc')
 		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
   #                      r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist', RT_split = True, permute = 1000)
+
+
+		# CONTROl ANALYSIS: EYEMOVEMENTS	
+		# erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = None)
+		# erp.ipsiContra(sj = sj, left = ['2'], right = [], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+		#                 r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_left', RT_split = True, permute = 1000) 		
+		# erp.ipsiContra(sj = sj, left = [], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+  #                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_right', RT_split = True, permute = 1000) 
 
 		# # target tuned (no spatial bias)
 		# erp = ERP(eeg, beh, 'target_loc', (-0.1,0))
@@ -313,11 +362,11 @@ if __name__ == '__main__':
 
 
 		# # distractor tuned (distractor at high probability location; only priming trials)
-		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
-		erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = dict(dist_high = ['no'], priming = [0])) # exclude all trials with distractor at low probability location (or without distractor) and no priming trials
-		erp.topoFlip(left = [2], header = 'high_loc') # as if all high probabilty locations are on the right
-		erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
-                        r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_priming', RT_split = False) 
+		# erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = dict(dist_high = ['no'], priming = [0])) # exclude all trials with distractor at low probability location (or without distractor) and no priming trials
+		# erp.topoFlip(left = [2], header = 'high_loc') # as if all high probabilty locations are on the right
+		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
+  #                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_priming', RT_split = False) 
 
 		# # read in preprocessed data
 		# beh, eeg = PO.loadData(sj, True, (-1,0.6),'HEOG', 1,
@@ -371,19 +420,77 @@ if __name__ == '__main__':
 		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
   #                      r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_1sthalf', RT_split = False)
 
-
-		# # do analysis seperately for first and second half of the block (with a spatial bias)
-		# beh, eeg = PO.loadData(sj, True, (-1,0.6),'HEOG', 1,
+		# read in preprocessed data
+		# do analysis seperately for first and second half of the block (without a spatial bias)
+		# beh, eeg = PO.loadData(sj, 'all',True, (-1,0.6),'HEOG', 1,
 		#  		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = use_tracker)
 
 		# beh['nr_trials'] = np.mod(beh['nr_trials'], 60) 
 		# beh.loc[beh['nr_trials'] == 0, 'nr_trials'] = 60  
 
 		# erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
-		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = {'nr_trials': list(range(1,21)), 'dist_high' : ['no']}) 
-		# erp.topoFlip(left = [2], header = 'high_loc')
-		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
-  #                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_2ndhalf', RT_split = False)
+		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 1, h_filter = 30, excl_factor = {'nr_trials': list(range(1,21))})
+		# erp.topoFlip(left = ['2'], header = 'dist_loc')
+		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+  #                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_2ndhalf_hfilter', RT_split = False)
+
+
+		# beh, eeg = PO.loadData(sj, 'all',True, (-1,0.6),'HEOG', 1,
+		# 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = use_tracker)
+
+		# beh['nr_trials'] = np.mod(beh['nr_trials'], 60) 
+		# beh.loc[beh['nr_trials'] == 0, 'nr_trials'] = 60  
+
+		# erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 1, h_filter = 30, excl_factor = {'nr_trials': list(range(21,61))})
+		# erp.topoFlip(left = ['2'], header = 'dist_loc')
+		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+  #                      r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_1sthalf_hfilter', RT_split = False)
+
+
+		# read in preprocessed data
+		# do analysis seperately for first and second half blocks (without a spatial bias)
+		beh, eeg = PO.loadData(sj, 'all',True, (-1,0.6),'HEOG', 1,
+		  		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = use_tracker)
+
+		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = 1, h_filter = 30, excl_factor = {'block_cnt': [2,3,4,5]}) # second half
+		erp.topoFlip(left = ['2'], header = 'dist_loc')
+		erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+                         r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_experience', RT_split = False)
+
+
+		beh, eeg = PO.loadData(sj, 'all',True, (-1,0.6),'HEOG', 1,
+		 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = use_tracker)
+  
+
+		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = 1, h_filter = 30, excl_factor = {'block_cnt': [6,7,8,9]})
+		erp.topoFlip(left = ['2'], header = 'dist_loc')
+		erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
+                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_no_experience', RT_split = False)
+
+
+		# do analysis seperately for first and second half blocks (with a spatial bias)
+		beh, eeg = PO.loadData(sj, 'all',True, (-1,0.6),'HEOG', 1,
+		  		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = use_tracker)
+
+		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = 1, h_filter = 30, excl_factor = {'block_cnt': [10,11,12,13]}) # second half
+		erp.topoFlip(left = ['2'], header = 'dist_loc')
+		erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
+                         r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_experience', RT_split = False)
+
+
+		beh, eeg = PO.loadData(sj, 'all',True, (-1,0.6),'HEOG', 1,
+		 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = use_tracker)
+  
+
+		erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
+		erp.selectERPData(time = [-0.1, 0.6], l_filter = 1, h_filter = 30, excl_factor = {'block_cnt': [14,15,16,17]})
+		erp.topoFlip(left = ['2'], header = 'dist_loc')
+		erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-bias','unpred-bias'], cnd_header = 'condition',
+                       r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_no_experience', RT_split = False)
 
 
 		# beh, eeg = PO.loadData(sj, True, (-1,0.6),'HEOG', 1,

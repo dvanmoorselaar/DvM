@@ -292,7 +292,38 @@ class TF(FolderStructure):
 		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)
 
-	def permuted_Z(self, raw_power, ch_names, num_frex, nr_time, nr_perm = 1500):
+	def normalizePower(self, raw_power, ch_names, num_frex, nr_time):
+
+		# ipsi_contra pairs
+		contra_ipsi_pair = [('Fp1','Fp2'),('AF7','AF8'),('AF3','AF4'),('F7','F8'),('F5','F6'),('F3','F4'),\
+					('F1','F2'),('FT7','FT8'),('FC5','FC6'),('FC3','FC4'),('FC1','FC2'),('T7','T8'),\
+					('C5','C6'),('C3','C4'),('C1','C2'),('TP7','TP8'),('CP5','CP6'),('CP3','CP4'),\
+					('CP1','CP2'),('P9','P10'),('P7','P8'),('P5','P6'),('P3','P4'),('P1','P2'),\
+					('PO7','PO8'),('PO3','PO4'),('O1','O2')]
+		pair_idx =  [i for i, pair in enumerate(contra_ipsi_pair) if pair[0] in ch_names]			
+		contra_ipsi_pair = np.array(contra_ipsi_pair)[pair_idx] 
+
+		# initiate array
+		norm = np.zeros((contra_ipsi_pair.shape[0], num_frex, nr_time))
+		norm_elec = []
+		# loop over contra_ipsi pairs
+		pair_idx = 0
+
+		for (contra_elec, ipsi_elec) in contra_ipsi_pair:
+
+			norm_elec.append(contra_elec)	
+			
+			# get indices of electrode pair
+			contra_idx = ch_names.index(contra_elec)
+			ipsi_idx = ch_names.index(ipsi_elec)
+			contra_ipsi_norm = (raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx])/(raw_power[:,:,contra_idx] + raw_power[:,:,ipsi_idx])
+			norm[pair_idx] = contra_ipsi_norm.mean(axis = 0)
+			pair_idx += 1
+
+		return norm, norm_elec
+
+
+	def permuted_Z(self, raw_power, ch_names, num_frex, nr_time, nr_perm = 1000):
 
 
 		
@@ -307,7 +338,6 @@ class TF(FolderStructure):
 
 		# initiate Z array
 		Z = np.zeros((contra_ipsi_pair.shape[0], num_frex, nr_time))
-		norm = np.zeros((contra_ipsi_pair.shape[0], num_frex, nr_time))
 		Z_elec = []
 		# loop over contra_ipsi pairs
 		pair_idx = 0
@@ -480,6 +510,10 @@ class TF(FolderStructure):
 				print('For permutation procedure it is assumed that it is as if all stimuli of interest are presented right')
 				tf_base[cnd]['Z_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
 				tf_base.update(dict(z_info = z_info))
+			elif base_type == 'norm':
+				print('For normalization procedure it is assumed that it is as if all stimuli of interest are presented right')
+				tf_base[cnd]['norm_power'], norm_info = self.normalizePower(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
+				tf_base.update(dict(norm_info = norm_info))
 			if base_type in ['conspec','conavg']:
 				tf[cnd]['base_power'] = np.mean(tf_base[cnd]['base_power'], axis = 0)
 

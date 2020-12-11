@@ -261,13 +261,18 @@ if __name__ == '__main__':
 		# bdm.Classify(sj, cnds =  ['positive','negative'], cnd_header = 'this_block', bdm_labels = [0,1,2,3,4,5],time = (-0.2, 0.55), gat_matrix = False)	
 
 		# COLOR DECODING TEMPLATE
-		bdm = BDM(beh, eeg, to_decode = 'template_color_code', nr_folds = 8, method = 'auc', elec_oi = 'post', 
-				 sliding_window = 5, downsample = 200, baseline = None, use_pca = 0.95)
-		bdm.Classify(sj, cnds =  ['positive','negative'], cnd_header = 'this_block', bdm_labels = ['A','B','C','D','E','F','G','H','I','J','K','L'], time = (-2.6, 0.5), gat_matrix = False)
+		#bdm = BDM(beh, eeg, to_decode = 'template_color_code', nr_folds = 8, method = 'auc', elec_oi = 'post', 
+		#		 sliding_window = 5, downsample = 200, baseline = None, use_pca = 0.95)
+		#bdm.Classify(sj, cnds =  ['positive','negative'], cnd_header = 'this_block', bdm_labels = ['A','B','C','D','E','F','G','H','I','J','K','L'], time = (-2.6, 0.5), gat_matrix = False)
 		
 		# LOCATION DECODING OF THE TEMPLATE IN MEMORY DISPLAY 	
 		# bdm = BDM(beh, eeg, to_decode = 'memory_position', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-2.8, -2.6))
 		# bdm.Classify(sj, cnds =  ['positive','negative'], cnd_header = 'this_block', bdm_labels = ['right', 'left', 'down', 'up'], time = (-2.8, 0.2), gat_matrix = False)
+
+		# STATUS DECODING
+		beh['cnd'] = 'all'
+		bdm = BDM(beh, eeg, to_decode = 'this_block', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-2.8, -2.6))
+		bdm.Classify(sj, cnds =  ['all'], cnd_header = 'cnd', bdm_labels = ['positive', 'negative'], time = (-2.8, 0.55), gat_matrix = False)
 
 
 		# # do TF analysis

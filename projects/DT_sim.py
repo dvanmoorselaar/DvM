@@ -711,32 +711,63 @@ if __name__ == '__main__':
   #                      r_elec = ['PO8','PO4','O2'], midline = {'high_loc_priming': [1]}, erp_name = 'early_pd_priming', RT_split = False)
 
 		# BDM analysis 
-		#beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		beh, eeg = PO.loadData(sj,'all',True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
 		# feature decoding distractor irrespective of location / no distractor absent trials
 		#bdm = BDM(beh, eeg, to_decode = 'dist_type', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
 		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
 		#   			excl_factor = dict(dist_loc = ['None']), gat_matrix = False)
 
 		# feature decoding target irrespective of location / no distractor absent trials
-		#bdm = BDM(beh, eeg, to_decode= 'target_type', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
-		#bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-		#			excl_factor = None, gat_matrix = False)
+		# bdm = BDM(beh, eeg, to_decode= 'target_type', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
+		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 			excl_factor = None, gat_matrix = False)
+
+		# without baseline feature decoding distractor irrespective of location / no distractor absent trials
+		# beh['dist_type_no_base'] = beh['dist_type']
+		# bdm = BDM(beh, eeg, to_decode = 'dist_type_no_base', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = None)
+		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		#   			excl_factor = dict(dist_loc = ['None']), gat_matrix = False)
+
+		# # # without baseline feature decoding target irrespective of location / no distractor absent trials
+		# beh['target_type_no_base'] = beh['target_type']
+		# bdm = BDM(beh, eeg, to_decode= 'target_type_no_base', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = None)
+		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 			excl_factor = None, gat_matrix = False)
+
+
+		# # condition specific baseline feature decoding distractor irrespective of location / no distractor absent trials
+		# beh['dist_type_cnd_base'] = beh['dist_type']
+		# eeg = cnd_baseline(eeg, beh, ['DTsim','DTdisP','DTdisDP'], 'block_type', base_period = (-0.75, 0.55), nr_elec = 64)
+		# bdm = BDM(beh, eeg, to_decode = 'dist_type_cnd_base', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = None)
+		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		#   			excl_factor = dict(dist_loc = ['None']), gat_matrix = False)
+
+		# # condition specific feature decoding target irrespective of location / no distractor absent trials
+		# beh['target_type_cnd_base'] = beh['target_type']
+		# bdm = BDM(beh, eeg, to_decode= 'target_type_cnd_base', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = None)
+		# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+		# 			excl_factor = None, gat_matrix = False)
+
+		# location decoding (collapsed across all conditions)
+		# beh['collapsed'] = 'all' 
+		# bdm = BDM(beh, eeg, to_decode = 'high_loc', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
+		# bdm.Classify(sj, cnds = ['all'], cnd_header = 'collapsed', time = (-0.75, 0.55), 
+		# 			excl_factor = None, gat_matrix = False)
 		
+		# # # # read in data again for cross-task decoding
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55))
+		# bdm.crossClassify(sj, cnds = ['DTdisP','DTdisDP'], cnd_header = 'block_type',
+		# 				time = (-0.75, 0.55), tr_header = 'target_type', te_header = 'target_type', tr_te_rel = 'ind', 
+		# 				excl_factor = None, tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor =dict(dist_loc = ['None']), 
+		# 				bdm_name = 'target_target')
 
-		# # # read in data again for cross-task decoding
-		beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
-		bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55))
-		bdm.crossClassify(sj, cnds = ['DTdisP','DTdisDP'], cnd_header = 'block_type',
-						time = (-0.75, 0.55), tr_header = 'target_type', te_header = 'target_type', tr_te_rel = 'ind', 
-						excl_factor = None, tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor =dict(dist_loc = ['None']), 
-						bdm_name = 'target_target')
-
-		beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
-		bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55))
-		bdm.crossClassify(sj, cnds = ['DTdisP','DTdisDP'], cnd_header = 'block_type',
-						time = (-0.75, 0.55), tr_header = 'dist_type', te_header = 'target_type', tr_te_rel = 'ind', 
-						excl_factor = None, tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor =dict(dist_loc = ['None']), 
-						bdm_name = 'dist_target')
+		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
+		# bdm = BDM(beh, eeg, to_decode = 'target_type', nr_folds = 1, elec_oi = 'all', method = 'auc',downsample = 128, baseline = (-0.75, -0.55))
+		# bdm.crossClassify(sj, cnds = ['DTdisP','DTdisDP'], cnd_header = 'block_type',
+		# 				time = (-0.75, 0.55), tr_header = 'dist_type', te_header = 'target_type', tr_te_rel = 'ind', 
+		# 				excl_factor = None, tr_factor = dict(dist_loc = ['0','1','2','3','4','5']), te_factor =dict(dist_loc = ['None']), 
+		# 				bdm_name = 'dist_target')
 
 		# # # read in data again for cross-task decoding
 		# beh, eeg = PO.loadData(sj,True, (-0.75,0.55),'HEOG', 1, eye_dict = None)
@@ -819,12 +850,11 @@ if __name__ == '__main__':
 		#			bdm_labels = ['0','1','2','3','4','5'], time = (-0.75, 0.55), nr_perm = 0, gat_matrix = False)
 
 		# TF analysis (first analyse anticipatory; collapsed across all trials)
-		#tf = TF(beh, eeg, laplacian = False)
-		#tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 	
-		# 		  	cnd_header ='block_type', elec_oi = 'all', base_type = 'Z', min_freq = 1,
-		# 		  	time_period = (-0.75,0), base_period = None, method = 'wavelet',flip = dict(high_loc = [2]), 
-		# 		  	tf_name = 'no_lapl_1-40', downsample = 4)
-
+		tf = TF(beh, eeg, laplacian = False)
+		tf.TFanalysis(sj = sj, cnds = ['DTsim','DTdisP','DTdisDP'], 	
+				  	cnd_header ='block_type', elec_oi = 'all', base_type = 'norm', min_freq = 1,
+		 		  	time_period = (-0.75,0), base_period = None, method = 'wavelet',flip = dict(high_loc = [2]), 
+		 		  	tf_name = 'no_lapl_1-40_norm', downsample = 4)
 		
 		# analyse reactive only for bottom left and right distractors
 		#tf = TF(beh, eeg, laplacian = True)

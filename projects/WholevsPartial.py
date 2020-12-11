@@ -2,13 +2,14 @@ import matplotlib          # run these lines only when running sript via ssh con
 matplotlib.use('agg')
 
 import sys
+import logging
 sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
 
 import seaborn as sns
 
 from IPython import embed
 from beh_analyses.PreProcessing import *
-#from eeg_analyses.EEG import * 
+from eeg_analyses.EEG import * 
 #from eeg_analyses.ERP import * 
 #from eeg_analyses.BDM import * 
 from eeg_analyses.TF import * 
@@ -131,7 +132,7 @@ class WholevsPartial(FolderStructure):
 		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
 		# ARTIFACT DETECTION
-		epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
+		#epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
 		epochs.artifactDetection(inspect=False, run = False)
 
 		# ICA
@@ -614,10 +615,10 @@ if __name__ == '__main__':
 	for sj in range(1,25):
 		pass
 		
-		# PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		#   t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		#   trigger = trigger, project_param = project_param, 
-		#   project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+		PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+		   t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+		   trigger = trigger, project_param = project_param, 
+		   project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 		# # CDA analysis
 		#erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)

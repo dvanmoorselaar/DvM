@@ -27,6 +27,38 @@ def trial_exclusion(beh, eeg, excl_factor):
 
 	return beh, eeg
 
+def cnd_baseline(EEG, beh, cnds, cnd_header, base_period = (-0.1, 0), nr_elec = 64):
+	"""Does baselining per condition
+
+	Arguments:
+
+	
+	Returns:
+		EEG {object} -- baseline corrected MNE epochs object
+	"""
+
+	# select indices baseline period
+	start, end = [np.argmin(abs(EEG.times - b)) for b in base_period]
+
+	# loop over conditions
+	for cnd in cnds:
+
+		# get indices of interest
+		idx = np.where(beh[cnd_header] == cnd)[0]
+
+		# get data
+		X = EEG._data[idx,:nr_elec]
+		# get base_mean (per electrode)
+		X_base = X[:,:,start:end].mean(axis = (0,2))
+
+		#do baselining per electrode
+		for i in range(nr_elec):
+			X[:,i,:] -= X_base[i] 
+
+		EEG._data[idx,:nr_elec] = X	
+
+	return EEG
+
 def cnd_time_shift(EEG, beh, cnd_info, cnd_header):
 	"""This function shifts the timings of all epochs that meet a specific criteria. 
 	   Can be usefull when events of interest in different conditions are not aligned
