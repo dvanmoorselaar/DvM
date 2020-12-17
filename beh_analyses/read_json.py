@@ -42,7 +42,6 @@ for f, file in enumerate(files):
             try: 
                 d = json.loads(line) 
             except: 
-                print(line)
                 continue
 
             # data from succesfully finished experiments

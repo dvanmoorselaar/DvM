@@ -1,13 +1,39 @@
-import numpy as np
+import os
 import mne
 import scipy.sparse as sparse
 import warnings
 
+import numpy as np
+import pandas as pd
 from IPython import embed 
 from math import sqrt
 from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
+
+
+def logPreproc(idx, file, nr_sj = 1, nr_sessions = 1, to_update = None):
+
+	# check whether file exists
+	if os.path.isfile(file):
+		df = pd.read_csv(file, index_col=[0,1])
+	else:
+		arrays = [np.arange(nr_sj) + 1, list(np.arange(1)+1)*nr_sj]
+		multi_idx = pd.MultiIndex.from_arrays(arrays, names = ('subject_id', 'session'))
+		df = pd.DataFrame(None,multi_idx, to_update.keys())
+
+	# do actual updating
+	if to_update != None:
+		for key, value in to_update.items():
+			if key not in df:
+				df[key] = np.nan 
+			if type(value) == list:
+				value = str(value) 
+			df.loc[idx,key] = str(value)
+
+	# save datafile
+	df.to_csv(file)
+
 
 def trial_exclusion(beh, eeg, excl_factor):
 

@@ -1,6 +1,3 @@
-#import matplotlib          # run these lines only when running sript via ssh connection
-#matplotlib.use('agg')
-
 import sys
 import logging
 sys.path.append('/Users/dvm/DvM')
@@ -12,7 +9,7 @@ from beh_analyses.PreProcessing import *
 from eeg_analyses.EEG import * 
 #from eeg_analyses.ERP import * 
 #from eeg_analyses.BDM import * 
-from eeg_analyses.TF import * 
+#from eeg_analyses.TF import * 
 from support.FolderStructure import *
 from support.support import *
 from stats.nonparametric import *
@@ -27,7 +24,7 @@ sj_info = {'1': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 		  	'6': {'tracker': (False, '', None, '',0), 'replace':{}}, #  first trial is spoke trigger, because wrong experiment was started
 		  	'7': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'8': {'tracker': (False, '', None, '',0), 'replace':{}},
-		  	'9': {'tracker': (False, '', None, '',0), 'replace':{}}, # recodring started late (missing trials are removed from behavior file)
+		  	'9': {'tracker': (False, '', None, '',0), 'replace':{}}, # recording started late (missing trials are removed from behavior file)
 		  	'10': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'11': {'tracker': (False, '', None, '',0), 'replace':{}},
 		  	'12': {'tracker': (False, '', None, '',0), 'replace':{}},
@@ -58,6 +55,7 @@ project_param = ['practice','nr_trials','trigger','condition',
 		        'test_order','points','subject_nr']
 
 # EEG
+nr_sessions = 1
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
 trigger = [10,11,12,19,20,21,22,29]
@@ -67,7 +65,14 @@ flt_pad = 0.5
 eeg_runs = [1]
 binary = 3840
 
-
+# eye tracker info
+tracker_ext = 'asc'
+eye_freq = 500
+start_event = 'Onset search'
+tracker_shift = 0
+viewing_dist = 80 
+screen_res = (1680, 1050) 
+screen_h = 29
 
 class WholevsPartial(FolderStructure):
 
@@ -94,7 +99,8 @@ class WholevsPartial(FolderStructure):
 		# set subject specific parameters
 		file = 'subject_{}_session_{}_'.format(sj, session)
 		replace = sj_info[str(sj)]['replace']
-		tracker, ext, t_freq, start_event, shift = sj_info[str(sj)]['tracker']
+		log_file = self.FolderTracker(extension=['processed', 'info'], 
+                        filename='preprocessing_param.csv')
 
 		# start logging
 		logging.basicConfig(level=logging.DEBUG,
@@ -115,9 +121,10 @@ class WholevsPartial(FolderStructure):
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-		EEGica = EEG.filter(h_freq=None, l_freq=1,
-		                   fir_design='firwin', skip_by_annotation='edge')
-		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+		#EEGica = EEG.copy()
+		#EEGica.filter(h_freq=None, l_freq=1,
+		#                   fir_design='firwin', skip_by_annotation='edge')
+		EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
 		            skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
@@ -129,24 +136,32 @@ class WholevsPartial(FolderStructure):
 
 		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
-		        tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad, reject_by_annotation = True) 
+		        tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
 
-		# ARTIFACT DETECTION
-		#epochs.selectBadChannels(channel_plots = False, inspect=False, RT = None)    
-		epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
-		#epochs.artifactDetectionOLD(inspect=True, run = True)
+		# AUTMATED ARTIFACT DETECTION
+		epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
+		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEGica, method='extended-infomax', decim=3, inspect = True)
+		epochs.applyICA(EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+		del EEGica
 
 		# EYE MOVEMENTS
-		self.binEye(epochs, missing, time_window=(t_min*1000, t_max*1000), tracker = tracker, tracker_shift = shift, start_event = start_event, extension = ext, eye_freq = t_freq)
+		epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
+						tracker_shift = tracker_shift, start_event = start_event, 
+						extension = tracker_ext, eye_freq = eye_freq, 
+						screen_res = screen_res, viewing_dist = viewing_dist, 
+						screen_h = screen_h)
 
 		# INTERPOLATE BADS
+		bads = epochs.info['bads']   
 		epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, trigger)
+
+		logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
+					to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
 
 	def anticipatoryEye(self, sj_info, nr_bins, start, end):
 		'''
@@ -613,13 +628,15 @@ if __name__ == '__main__':
 	# eye analysis
 	#PO.anticipatoryEye(sj_info,  nr_bins = 40, start = -500, end = 850)
 
+	PO.prepareEEG(sj = 1, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+			trigger = trigger, project_param = project_param, 
+			project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+
 	for sj in range(1,25):
 		pass
 		
-		PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		   t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		   trigger = trigger, project_param = project_param, 
-		   project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+
 
 		# # CDA analysis
 		#erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
@@ -649,12 +666,12 @@ if __name__ == '__main__':
 
 	
 		# read in preprocessed data
-		beh, eeg = PO.loadData(sj, True, (-0.2,0.85),'HEOG', 1,
-				 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = True)
+		#beh, eeg = PO.loadData(sj, True, (-0.2,0.85),'HEOG', 1,
+		#		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = True)
 		# do TF analysis
-		tf = TF(beh, eeg, laplacian=False)
-		tf.TFanalysis(sj, cnds = ['partial','whole'], cnd_header = 'block_type', base_period = (-0.2,0), base_type = 'conspec',
-		 			time_period = (-0.2,0.85), tf_name = 'cue_power', elec_oi = 'all', method = 'wavelet', flip = dict(cue_loc = ['1']), factor = dict(cue_loc = ['None','0']))
+		#tf = TF(beh, eeg, laplacian=False)
+		#tf.TFanalysis(sj, cnds = ['partial','whole'], cnd_header = 'block_type', base_period = (-0.2,0), base_type = 'conspec',
+		# 			time_period = (-0.2,0.85), tf_name = 'cue_power', elec_oi = 'all', method = 'wavelet', flip = dict(cue_loc = ['1']), factor = dict(cue_loc = ['None','0']))
 
 	#PO.behExp1() 
 	#PO.plotCDA()

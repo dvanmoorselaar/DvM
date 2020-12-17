@@ -323,11 +323,12 @@ class Epochs(mne.Epochs, FolderStructure):
         self.info['bads']: list with all bad channels detected by the RANSAC algorithm
 
         '''
+
         # select channels to display
         picks = mne.pick_types(self.info, eeg=True, exclude='bads')
 
         # use Ransac, interpolating bads and append bad channels to self.info['bads']
-        ransac = Ransac(verbose='progressbar', picks=picks, n_jobs=1)
+        ransac = Ransac(verbose=False, picks=picks, n_jobs=1)
         epochs_clean = ransac.fit_transform(self)
         print('The following electrodes are selected as bad by Ransac:')
         print('\n'.join(ransac.bad_chs_))
@@ -447,7 +448,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # normalize z_score
         z_score = z_score.sum(axis = 0)/sqrt(data.shape[0]) 
-        z_score = filter_data(z_score, self.info['sfreq'], None, 4, pad='reflect_limited') 
+        #z_score = filter_data(z_score, self.info['sfreq'], None, 4, pad='reflect_limited') 
 
         # adjust threshold (data driven)    
         z_thresh += np.median(z_score) + abs(z_score.min() - np.median(z_score)) 
@@ -510,6 +511,8 @@ class Epochs(mne.Epochs, FolderStructure):
         np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
                    ['Artifact detection z threshold set to {}. \n{} epochs dropped ({}%)'.
                     format(round(z_thresh, 1), len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2))], fmt='%.100s')
+
+        return z_thresh
 
     def artifactDetectionOLD(self, z_cutoff=4, band_pass=[110, 140], min_dur = 0.05, min_nr_art = 1, run = True, plot=True, inspect=True):
         """ Detect artifacts based on FieldTrip's automatic artifact detection. 
@@ -760,7 +763,8 @@ class Epochs(mne.Epochs, FolderStructure):
         # remove trials that have been deleted from eeg 
         eye_bins = np.delete(eye_bins, noise_epochs)
         # start logging eye_tracker info
-        for eye_bin in  np.unique(eye_bins):
+        unique_bins = np.array(np.unique(eye_bins), dtype = np.float64)
+        for eye_bin in np.unique(unique_bins[~np.isnan(unique_bins)]):
             logging.info('{0:.1f}% of trials exceed {1} degree of visual angle'.format(sum(eye_bins> eye_bin) / eye_bins.size*100, eye_bin))
 
         # save array of deviation bins    
@@ -768,7 +772,7 @@ class Epochs(mne.Epochs, FolderStructure):
             self.sj), self.session], filename='eye_bins.txt'), eye_bins)
 
 
-    def applyICA(self, raw, method='extended-infomax', decim=None):
+    def applyICA(self, raw, method='extended-infomax', decim=None, fit_params = None, inspect = True):
         '''
 
         Arguments
@@ -787,10 +791,14 @@ class Epochs(mne.Epochs, FolderStructure):
 
         '''
 
+        # make sure that bad electrodes match between both data sets
+        raw.info['bads'] = self.info['bads']
+
         # initiate ica
         logging.info('Started ICA')
         picks = mne.pick_types(self.info, eeg=True, exclude='bads')
-        ica = ICA(n_components=picks.size, method=method)
+        ica = ICA(n_components=picks.size, method=method, fit_params = fit_params)
+        
         # ica is fitted on epoched data
         ica.fit(self, picks=picks, decim=decim)
 
@@ -809,6 +817,14 @@ class Epochs(mne.Epochs, FolderStructure):
                     'preprocessing', 'subject-{}'.format(self.sj), self.session], filename='ica_scores.pdf'))
         plt.close()
 
+        # diagnostic plotting
+        ica.plot_sources(self, show_scrollbars=False, picks=picks, show=False)
+        if inspect:
+            plt.show()
+        else:
+            plt.savefig(self.FolderTracker(extension=[
+                    'preprocessing', 'subject-{}'.format(self.sj), self.session], filename='sources.pdf'))
+        plt.close()
 
         # double check selected component with user input
         time.sleep(5)
@@ -826,14 +842,8 @@ class Epochs(mne.Epochs, FolderStructure):
                 eog_inds.append(
                     int(input('What is component nr {}?'.format(i + 1))))
 
-        # diagnostic plotting
-        ica.plot_sources(eog_epochs.average(), exclude=eog_inds, show=False)
-        plt.savefig(self.FolderTracker(extension=[
-                    'preprocessing', 'subject-{}'.format(self.sj), self.session], filename='sources.pdf'))
-        plt.close()
-
         for i, cmpt in enumerate(eog_inds):
-            ica.plot_properties(eog_epochs, picks=cmpt, psd_args={
+            ica.plot_properties(self, picks=cmpt, psd_args={
                                 'fmax': 35.}, image_args={'sigma': 1.}, show=False)
             plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
                 self.sj), self.session], filename='property{}.pdf'.format(cmpt)))
@@ -883,7 +893,8 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # save eeg
         self.save(self.FolderTracker(extension=[
-                    'processed'], filename='subject-{}_ses-{}-epo.fif'.format(self.sj, self.session)), split_size='2GB')
+                    'processed'], filename='subject-{}_ses-{}-epo.fif'.format(self.sj, self.session)), 
+                 split_size='2GB', overwrite = True)
 
         # update preprocessing information
         logging.info('Nr clean trials is {0} ({1:.0f}%)'.format(
@@ -930,7 +941,8 @@ class Epochs(mne.Epochs, FolderStructure):
 
             all_eeg = mne.concatenate_epochs(all_eeg)
             all_eeg.save(self.FolderTracker(extension=[
-                         'processed'], filename='subject-{}_all-epo.fif'.format(self.sj)), split_size='2GB')
+                         'processed'], filename='subject-{}_all-epo.fif'.format(self.sj)), 
+                        split_size='2GB', overwrite = True)
 
             logging.info('EEG sessions combined')
 
