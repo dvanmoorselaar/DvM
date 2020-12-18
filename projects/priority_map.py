@@ -6,7 +6,8 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
-sys.path.append('/Users/dvm/DvM')
+#sys.path.append('/Users/dvm/DvM')
+sys.path.append('/Users/dockyduncan/Documents/GitHub/DvM')
 
 import numpy as np
 import seaborn as sns
@@ -46,14 +47,14 @@ sj_info = {'1': {'replace':{}}, # example replace: replace = {'15': {'session_1'
 							}
 
 # project specific info
-project = 'Ping'
+project = 'ping'
 factors = []
 labels = []
 to_filter = ['RT'] 
 project_param = ['nr_trials','trigger','RT', 'subject_nr', 'block_cnt', 'practice',
 				'block_type', 'correct','dist_high','dist_loc','dist_shape', 
 				'dist_color', 'high_prob_loc', 'target_high','target_loc','target_shape',
-				'target_color','ping','ping_trigger','ping_type','block_cnt','trial_type']
+				'target_color','ping','ping_trigger','ping_type','trial_type']
 
 
 # eeg info (event_id specified below)
@@ -65,7 +66,7 @@ eeg_runs = [1]
 # ping parameters
 t_min = -0.7 
 t_max = 0.6
-#event_id = [9, 100, 102, 104, 106]
+event_id = [109, 100, 102, 104, 106, 209, 200,202,204,206]
 # search parameters
 #t_min = -0.1 
 #t_max = 0.6
@@ -147,11 +148,11 @@ class priorityMap(FolderStructure):
 		        tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
 
 		# AUTMATED ARTIFACT DETECTION
-		epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
+		#epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
 		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+		#epochs.applyICA(EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
 		del EEGica
 
 		# EYE MOVEMENTS
@@ -168,7 +169,7 @@ class priorityMap(FolderStructure):
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, event_id)
 
-		logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
+		logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = 1, 
 					to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
 
 if __name__ == '__main__':
@@ -178,14 +179,14 @@ if __name__ == '__main__':
 	os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
-	project_folder = '/Users/dvm/Desktop/Ping'
+	project_folder = '/Users/dockyduncan/Documents/EEG/ping'
 	os.chdir(project_folder)
 
 	# initiate current project
 	PO = priorityMap()
 
 	#Run preprocessing 
-	PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
+	#PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
 
 	#Run preprocessing EEG
 	PO.prepareEEG(sj = 2, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
@@ -193,4 +194,11 @@ if __name__ == '__main__':
 			event_id = event_id, project_param = project_param, 
 			project_folder = project_folder, binary = binary, 
 			channel_plots = True, inspect = True)
+
+	# ping decoding target only on ping trials
+	embed()
+	beh, eeg = PO.loadData(2,'ping',False, (-0.7,0.6),'HEOG', 1, eye_dict = None)
+	bdm = BDM(beh, eeg, to_decode= 'high_prob_loc', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
+	# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
+	# 			excl_factor = None, gat_matrix = False)
 			

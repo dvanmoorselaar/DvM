@@ -481,8 +481,9 @@ class Epochs(mne.Epochs, FolderStructure):
             missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection])
             logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
                             missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
-            bad_epochs = np.delete(bad_epochs, missing)
-        
+            if len(missing)> 0:
+                bad_epochs = np.delete(bad_epochs, missing)
+
         if plot:
             plt.figure(figsize=(10, 10))
             with sns.axes_style('dark'):
