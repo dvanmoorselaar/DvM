@@ -348,10 +348,10 @@ class PreProcessing(object):
 		work_data = self.work_data.reset_index(drop = True)
 		work_data['congruency_filter'] = False
 		for index in work_data['congruency_filter'].index[:]:
-			target = work_data.ix[index,'target_loc_int']
-			dist = work_data.ix[index,'dist_loc_int']
-			if eval(work_data.ix[index,'target_list'])[target] == eval(work_data.ix[index,'target_list'])[dist]: 
-				work_data.ix[index,'congruency_filter'] = True
+			target = work_data.loc[index,'target_loc_int']
+			dist = work_data.loc[index,'dist_loc_int']
+			if eval(work_data.loc[index,'target_list'])[target] == eval(work_data.loc[index,'target_list'])[dist]: 
+				work_data.loc[index,'congruency_filter'] = True
 
 		if save:
 			work_data.to_excel(os.path.join(self.project_folder,'analysis','data_comb_filter.xlsx'), sheet_name ='data_comb_filter')	
@@ -367,14 +367,14 @@ class PreProcessing(object):
 		work_data['dist'] = 'NA'
 
 		for idx in work_data['bin'].index[:]:
-			d = abs(work_data.ix[idx,'target_loc'] - work_data.ix[idx,'dist_loc'])
-			if work_data.ix[idx,'set_size'] == 4:
+			d = abs(work_data.loc[idx,'target_loc'] - work_data.loc[idx,'dist_loc'])
+			if work_data.loc[idx,'set_size'] == 4:
 				if d > 2:
 					d = 1
-			elif work_data.ix[idx,'set_size'] == 8:	
+			elif work_data.loc[idx,'set_size'] == 8:	
 				if d > 4:
 					d -= (d-4)*2
-			work_data.ix[idx,'dist'] = d
+			work_data.loc[idx,'dist'] = d
 
 		if save:
 			work_data.to_excel(os.path.join(self.project_folder,'analysis','data_comb_filter_dist.xlsx'), sheet_name ='data_comb_filter_dist')	
@@ -393,8 +393,8 @@ class PreProcessing(object):
 
 		for index in work_data['PE_filter'].index[1:]:
 			# check memory reponse on n-1 trial and check whether trial n is not the start of a new block
-			if work_data.ix[index - 1,'memory_resp'] == 0 and work_data.ix[index - 1,'block_count'] == work_data.ix[index,'block_count']:
-				work_data.ix[index,'PE_filter'] = True
+			if work_data.loc[index - 1,'memory_resp'] == 0 and work_data.loc[index - 1,'block_count'] == work_data.loc[index,'block_count']:
+				work_data.loc[index,'PE_filter'] = True
 
 		if save:
 			work_data.to_excel(os.path.join(self.project_folder,'analysis','data_comb_filter.xlsx'), sheet_name ='data_comb_filter')	
