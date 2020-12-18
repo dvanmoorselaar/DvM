@@ -46,11 +46,11 @@ sj_info = {'1': {'replace':{}}, # example replace: replace = {'15': {'session_1'
 							}
 
 # project specific info
-project = 'priority_map'
-factors = ['block_type','target_high']
-labels = [['bias','neutral'],['yes','no','None']]
+project = 'Ping'
+factors = []
+labels = []
 to_filter = ['RT'] 
-project_param = ['nr_trials','trigger','RT', 'subject_nr', 'block_cnt', 
+project_param = ['nr_trials','trigger','RT', 'subject_nr', 'block_cnt', 'practice',
 				'block_type', 'correct','dist_high','dist_loc','dist_shape', 
 				'dist_color', 'high_prob_loc', 'target_high','target_loc','target_shape',
 				'target_color','ping','ping_trigger','ping_type','block_cnt','trial_type']
@@ -58,15 +58,19 @@ project_param = ['nr_trials','trigger','RT', 'subject_nr', 'block_cnt',
 
 # eeg info (event_id specified below)
 ping = 'no_ping' # 'ping'
+part = 'beh'
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
 eeg_runs = [1]
 # ping parameters
 t_min = -0.7 
 t_max = 0.6
+#event_id = [9, 100, 102, 104, 106]
 # search parameters
 #t_min = -0.1 
 #t_max = 0.6
+#event_id = [12,13,14,15,16,17,18,19,21,23,24,25,26,27,28,29,31,32,34,35,36,37,38,39,41,42,43,45,46,\
+#			47,48,49,51,52,53,54,56,57,58,59,61,62,63,64,65,67,68,69,71,72,73,74,75,76,78,79,81,82,83,84,85,86,87,89]
 
 flt_pad = 0.5
 binary =  0
@@ -97,14 +101,16 @@ class priorityMap(FolderStructure):
 		PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
 		PP.save_data_file()
 
-	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, event_id, project_param, project_folder, binary, channel_plots, inspect, ping = 'ping'):
+	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, event_id, project_param, project_folder, binary, channel_plots, inspect):
 		'''
-		EEG preprocessing as preregistred @ https://osf.io/n35xa/registrations
+		EEG preprocessing as preregistred @
 		'''
 
 		# set subject specific parameters
 		file = 'subject_{}_session_{}_'.format(sj, session)
 		replace = sj_info[str(sj)]['replace']
+		log_file = self.FolderTracker(extension=['processed', 'info'], 
+                        filename='preprocessing_param.csv')
 
 		# start logging
 		logging.basicConfig(level=logging.DEBUG,
@@ -113,12 +119,11 @@ class priorityMap(FolderStructure):
                     filename= self.FolderTracker(extension=['processed', 'info'], 
                         filename='preprocess_sj{}_ses{}.log'.format(
                         sj, session), overwrite = False),
-                    filemode='w+')
+                    filemode='w')
 
-		logging.info('Started preprocessing subject {}, session {}'.format(sj, session))
 		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
 		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
-		                                   montage=None, preload=True, eog=eog) for run in eeg_runs])
+		                                  preload=True, eog=eog) for run in eeg_runs])
 
 		#EEG.replaceChannel(sj, session, replace)
 		EEG.reReference(ref_channels=ref, vEOG=eog[
@@ -126,24 +131,28 @@ class priorityMap(FolderStructure):
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+		EEGica = EEG.copy()
+		EEGica.filter(h_freq=None, l_freq=1,
+		                   fir_design='firwin', skip_by_annotation='edge')
 		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-		             skip_by_annotation='edge')
+		            skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
 		beh, missing = EEG.matchBeh(sj, session, events, event_id, 
-		                             headers = project_param)			
+		                             headers = project_param)
 
-		# # EPOCH DATA
+		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=event_id,
-		         tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
+		        tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
 
-		# ARTIFACT DETECTION
-		#epochs.selectBadChannels(channel_plots = False, inspect = True, RT = None)    
-		epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
+		# AUTMATED ARTIFACT DETECTION
+		epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
+		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEG, method='picard')
+		epochs.applyICA(EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+		del EEGica
 
 		# EYE MOVEMENTS
 		epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
@@ -153,10 +162,14 @@ class priorityMap(FolderStructure):
 						screen_h = screen_h)
 
 		# INTERPOLATE BADS
+		bads = epochs.info['bads']   
 		epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, event_id)
+
+		logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
+					to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
 
 if __name__ == '__main__':
 
@@ -171,17 +184,13 @@ if __name__ == '__main__':
 	# initiate current project
 	PO = priorityMap()
 
-	#Run preprocessing behavior
-	for sj in [2]:
-		print('starting subject {}'.format(sj))
-		if ping == 'ping':
-			event_id = [9, 100, 102, 104, 106]
-		else:
-			event_id = [12,13,14,15,16,17,18,19,21,23,24,25,26,27,28,29,31,32,34,35,36,37,38,39,41,42,43,45,46,\
-						47,48,49,51,52,53,54,56,57,58,59,61,62,63,64,65,67,68,69,71,72,73,74,75,76,78,79,81,82,83,84,85,86,87,89]
+	#Run preprocessing 
+	PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
 
-		PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	#Run preprocessing EEG
+	PO.prepareEEG(sj = 2, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
 			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-				event_id = event_id, project_param = project_param, 
-				project_folder = project_folder, binary = binary, channel_plots = True, inspect = True, ping = ping)
+			event_id = event_id, project_param = project_param, 
+			project_folder = project_folder, binary = binary, 
+			channel_plots = True, inspect = True)
 			

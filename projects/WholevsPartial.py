@@ -58,7 +58,7 @@ project_param = ['practice','nr_trials','trigger','condition',
 nr_sessions = 1
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
-trigger = [10,11,12,19,20,21,22,29]
+event_id = [10,11,12,19,20,21,22,29]
 t_min = -0.5
 t_max = 0.85
 flt_pad = 0.5
@@ -91,7 +91,7 @@ class WholevsPartial(FolderStructure):
 		#PP.prep_JASP(agg_func = 'mean', voi = 'dev_0', data_filter = "", save = True)
 		PP.save_data_file()
 
-	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, trigger, project_param, project_folder, binary, channel_plots, inspect):
+	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, event_id, project_param, project_folder, binary, channel_plots, inspect):
 		'''
 		EEG preprocessing as preregistred @ https://osf.io/b2ndy/register/5771ca429ad5a1020de2872e
 		'''
@@ -121,21 +121,21 @@ class WholevsPartial(FolderStructure):
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-		#EEGica = EEG.copy()
-		#EEGica.filter(h_freq=None, l_freq=1,
-		#                   fir_design='firwin', skip_by_annotation='edge')
+		EEGica = EEG.copy()
+		EEGica.filter(h_freq=None, l_freq=1,
+		                   fir_design='firwin', skip_by_annotation='edge')
 		EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
 		            skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
-		events = EEG.eventSelection(trigger, binary=binary, min_duration=0)
+		events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
 		if sj == 6:
 			events = np.delete(events,3,0) # delete spoke trigger
-		beh, missing = EEG.matchBeh(sj, session, events, trigger, 
+		beh, missing = EEG.matchBeh(sj, session, events, event_id, 
 		                             headers = project_param)
 
 		# EPOCH DATA
-		epochs = Epochs(sj, session, EEG, events, event_id=trigger,
+		epochs = Epochs(sj, session, EEG, events, event_id=event_id,
 		        tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
 
 		# AUTMATED ARTIFACT DETECTION
@@ -158,7 +158,7 @@ class WholevsPartial(FolderStructure):
 		epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
 		# LINK BEHAVIOR
-		epochs.linkBeh(beh, events, trigger)
+		epochs.linkBeh(beh, events, event_id)
 
 		logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
 					to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
@@ -630,7 +630,7 @@ if __name__ == '__main__':
 
 	PO.prepareEEG(sj = 1, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
 			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-			trigger = trigger, project_param = project_param, 
+			event_id = event_id, project_param = project_param, 
 			project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 	for sj in range(1,25):

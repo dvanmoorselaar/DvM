@@ -124,7 +124,7 @@ class PreProcessing(object):
 			for idx in data_comb.index:
 				data_comb.ix[idx,'color_cat_target'] = self.select_color_cat(ast.literal_eval(data_comb.ix[idx,'shapes'])['target'][0])
 		except:
-			print('??')
+			pass
 
 		# store or save data
 		if save:
