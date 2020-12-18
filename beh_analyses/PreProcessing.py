@@ -122,7 +122,7 @@ class PreProcessing(object):
 
 		try: # temporary line to analyze CFS data for Cortex revision
 			for idx in data_comb.index:
-				data_comb.ix[idx,'color_cat_target'] = self.select_color_cat(ast.literal_eval(data_comb.ix[idx,'shapes'])['target'][0])
+				data_comb.loc[idx,'color_cat_target'] = self.select_color_cat(ast.literal_eval(data_comb.loc[idx,'shapes'])['target'][0])
 		except:
 			pass
 
@@ -211,8 +211,8 @@ class PreProcessing(object):
 		upper_bound = df[filt].mean() + 2.5 * df[filt].std()
 
 		for index in df.index:
-			if (self.work_data.ix[index,filt] >= lower_bound) and (self.work_data.ix[index,filt] <= upper_bound):
-				self.work_data.ix[index,'{}_filter'.format(filt)] = True
+			if (self.work_data.loc[index,filt] >= lower_bound) and (self.work_data.loc[index,filt] <= upper_bound):
+				self.work_data.loc[index,'{}_filter'.format(filt)] = True
 
 
 
