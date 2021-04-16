@@ -8,13 +8,10 @@ import os
 import mne
 import pickle
 import math
-import matplotlib
 import warnings
-matplotlib.use('agg') # now it works via ssh connection
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from IPython import embed
 from scipy.fftpack import fft, ifft
@@ -24,7 +21,7 @@ from support.support import select_electrodes, trial_exclusion
 
 class ERP(FolderStructure):
 
-	def __init__(self, eeg, beh, header, baseline):
+	def __init__(self, eeg, beh, header, baseline, flipped = False):
 		''' 
 
 		Arguments
@@ -40,7 +37,7 @@ class ERP(FolderStructure):
 		self.beh = beh
 		self.header = header
 		self.baseline = baseline
-		self.flipped = False
+		self.flipped = flipped
 
 
 	def selectERPData(self, time, l_filter = None, h_filter = None, excl_factor = None):
@@ -303,7 +300,7 @@ class ERP(FolderStructure):
 			RT_split {bool} -- If True data will also be analyzed seperately for fast and slow trials (default: {False})
 		"""
 
-		beh = beh.iloc[idx]
+		beh = beh.iloc[idx].copy()
 		eeg = eeg[idx]
 
 		# create evoked objects using mne functionality and save file

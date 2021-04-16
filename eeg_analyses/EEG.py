@@ -272,12 +272,13 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
                 # drop the last items from the beh file
                 missing_trials = np.hstack((missing_trials, beh['nr_trials'].iloc[-nr_miss:].values))
-                beh.drop(beh.index[-nr_miss], inplace=True)
+                beh.drop(beh.index[-nr_miss:], inplace=True)
                 logging.info('Removed last {} trials because no matches detected'.format(nr_miss))         
                 nr_miss = 0
       
         # keep track of missing trials to allign eye tracking data (if available)   
-        missing = np.array(missing_trials)      
+        missing = np.array(missing_trials)  
+   
         # log number of matches between beh and bdf    
         logging.info('{} matches between beh and epoched data out of {}'.
             format(sum(beh['trigger'].values == bdf_triggers), bdf_triggers.size))           
@@ -294,7 +295,7 @@ class Epochs(mne.Epochs, FolderStructure):
                  on_missing='error', reject_by_annotation=False, verbose=None):
 
         # check whether a preprocessed folder for the current subject exists,
-        # if not make one
+        # if not make onen
         self.sj = sj
         self.session = str(session)
         self.flt_pad = flt_pad
@@ -772,7 +773,7 @@ class Epochs(mne.Epochs, FolderStructure):
             self.sj), self.session], filename='eye_bins.txt'), eye_bins)
 
 
-    def applyICA(self, raw, method='extended-infomax', decim=None, fit_params = None, inspect = True):
+    def applyICA(self, raw, ica_fit, method='extended-infomax', decim=None, fit_params = None, inspect = True):
         '''
 
         Arguments
@@ -791,8 +792,12 @@ class Epochs(mne.Epochs, FolderStructure):
 
         '''
 
-        # make sure that bad electrodes match between both data sets
-        raw.info['bads'] = self.info['bads']
+        # make sure that bad electrodes and 'good' epochs match between both data sets
+        ica_fit.info['bads'] = self.info['bads']
+        if str(type(ica_fit))[-3] == 's':
+            print('fitting data on epochs object')
+            to_drop = [i for i, v in enumerate(ica_fit.selection) if v not in self.selection]
+            ica_fit.drop(to_drop)
 
         # initiate ica
         logging.info('Started ICA')
@@ -800,7 +805,7 @@ class Epochs(mne.Epochs, FolderStructure):
         ica = ICA(n_components=picks.size, method=method, fit_params = fit_params)
         
         # ica is fitted on epoched data
-        ica.fit(self, picks=picks, decim=decim)
+        ica.fit(ica_fit, picks=picks, decim=decim)
 
         # plot the components
         ica.plot_components(colorbar=True, picks=range(picks.size), show=False)
@@ -818,7 +823,7 @@ class Epochs(mne.Epochs, FolderStructure):
         plt.close()
 
         # diagnostic plotting
-        ica.plot_sources(self, show_scrollbars=False, picks=picks, show=False)
+        ica.plot_sources(self, show_scrollbars=False, show=False)
         if inspect:
             plt.show()
         else:

@@ -175,7 +175,6 @@ class DT_sim(FolderStructure):
 		eog = eeg._data[:,eeg.ch_names.index('HEOG'),s:e]
 		eye_idx = eog_filt(eog, eeg.info['sfreq'], windowsize = 200, windowstep = 10, threshold = 25)	
 
-
 		bad_eogs = eeg[eye_idx]
 		idx_bads = bad_eogs.selection
 

@@ -6,7 +6,8 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
-sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
+#sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
+sys.path.append('/Users/dvm/DvM')
 
 import numpy as np
 import seaborn as sns
@@ -129,8 +130,13 @@ class StatPred(FolderStructure):
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+		#EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+		#             skip_by_annotation='edge')
+		EEG_ica = EEG.copy()
 		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-		             skip_by_annotation='edge')
+		            skip_by_annotation='edge')
+		EEG_ica.filter(h_freq=None, l_freq=1, fir_design='firwin',
+		            skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
@@ -145,10 +151,12 @@ class StatPred(FolderStructure):
 
 		# ARTIFACT DETECTION
 		epochs.selectBadChannels(channel_plots = False, inspect = True, RT = None)    
-		epochs.artifactDetection(inspect=False, run = True)
+		#epochs.artifactDetection(inspect=False, run = True)
+		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEG, method='picard')
+		#epochs.applyICA(EEG, method='picard')
+		epochs.applyICA(EEG, EEG_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
 
 		# EYE MOVEMENTS
 		epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
@@ -270,7 +278,8 @@ if __name__ == '__main__':
 	os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
-	project_folder = '/home/dvmoors1/BB/stat_pred'
+	#project_folder = '/home/dvmoors1/BB/stat_pred'
+	project_folder = '/Users/dvm/Desktop/cortex' 
 	os.chdir(project_folder)
 
 	# initiate current project
@@ -288,7 +297,7 @@ if __name__ == '__main__':
 	#PO.prepareBEH('stat_pred', 'beh', ['trial_type','block_type','dist_high'], [['distractor','single_target'],['unpred', 'pred'],['yes','no']], project_param, to_filter)
 
 	#Run preprocessing behavior
-	for sj in range(0):
+	for sj in range(23,24):
 		print('starting subject {}'.format(sj))
 		for session in range(1,3):
 			if (sj % 2 == 0 and session == 2) or (sj % 2 == 1 and session == 1):
@@ -296,10 +305,10 @@ if __name__ == '__main__':
 			else:
 				event_id = [110,120,130,140,112,113,114,121,123,124,131,132,134,141,142,143]
 
-			#PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-			#	t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-			#	event_id = event_id, project_param = project_param, 
-			#	project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+			PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+				t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+				event_id = event_id, project_param = project_param, 
+				project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 			
 
  

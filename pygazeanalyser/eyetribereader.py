@@ -44,7 +44,7 @@ import os.path
 import numpy
 
 from pygazeanalyser.detectors import blink_detection, fixation_detection, saccade_detection
-
+from IPython import embed
 
 def read_eyetribe(filename, start, stop=None, missing=0.0, debug=False):
 	
@@ -131,11 +131,13 @@ def read_eyetribe(filename, start, stop=None, missing=0.0, debug=False):
 	started = False
 	trialend = False
 	
+
 	# loop through all lines
 	for i in range(len(raw)):
 		
 		# string to list
 		line = raw[i].replace('\n','').replace('\r','').split('\t')
+
 		
 		# check if trial has already started
 		if started:

@@ -10,11 +10,18 @@ if hasattr(json.decoder, 'JSONDecodeError'):
 else:
     jsonerror = ValueError
 
-#pbar = ProgressBar()
-
 # get all raw result files
 #files = glob.glob('/Users/dvm/Documents/projects/covert_sequence/raw/*.txt')
-files = glob.glob('/Users/dvm/Documents/projects/present_absent/dist_SL/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/d_prime/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/dist_onset/RT/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/dist_onset/RT_exp2/raw/*.txt')
+files = glob.glob('/Users/dvm/Documents/projects/dist_onset/RT_exp3/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/present_absent/target_SL/exp_1/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/present_absent/target_SL/exp_2/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/present_absent/target_SL/exp_3/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/object/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/control/raw/*.txt')
 
 # set general parameters
 control_sj = True
@@ -97,5 +104,15 @@ else:
 
 # save datafile 
 #df.to_csv('/Users/dvm/Documents/projects/covert_sequence/raw/raw_data.csv')
-df.to_csv('/Users/dvm/Documents/projects/present_absent/dist_SL/raw/raw_data.csv')
-            
+#df.to_csv('/Users/dvm/Documents/projects/d_prime/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/dist_onset/RT/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/dist_onset/RT_exp2/raw/raw_data.csv')
+df.to_csv('/Users/dvm/Documents/projects/dist_onset/RT_exp3/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/present_absent/target_SL/exp_1/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/present_absent/target_SL/exp_2/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/present_absent/target_SL/exp_3/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/raw_data.csv') 
+#df.to_csv('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/object/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/control/raw/raw_data.csv')
+         

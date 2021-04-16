@@ -1,5 +1,6 @@
 import sys
 import logging
+logging.getLogger('matplotlib').setLevel(logging.ERROR)
 sys.path.append('/Users/dvm/DvM')
 
 import seaborn as sns
@@ -7,9 +8,9 @@ import seaborn as sns
 from IPython import embed
 from beh_analyses.PreProcessing import *
 from eeg_analyses.EEG import * 
-#from eeg_analyses.ERP import * 
+from eeg_analyses.ERP import * 
 #from eeg_analyses.BDM import * 
-#from eeg_analyses.TF import * 
+from eeg_analyses.TF import * 
 from support.FolderStructure import *
 from support.support import *
 from stats.nonparametric import *
@@ -35,7 +36,7 @@ sj_info = {'1': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 			'17': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 			'18': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 			'19': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
-			'20': {'tracker': (False, '', None, '',0), 'replace':{}},
+			'20': {'tracker': (False, '', None, '',0), 'replace':{}},# final beh trials are missing??????
 			'21': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 			'22': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
 			'23': {'tracker': (True, 'asc', 500, 'Onset cue',0), 'replace':{}},
@@ -59,8 +60,8 @@ nr_sessions = 1
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
 event_id = [10,11,12,19,20,21,22,29]
-t_min = -0.5
-t_max = 0.85
+t_min = -0.5 # offset memory
+t_max = 0.85 # onset test display
 flt_pad = 0.5
 eeg_runs = [1]
 binary = 3840
@@ -68,8 +69,8 @@ binary = 3840
 # eye tracker info
 tracker_ext = 'asc'
 eye_freq = 500
-start_event = 'Onset search'
-tracker_shift = 0
+start_event = 'Onset memory'
+tracker_shift = 0#-0.8
 viewing_dist = 80 
 screen_res = (1680, 1050) 
 screen_h = 29
@@ -110,6 +111,7 @@ class WholevsPartial(FolderStructure):
                         filename='preprocess_sj{}_ses{}.log'.format(
                         sj, session), overwrite = False),
                     filemode='w')
+		
 
 		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
 		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
@@ -121,11 +123,11 @@ class WholevsPartial(FolderStructure):
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-		EEGica = EEG.copy()
-		EEGica.filter(h_freq=None, l_freq=1,
-		                   fir_design='firwin', skip_by_annotation='edge')
+		EEG_ica = EEG.copy()
 		EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
 		            skip_by_annotation='edge')
+		EEG_ica.filter(h_freq=None, l_freq=1, fir_design='firwin',
+		            skip_by_annotation='edge')		
 
 		# MATCH BEHAVIOR FILE
 		events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
@@ -137,14 +139,15 @@ class WholevsPartial(FolderStructure):
 		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=event_id,
 		        tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
+		epochs_ica = Epochs(sj, session, EEG_ica, events, event_id=event_id,
+		        tmin=t_min, tmax=t_max, baseline=(None,None), flt_pad = flt_pad, reject_by_annotation = True)
 
 		# AUTMATED ARTIFACT DETECTION
 		epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
 		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
-		del EEGica
+		epochs.applyICA(EEG, EEG_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
 
 		# EYE MOVEMENTS
 		epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
@@ -163,177 +166,72 @@ class WholevsPartial(FolderStructure):
 		logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
 					to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
 
-	def anticipatoryEye(self, sj_info, nr_bins, start, end):
+	def visualMarkSaccades(self, sj, overwrite_tracker = False):
+		'''
+		Visual inspection of saccades detected by automatic step algorythm
 		'''
 
-		'''
+		# read in data
+		beh, eeg = PO.loadData(sj, 'ses-1', False, (-0.5,0.85),'HEOG', 1,
+		 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = False)
 		
-		# initiate SGD class and EYE class
-		SD = SaccadeGlissadeDetection(500.0)
-		EO = EYE(sfreq = 500.0)
-		# create timing bins
-		bins = np.linspace(start,end, nr_bins)
+		# crop data to time window of interest to inspect eyemovements
+		eeg.crop(tmin = -0.5, tmax = 0.8)
+		
+		# apply baseline correction for visualization purposes
+		eeg.apply_baseline((None,None))
 
-		sac_info = {'cue':[],'no':[]}
-		beh_info = {'cue':[],'no':[]}
+		# get eog data of interest
+		eog = eeg._data[:,eeg.ch_names.index('HEOG')]
+		eye_idx = eog_filt(eog, eeg.info['sfreq'], windowsize = 200, windowstep = 10, threshold = 20)	
 
-		for sj in sj_info.keys():
+		# inspect eog channels
+		bad_eogs = eeg[eye_idx]
+		idx_bads = bad_eogs.selection
+		bad_eogs.plot(block=True, n_epochs=5, n_channels=2, picks='eog', scalings='auto')
+
+		missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eogs.selection])
+		eye_idx = np.delete(eye_idx, missing)
+
+		if beh['eye_bins'].isnull().values.any() or overwrite_tracker:
+			beh['eye_bins'] = 0  
+
+		beh['eye_bins'][eye_idx] = 99
+		pickle.dump(beh,open(self.FolderTracker(extension=['beh', 'processed'],
+            	filename='subject-{}_ses-1.pickle'.format(sj)),'wb'))
+
+	def eyePositionControl(self, sj, eeg, beh, baseline = (-0.2,0)):
+		'''
+		calculate systematic eye bias (as indexed via HEOG) on lateralized cue trials
+		'''
+
+		base_idx = [np.argmin(abs(eeg.times - t)) for t in baseline]
+		base_idx = slice(base_idx[0], base_idx[1]+1)
+
+		l_idx = np.where(beh.cue_loc == '1')
+		r_idx = np.where(beh.cue_loc == '2')
+
+		cnd_heog = {'partial':[], 'whole':[]}
+		cnd_heog['times'] = eeg.times
+
+		# analyze eye bias seperate for partial and whole conditions
+		for cnd in ['partial', 'whole']:
+			l_idx = np.where((beh.cue_loc == '1') & (beh.block_type == cnd))[0]
+			r_idx = np.where((beh.cue_loc == '2') & (beh.block_type == cnd))[0]
 			
-			if not sj_info[sj]['tracker'][0] or not sj_info[sj]['tracker'][3] == 'Onset cue': continue
+			# get HEOG data of interest
+			left = np.mean(eeg._data[l_idx,eeg.ch_names.index('HEOG') ], axis = 0)  
+			right = np.mean(eeg._data[r_idx,eeg.ch_names.index('HEOG') ] * -1, axis = 0) 
 
-			eye_file = self.FolderTracker(extension = ['eye','raw'], \
-					filename = 'sub_{}_session_1.asc'.format(sj))
-			beh_file = self.FolderTracker(extension = ['beh','raw'], \
-										filename = 'subject-{}_ses_1.csv'.format(sj))
+			# average left and right trials and baseline correct
+			avg = np.stack((left, right)).mean(axis = 0)
+			avg_base = avg - avg[base_idx].mean()   
+			cnd_heog[cnd] = avg_base
 
-			eye, beh = EO.readEyeData(sj, [eye_file], [beh_file])
-			x, y, times = EO.getXY(eye, start = start, end = end, start_event = sj_info[sj]['tracker'][3])	
-			x, y = EO.setXY(x,y, times, (-200,0))
-			# loop over all trials
-			for i, (x_, y_) in enumerate(zip(x,y)):
-				info = SD.detectEvents(x_, y_, output = 'dict')
-				
-				if info[0] not in  [{},np.nan]:
-					# loop over saccades
-					for s in info[0].keys():
-						sac_info[beh['cue'].values[i]].append(times[info[0][s][0]: info[0][s][1]].mean())	
-						beh_info[beh['cue'].values[i]].append(beh['block_type'].values[i])
-		
-		# bin data for whole and partial blocks seperately
-		plt.figure(figsize = (30,10))
-		x = np.arange(bins.size)
-		width = 0.2
-		# set informative x labels
-		x_label = x[[np.argmin(abs(bins - t)) for t in (0,100)]]
-
-		for idx, cue in enumerate(['cue','no']):
-			bin_nr = np.digitize(sac_info[cue], bins)
-			binned = np.array([(sum((np.array(beh_info[cue])[bin_nr == b] == 'partial')),
-				  sum((np.array(beh_info[cue])[bin_nr == b] == 'whole'))) for b in range(bins.size)])
-			ax = plt.subplot(1,2 , idx + 1, title = cue, ylim = (0,180))
-			plt.bar(x, binned[:,0], width, color = 'green', label = 'partial')	
-			plt.bar(x +width, binned[:,1], width, color = 'red', label = 'whole')
-			ax.set_xticks(x_label)
-			ax.set_xticklabels(['cue \n on','cue \n off'])
-			sns.despine(offset=50, trim = False)	
-			plt.legend(loc = 'best')
-
-		plt.tight_layout()
-		plt.savefig(self.FolderTracker(['eye','analysis'], filename = 'anticipatory1.pdf'))
-		plt.close()
-
-		
+		pickle.dump(cnd_heog,open(self.FolderTracker(extension=['eye', 'cue_control'],
+            	filename='subject-{}_heog.pickle'.format(sj)),'wb'))
 
 
-
-
-
-	def binEye(self, EEG, missing, time_window, threshold=30, windowsize=50, windowstep=25, channel='HEOG', tracker = True, tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500):
-		'''
-		Marking epochs containing step-like activity that is greater than a given threshold
-
-		Arguments
-		- - - - -
-		self():
-		EEG(object): Epochs object
-		missing
-		time_window (tuple): start and end time in seconds
-		threshold (int): range of amplitude in microVolt
-		windowsize (int): total moving window width in ms. So each window's width is half this value
-		windowsstep (int): moving window step in ms
-		channel (str): name of HEOG channel
-		tracker (boolean): is tracker data reliable or not
-		tracker_shift (float): specifies difference in ms between onset trigger and event in eyetracker data
-		start_event (str): marking onset of trial in eyetracker data
-		extension (str): type of eyetracker file (now supports .asc/ .tsv)
-		eye_freq (int): sampling rate of the eyetracker
-
-
-		Returns
-		- - - -
-
-		'''
-        
-		sac_epochs = []
-
-		# CODE FOR HEOG DATA
-		idx_ch = EEG.ch_names.index(channel)
-		idx_s, idx_e = tuple([np.argmin(abs(EEG.times - t))
-		                      for t in time_window])
-		windowstep /= 1000 / EEG.info['sfreq']
-		windowsize /= 1000 / EEG.info['sfreq']
-
-		for i in range(len(EEG)):
-			up_down = 0
-			for j in np.arange(idx_s, idx_e - windowstep, windowstep):
-
-				w1 = np.mean(EEG._data[i, idx_ch, int(
-					j):int(j + windowsize / 2) - 1])
-				w2 = np.mean(EEG._data[i, idx_ch, int(
-					j + windowsize / 2):int(j + windowsize) - 1])
-
-			if abs(w1 - w2) > threshold:
-				up_down += 1
-			if up_down == 2:
-				sac_epochs.append(i)
-				break
-
-		logging.info('Detected {0} epochs ({1:.2f}%) with a saccade based on HEOG'.format(
-				len(sac_epochs), len(sac_epochs) / float(len(EEG)) * 100))
-
-		# read in epochs removed via artifact detection
-		if os.path.exists(self.FolderTracker(extension=[
-		                        'preprocessing', 'subject-{}'.format(EEG.sj), EEG.session], 
-		                        filename='noise_epochs.txt')):
-			noise_epochs = np.loadtxt(self.FolderTracker(extension=[
-		                        'preprocessing', 'subject-{}'.format(EEG.sj), EEG.session], 
-		                        filename='noise_epochs.txt'))
-		else:
-			noise_epochs = np.array([])    
-
-		# do binning based on eye-tracking data
-		if tracker:
-			# CODE FOR EYETRACKER DATA 
-			EO = EYE(sfreq = eye_freq)
-			# correct timings for subjects without correct eyetracker log files
-			s_time = (EEG.tmin + EEG.flt_pad) * 1000
-			e_time = (EEG.tmax - EEG.flt_pad) * 1000
-			drift_correct = (-200,0)
-			if start_event == 'Onset memory':
-				s_time += tracker_shift * 1000
-				e_time += tracker_shift * 1000
-				drift_correct = (600,800)
-			eye_bins, trial_nrs = EO.eyeBinEEG(EEG.sj, int(EEG.session), 
-		                        int(s_time), int(e_time), drift_correct = drift_correct, start_event = start_event, extension = extension)
-		else:
-			eye_bins = np.array([])    
-
-		# correct for missing data (if eye recording is stopped during experiment)
-		if eye_bins.size > 0 and eye_bins.size < EEG.nr_events:
-			# create array of nan values for all epochs (UGLY CODING!!!)
-			temp = np.empty(EEG.nr_events) * np.nan
-			temp[trial_nrs - 1] = eye_bins
-			eye_bins = temp
-
-			temp = (np.empty(EEG.nr_events) * np.nan)
-			temp[trial_nrs - 1] = trial_nrs
-			trial_nrs = temp
-		elif eye_bins.size == 0 or tracker == False:
-			eye_bins = np.empty(EEG.nr_events + missing.size) * np.nan
-			trial_nrs = np.arange(EEG.nr_events + missing.size) + 1
-
-		# remove trials that are not present in bdf file, if any
-		miss_mask = np.in1d(trial_nrs, missing, invert = True)
-		eye_bins = eye_bins[miss_mask]      
-
-		# remove trials that have been deleted from eeg 
-		eye_bins = np.delete(eye_bins, noise_epochs)
-		logging.info('Detected {0} bins ({1} with data) based on tracker ({2:.2f} > 1 degree)'.
-		            format(eye_bins.size, (~np.isnan(eye_bins)).sum(), sum(eye_bins > 1) / float(len(EEG)) * 100))
-
-		# save array of deviation bins    
-		np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-		    EEG.sj), EEG.session], filename='eye_bins.txt'), eye_bins)	
 
 	# analyze BEHAVIOR
 	def behExp1(self):
@@ -377,243 +275,6 @@ class WholevsPartial(FolderStructure):
 		plt.savefig(self.FolderTracker(['beh-exp1','analysis'], filename = 'beh-main.pdf'))
 		plt.close()
 
-
-	def cdaTopo(self):
-		'''
-
-		'''	
-
-		# read in cda data
-		with open(self.FolderTracker(['erp','cue_loc'], filename = 'topo_cda.pickle') ,'rb') as handle:
-			topo = pickle.load(handle)
-
-		with open(self.FolderTracker(['erp','cue_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
-			info = pickle.load(handle)
-
-		
-		for idx, cnd in enumerate(['partial-cue', 'whole-cue']):
-			plt.figure(figsize = (30,10))
-			T = np.mean(np.stack([topo[t][cnd] for t in topo]), axis = 0)
-
-			embed()
-
-	def plotCDA(self):
-		
-		# read in cda data
-		with open(self.FolderTracker(['erp','cue_loc'], filename = 'cda.pickle') ,'rb') as handle:
-			erp = pickle.load(handle)
-
-		embed()
-
-		with open(self.FolderTracker(['erp','cue_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
-			info = pickle.load(handle)
-
-		plt.figure(figsize = (30,10))
-		diff = []
-		for idx, cnd in enumerate(['partial-cue', 'whole-cue']):
-			ax =  plt.subplot(1,3, idx + 1, title = cnd, ylabel = 'mV', xlabel = 'time (ms)')
-			ipsi = np.mean(np.stack([erp[e][cnd]['ipsi'] for e in erp]), axis = 1)
-			contra = np.mean(np.stack([erp[e][cnd]['contra'] for e in erp]), axis = 1)
-			diff.append(contra - ipsi)
-			err_i, ipsi  = bootstrap(ipsi)	
-			err_c, contra  = bootstrap(contra)	
-
-			plt.ylim(-6,6)
-			plt.axhline(y = 0, color = 'black')
-			plt.plot(info['times'], ipsi, label = 'ipsi', color = 'red')
-			plt.plot(info['times'], contra, label = 'contra', color = 'green')
-			plt.fill_between(info['times'], ipsi + err_i, ipsi - err_i, alpha = 0.2, color = 'red')	
-			plt.fill_between(info['times'], contra + err_c, contra - err_c, alpha = 0.2, color = 'green')	
-
-			plt.legend(loc = 'best')
-			sns.despine(offset=50, trim = False)
-
-		ax =  plt.subplot(1,3, 3, title = 'cda', ylabel = 'mV', xlabel = 'time (ms)')
-		for i, cnd in enumerate(['partial','whole']):
-			err, x  = bootstrap(diff[i])
-			plt.plot(info['times'], x, label = cnd, color = ['red','green'][i])
-			plt.fill_between(info['times'], x + err, x - err, alpha = 0.2, color = ['red','green'][i])
-			self.clusterPlot(diff[i], 0, 0.05, info['times'], ax.get_ylim()[0] + 0.05*(i+1), color = ['red','green'][i])
-		plt.axhline(y = 0, color = 'black')
-
-		plt.legend(loc = 'best')
-		sns.despine(offset=50, trim = False)	
-
-		plt.tight_layout()
-		plt.savefig(self.FolderTracker(['erp','cue_loc'], filename = 'cda.pdf'))
-		plt.close()
-
-	def clusterPlot(self, X1, X2, p_val, times, y, color, ls = '-'):
-		'''
-		plots significant clusters in the current plot
-		'''	
-
-		# indicate significant clusters of individual timecourses
-		sig_cl = clusterBasedPermutation(X1, X2, p_val = p_val)
-		mask = np.where(sig_cl < 1)[0]
-		sig_cl = np.split(mask, np.where(np.diff(mask) != 1)[0]+1)
-		for cl in sig_cl:
-			plt.plot(times[cl], np.ones(cl.size) * y, color = color, ls = ls)
-
-	def plotTF(self):
-		'''
-
-		'''
-
-		with open(self.FolderTracker(['tf','wavelet'], filename = 'plot_dict.pickle') ,'rb') as handle:
-			info = pickle.load(handle)
-		times = info['times']	
-
-		files = glob.glob(self.FolderTracker(['tf','wavelet'], filename = '*-tf.pickle'))
-		tf = []
-		for file in files:
-			with open(file ,'rb') as handle:
-				tf.append(pickle.load(handle))
-
-		contra_idx = info['ch_names'].index('PO7')	
-		ipsi_idx = info['ch_names'].index('PO8')
-
-		# plot conditions
-		plt.figure(figsize = (30,10))
-		alpha = {'partial':[],'whole':[]}
-		for idx, cnd in enumerate(['partial','whole']):
-			X = np.stack([tf[i][cnd]['base_power'][:,contra_idx,:] for i in range(len(tf))]) - \
-				 np.stack([tf[i][cnd]['base_power'][:,ipsi_idx,:] for i in range(len(tf))])	 
-			alpha[cnd] = X[:,6:12,:].mean(axis = 1)
-			#cl_p_vals = clusterBasedPermutation(X,0)
-			X = X.mean(axis = 0)
-			#X[cl_p_vals == 1] = 0
-			ax = plt.subplot(2,2, idx + 1, title = 'TF-{}'.format(cnd), ylabel = 'freq', xlabel = 'Time (ms)')
-			plt.imshow(X, aspect = 'auto', origin = 'lower', 
-						cmap = cm.jet, interpolation = None, vmin = -1, vmax = 1, extent = [times[0], times[-1],0,40])
-			plt.yticks(info['frex'][::4])
-			plt.colorbar()
-			sns.despine(offset=50, trim = False)
-
-		ax = plt.subplot(2,1, 2, title = 'alpha suppression', ylim = (-1,0),ylabel = 'mV', xlabel = 'Time (ms)')
-		for i, cnd in enumerate(['partial','whole']):
-			err, x = bootstrap(alpha[cnd])
-			plt.plot(times, x, label = cnd, color = ['red','green'][i])
-			plt.fill_between(times, x + err, x - err, alpha = 0.2, color = ['red','green'][i])
-			self.clusterPlot(alpha[cnd], 0, 0.05, times, ax.get_ylim()[0] + 0.05*(i+1), color = ['red','green'][i])
-		plt.legend(loc = 'best')
-		sns.despine(offset=50, trim = False)
-
-		plt.tight_layout()	
-		plt.savefig(self.FolderTracker(['tf','wavelet'], filename = 'tf.pdf'))
-		plt.close()
-
-	def bdmBlock(self):
-		'''
-
-		'''
-
-		with open(self.FolderTracker(['bdm','block_type'], filename = 'plot_dict.pickle') ,'rb') as handle:
-			info = pickle.load(handle)
-		times = info['times']	
-
-
-		# plot conditions
-		plt.figure(figsize = (30,20))
-		norm = MidpointNormalize(midpoint=1/2.0)
-
-		diag = {'no-cue':[],'cue':[]}
-		for idx, cue in enumerate(['no-cue','cue']):
-
-			files = glob.glob(self.FolderTracker(['bdm','block_type',cue], filename = 'class_*_perm-False-broad.pickle'))
-			bdm = []
-			for file in files:
-				with open(file ,'rb') as handle:
-					bdm.append(pickle.load(handle))
-
-			X = np.stack([bdm[i]['all']['standard'] for i in range(len(bdm))])
-			diag[cue] = np.vstack([np.diag(x) for x in X]) 
-			cl_p_vals = clusterBasedPermutation(X,1/2.0)
-			X = X.mean(axis = 0)
-			X[cl_p_vals == 1] = 1/2.0
-	
-			# plot GAT
-			ax = plt.subplot(2,2, idx +1, title = 'GAT-{}'.format(cue), ylabel = 'train time (ms)', xlabel = 'test time (ms)')
-			plt.imshow(X, norm = norm, aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]], 
-						cmap = cm.bwr, interpolation = None, vmin = 0.45, vmax = 0.6)
-			plt.colorbar()
-			sns.despine(offset=50, trim = False)
-
-		ax = plt.subplot(2,1, 2, title = 'Diagonal', ylabel = 'dec acc (%)', xlabel = 'time (ms)', ylim = (0.45,0.6), xlim = (times[0],times[-1]))
-		for i, key in enumerate(diag.keys()):
-			err, x = bootstrap(diag[key])
-			plt.plot(times, x, color = ['red','green'][i], label = key)
-			plt.fill_between(times, x + err, x - err, alpha = 0.2, color = ['red','green'][i])
-			self.clusterPlot(diag[key], 1/2.0, 0.05, times, ax.get_ylim()[0] + 0.01*(i+1), color = ['red','green'][i])
-		
-		self.clusterPlot(diag['cue'], diag['no-cue'], 0.05, times, ax.get_ylim()[0] + 0.01*(3), color = 'black')
-
-		plt.axhline(y = 1/2.0, color = 'black', ls = '--')
-		sns.despine(offset=50, trim = False)
-		plt.legend(loc = 'best')
-
-		plt.tight_layout()	
-		plt.savefig(self.FolderTracker(['bdm'], filename = 'block_type-decoding.pdf'))
-		plt.close()	
-
-	def bdmCue(self):
-		'''
-
-		'''
-
-		with open(self.FolderTracker(['bdm','cue_loc'], filename = 'plot_dict.pickle') ,'rb') as handle:
-			info = pickle.load(handle)
-		times = info['times']	
-
-		files = glob.glob(self.FolderTracker(['bdm','cue_loc'], filename = 'class_*_perm-False-broad.pickle'))
-		bdm = []
-		for file in files:
-			print(file)
-			with open(file ,'rb') as handle:
-				bdm.append(pickle.load(handle))
-
-		# plot conditions
-		plt.figure(figsize = (30,20))
-		norm = MidpointNormalize(midpoint=1/3.0)
-		diag = {'partial':0,'whole':0}
-		for idx, cnd in enumerate(['partial','whole']):
-						
-			X = np.stack([bdm[i][cnd]['standard'] for i in range(len(bdm))])
-			diag[cnd] = np.vstack([np.diag(x) for x in X]) 
-			cl_p_vals = clusterBasedPermutation(X,1/3.0)
-			X = X.mean(axis = 0)
-			
-			
-			# plot diagonal
-			# ax = plt.subplot(2,2, idx + 3, title = 'Diagonal-{}'.format(cnd), ylabel = 'dec acc (%)', xlabel = 'time (ms)', ylim = (0.3,0.4))
-			# plt.plot(times, np.diag(X))
-			# plt.axhline(y = 1/3.0, color = 'black', ls = '--')
-			# sns.despine(offset=50, trim = False)
-
-			# plot GAT
-			X[cl_p_vals == 1] = 1/3.0
-			ax = plt.subplot(2,2, idx + 1, title = 'GAT-{}'.format(cnd), ylabel = 'train time (ms)', xlabel = 'test time (ms)')
-			plt.imshow(X, norm = norm, aspect = 'auto', origin = 'lower',extent = [times[0],times[-1],times[0],times[-1]], 
-						cmap = cm.bwr, interpolation = None, vmin = 1/3.0, vmax = 0.5)
-			plt.colorbar()
-			sns.despine(offset=50, trim = False)
-
-		ax = plt.subplot(2,1, 2, title = 'Diagonal', ylabel = 'dec acc (%)', xlabel = 'time (ms)')
-		for i, cnd in enumerate(['partial', 'whole']):
-				err, x = bootstrap(diag[cnd])
-				plt.plot(times, x, label = cnd, color = ['red','green'][i])
-				plt.fill_between(times, x + err, x - err, alpha = 0.2, color = ['red','green'][i])
-				self.clusterPlot(diag[cnd], 1/3.0, 0.05, times, ax.get_ylim()[0] + 0.01*(i+1), color = ['red','green'][i])
-				
-		self.clusterPlot(diag['partial'], diag['whole'], 0.05, times, 0.3,'black', '--')
-		plt.axhline(y = 1/3.0, color = 'black', ls = '--')
-		sns.despine(offset=50, trim = False)
-		plt.legend(loc = 'best')
-
-		plt.tight_layout()	
-		plt.savefig(self.FolderTracker(['bdm'], filename = 'cue_loc-decoding.pdf'))
-		plt.close()
-
 if __name__ == '__main__':
 	
 	# Specify project parameters
@@ -625,26 +286,49 @@ if __name__ == '__main__':
 	#PO.prepareBEH(project, 'beh', ['condition','cue'], [['whole','partial'],['cue','no']], project_param)
 	#PO.prepareBEH(project, 'beh-exp1', ['condition','cue','set_size'], [['whole','partial'],['cue','no'],[3,5]], project_param + ['set_size'])
 
-	# eye analysis
-	#PO.anticipatoryEye(sj_info,  nr_bins = 40, start = -500, end = 850)
+	#PO.visualMarkSaccades(12, overwrite_tracker = False)
 
-	PO.prepareEEG(sj = 1, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-			event_id = event_id, project_param = project_param, 
-			project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+	# PO.prepareEEG(sj = 3, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	#    		t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+	#    		event_id = event_id, project_param = project_param, 
+	#    		project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 
 	for sj in range(1,25):
-		pass
 		
+		# read in data
+		beh, eeg = PO.loadData(sj, 'ses-1',True, (-0.4,0.85),'HEOG', 1,
+		 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = True)
 
+		# eyemovent control
+		PO.eyePositionControl(sj, eeg, beh)
 
 		# # CDA analysis
-		#erp = ERP(header = 'cue_loc', baseline = [-0.2,0], eye = False)
-		#erp.selectERPData(sj = sj, time = [-0.2, 0.85], l_filter = False) 
-		#erp.ipsiContra(sj = sj, left = [1], right = [2], l_elec = ['PO7'], 
-		#								r_elec = ['PO8'], midline = None, balance = False, erp_name = 'cda')
-		# erp.topoFlip(left = [1])
-		# erp.topoSelection(sj = sj, loc = [1,2], midline = None, topo_name = 'cda')
+		# erp = ERP(eeg, beh, 'cue_loc', (-0.2,0))
+		# erp.selectERPData(time = [-0.2, 0.85], h_filter = 6, excl_factor = None) 
+		# erp.topoFlip(left = ['1'], header = 'cue_loc')
+		# erp.ipsiContra(sj = sj, left = ['1'], right = ['2'], l_elec = ['P7'], r_elec = ['P8'], 
+		#  				conditions = ['partial','whole'], cnd_header = 'block_type', 
+		#  				midline = None, erp_name = 'cda', RT_split = False)
+
+		# CDA analysis (topoplot left minus right cue)
+		# read in data
+		# beh, eeg = PO.loadData(sj, 'ses-1',True, (-0.4,0.85),'HEOG', 1,
+		#  		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = True)
+
+		# erp = ERP(eeg, beh, 'cue_loc', (-0.2,0), flipped = True)
+		# erp.selectERPData(time = [-0.2, 0.85], h_filter = 6, excl_factor = None) 
+		# left trials
+		# erp.ipsiContra(sj = sj, left = ['1'], right = [], l_elec = ['P7'], r_elec = ['P8'], 
+		#  				conditions = ['partial','whole'], cnd_header = 'block_type', 
+		#  				midline = None, erp_name = 'cda_left', RT_split = False)
+
+		# beh, eeg = PO.loadData(sj, 'ses-1',True, (-0.4,0.85),'HEOG', 1,
+		#  		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = True)	
+		
+		# right trials	
+		# erp.ipsiContra(sj = sj, left = [], right = ['2'], l_elec = ['P7'], r_elec = ['P8'], 
+		#  				conditions = ['partial','whole'], cnd_header = 'block_type', 
+		#  				midline = None, erp_name = 'cda_right', RT_split = False)				
 
 		# # BDM analysis
 		#bdm = BDM('cue_loc', nr_folds = 10, eye = False)
@@ -657,12 +341,17 @@ if __name__ == '__main__':
 		# no-cue trials (whole vs partial)
 		#bdm = BDM('block_type', nr_folds = 10, eye = False)
 		#bdm.Classify(sj, cnds = 'all', cnd_header = 'block_type', bdm_labels = ['partial','whole'], factor = dict(cue = ['no']), time = (-0.5, 0.85), nr_perm = 0, bdm_matrix = True)
-		
-		# TF analysis
-		# tf = TF()
-		# tf.TFanalysis(sj = sj, cnds = ['partial','whole'], 
-	 #  			  cnd_header ='block_type', base_period = (-0.2,0), 
-		# 		  time_period = (0,0.85), method = 'wavelet', flip = dict(cue_loc = '1'), downsample = 4)
+
+		# read in data
+		# beh, eeg = PO.loadData(sj, 'ses-1',True, (-0.4,0.85),'HEOG', 1,
+		#  		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = True)
+
+		# # do TF analysis
+		# tf = TF(beh, eeg, laplacian = False)
+		# tf.TFanalysis(sj, cnds = ['whole','partial'], cnd_header = 'block_type', base_type = 'conspec', min_freq = 4, max_freq = 40,
+		# 			num_frex = 18, time_period = (-0.4,0.85), base_period = (-0.4,-0.1), elec_oi = 'all', method = 'wavelet', 
+		# 			flip = dict(cue_loc = ['1']), downsample = 4, tf_name = 'no_lapl_4-40')
+
 
 	
 		# read in preprocessed data
