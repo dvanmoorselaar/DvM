@@ -113,22 +113,28 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         logging.info(
             'EEG data was rereferenced to channels {}'.format(ref_channels))
 
+        # select eog channels
+        eog = self.copy().pick_types(eeg=False, eog=True)
+        
         # rerefence EOG data (vertical and horizontal)
-        idx_v = [self.ch_names.index(vert) for vert in vEOG]
-        idx_h = [self.ch_names.index(hor) for hor in hEOG]
+        idx_v = [eog.ch_names.index(vert) for vert in vEOG]
+        idx_h = [eog.ch_names.index(hor) for hor in hEOG]
 
         if len(idx_v) == 2:
-            self._data[idx_v[0]] -= self._data[idx_v[1]]
+            eog._data[idx_v[0]] -= self._data[idx_v[1]]
         if len(idx_h) == 2:   
-            self._data[idx_h[0]] -= self._data[idx_h[1]]
-        
-        ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
-        to_remove += [vEOG[1], hEOG[1]]
-        self.rename_channels(ch_mapping)
+            eog._data[idx_h[0]] -= self._data[idx_h[1]]
+
         print(
             'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
         logging.info(
             'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
+        
+        # add rereferenced vEOG and hEOG data to self
+        ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
+        eog.rename_channels(ch_mapping)
+        eog.drop_channels([vEOG[1], hEOG[1]])
+        self.add_channels([eog])
 
         # drop ref chans
         self.drop_channels(to_remove)

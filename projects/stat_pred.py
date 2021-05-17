@@ -6,7 +6,6 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
-#sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
 sys.path.append('/Users/dvm/DvM')
 
 import numpy as np
