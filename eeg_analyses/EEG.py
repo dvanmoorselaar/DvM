@@ -35,7 +35,7 @@ from mne.filter import filter_data
 from mne.preprocessing import ICA
 from mne.preprocessing import create_eog_epochs, create_ecg_epochs
 from math import ceil, floor
-from autoreject import Ransac
+from autoreject import Ransac, AutoReject
 
 
 class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
@@ -320,6 +320,23 @@ class Epochs(mne.Epochs, FolderStructure):
         # save number of detected events
         self.nr_events = len(self)
         logging.info('{} epochs created'.format(len(self)))
+
+    def autoRepair(self):
+        '''
+
+        '''
+        # select eeg channels
+        picks = mne.pick_types(self.info, meg=False, eeg=True, stim=False, eog=False,
+                       include=[], exclude=[])
+
+        # initiate parameters p and k
+        n_interpolates = np.array([1, 4, 32])
+        consensus_percs = np.linspace(0, 1.0, 11)
+
+        ar = AutoReject(n_interpolates, consensus_percs, picks=picks,
+                thresh_method='random_search', random_state=42)
+        
+        self = ar.fit_transform(self)  
 
     def applyRansac(self):
         '''

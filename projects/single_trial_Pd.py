@@ -55,7 +55,7 @@ factors = []
 labels = []
 to_filter = ['RT'] 
 project_param = ['practice','nr_trials','trigger','RT', 'subject_nr', 'correct','dist_high','dist_loc','shape',
-                'high_loc', 'target_high','target_loc','target_shape', 'dist_color','trial_type','block_cnt']
+                'high_loc', 'target_high','target_loc','shape', 'dist_color','block_cnt']
 
 
 # eeg info (event_id specified below)
@@ -108,7 +108,7 @@ class singleTrialPd(FolderStructure):
         beh.rename(columns = {'prac': 'practice',
                              'subj':'subject_nr',
                              'dist':'dist_color',
-                             'runNum':'block_count'}, inplace = True)
+                             'runNum':'block_cnt'}, inplace = True)
 
         # change practice info
         beh.loc[beh.practice == 'practice', 'practice'] = 'yes'
@@ -124,17 +124,36 @@ class singleTrialPd(FolderStructure):
         beh['target_high'] = 'low'
         if high_loc:
             locs, counts = np.unique(beh.dist_loc, return_counts= True) 
-            high_loc = locs[np.argmax(counts)]
+            high_loc = int(locs[np.argmax(counts)])
+            beh['high_loc'] = high_loc
+            low_loc = 2 if high_loc == 6 else 2
             beh.loc[beh.dist_loc == high_loc, 'dist_high'] = 'high'
             beh.loc[beh.target_loc == high_loc, 'target_high'] = 'high'
+        else:
+            beh['high_loc'] = 'None'
 
+        # set trigger info
+        beh.loc[(beh.dist_loc == low_loc) & (beh.target_loc == 0),'trigger'] = 134
+        beh.loc[(beh.dist_loc == low_loc) & (beh.target_loc == 4),'trigger'] = 144  
+        beh.loc[(beh.dist_loc == high_loc) & (beh.target_loc == 0),'trigger'] = 131
+        beh.loc[(beh.dist_loc == high_loc) & (beh.target_loc == 4),'trigger'] = 141
+        beh.loc[(beh.dist_loc.isnull()) & (beh.target_loc == low_loc),'trigger'] = 150
+        beh.loc[(beh.dist_loc.isnull()) & (beh.target_loc == high_loc),'trigger'] = 120
+        beh.loc[(beh.dist_loc == high_loc) & (beh.target_loc == low_loc),'trigger'] = 151
+        beh.loc[(beh.dist_loc == 0) & (beh.target_loc == low_loc),'trigger'] = 152
+        beh.loc[(beh.dist_loc == 4) & (beh.target_loc == low_loc),'trigger'] = 153
+        beh.loc[(beh.dist_loc == 4) & (beh.target_loc == 0),'trigger'] = 133
+        beh.loc[(beh.dist_loc == 0) & (beh.target_loc == 4),'trigger'] = 142
+        beh.loc[(beh.dist_loc.isnull()) & (beh.target_loc == 0),'trigger'] = 130
+        beh.loc[(beh.dist_loc.isnull()) & (beh.target_loc == 4),'trigger'] = 140
+        
         # add column with priming info
         nr_prime = 0
         prime_info = [0]
         for idx, row in beh[1:].iterrows():
 
             # check whether dist_loc matches previous trial (and it is not the start of a new block) 
-            if row.dist_loc == beh.iloc[idx-1].dist_loc and ~np.isnan(row.dist_loc) and row.block_count == beh.iloc[idx-1].block_count:
+            if row.dist_loc == beh.iloc[idx-1].dist_loc and ~np.isnan(row.dist_loc) and row.block_cnt == beh.iloc[idx-1].block_cnt:
                 nr_prime += 1
             else:
                 nr_prime = 0
@@ -176,30 +195,31 @@ class singleTrialPd(FolderStructure):
         EEG.setMontage(montage='biosemi64')
 
         #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-        #EEG_ica = EEG.copy()
-        #EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-        #            skip_by_annotation='edge')
-        #EEG_ica.filter(h_freq=None, l_freq=1.5, fir_design='firwin',
-        #            skip_by_annotation='edge')
+        EEG_ica = EEG.copy()
+        EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+                    skip_by_annotation='edge')
+        EEG_ica.filter(h_freq=None, l_freq=1.5, fir_design='firwin',
+                    skip_by_annotation='edge')
 
         # MATCH BEHAVIOR FILE
         events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
-        #self.updateBeh()
-        #beh, missing = EEG.matchBeh(sj, session, events, event_id, 
-        #                                headers = project_param)
-
+        self.updateBeh(sj = sj)
+        beh, missing = EEG.matchBeh(sj, session, events, event_id, 
+                                        headers = project_param)
+                                        
         # # EPOCH DATA
         epochs = Epochs(sj, session, EEG, events, event_id=event_id,
                     tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
-        embed()
+        
+        epochs.autoRepair()
+
         # ARTIFACT DETECTION
-        epochs.selectBadChannels(channel_plots = False, inspect = True, RT = None)    
+        #epochs.selectBadChannels(channel_plots = False, inspect = True, RT = None)    
         #epochs.artifactDetection(inspect=False, run = True)
-        z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
+        #z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
         # ICA
-        #epochs.applyICA(EEG, method='picard')
         epochs.applyICA(EEG, EEG_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
 
         # EYE MOVEMENTS
@@ -210,7 +230,7 @@ class singleTrialPd(FolderStructure):
                         screen_h = screen_h)
 
         # INTERPOLATE BADS
-        epochs.interpolate_bads(reset_bads=True, mode='accurate')
+        #epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
         # LINK BEHAVIOR
         epochs.linkBeh(beh, events, event_id)
@@ -222,6 +242,7 @@ if __name__ == '__main__':
     os.environ['OMP_NUM_THREADS'] = '5'
 
     # Specify project parameters
+    #project_folder = '/research/FGB-ETP-DVM/single_trial_Pd' 
     project_folder = '/Users/dvm/Desktop/Benchi' 
     os.chdir(project_folder)
 
