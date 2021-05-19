@@ -13,7 +13,8 @@ import seaborn as sns
 
 from IPython import embed
 from beh_analyses.PreProcessing import *
-from eeg_analyses.EEG import * 
+from eeg_analyses.EEG import *
+from eeg_analyses.BDM import *  
 
 from support.FolderStructure import *
 from support.support import *
@@ -50,22 +51,23 @@ project = 'Ping'
 factors = []
 labels = []
 to_filter = ['RT'] 
+nr_sessions = 1
 project_param = ['nr_trials','trigger','RT', 'subject_nr', 'block_cnt', 'practice',
 				'block_type', 'correct','dist_high','dist_loc','dist_shape', 
 				'dist_color', 'high_prob_loc', 'target_high','target_loc','target_shape',
-				'target_color','ping','ping_trigger','ping_type','block_cnt','trial_type']
+				'target_color','ping','ping_trigger','ping_type','trial_type']
 
 
 # eeg info (event_id specified below)
-ping = 'no_ping' # 'ping'
+ping = 'ping'
 part = 'beh'
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
 eeg_runs = [1]
 # ping parameters
-t_min = -0.7 
+t_min = -0.2 
 t_max = 0.6
-#event_id = [9, 100, 102, 104, 106]
+event_id = [109, 100, 102, 104, 106, 209, 200, 202, 204, 206]
 # search parameters
 #t_min = -0.1 
 #t_max = 0.6
@@ -127,14 +129,14 @@ class priorityMap(FolderStructure):
 
 		#EEG.replaceChannel(sj, session, replace)
 		EEG.reReference(ref_channels=ref, vEOG=eog[
-		                :2], hEOG=eog[2:], changevoltage=True, to_remove = ['V_do','H_l','Ref_r','Ref_l','EXG7','EXG8'])
+		                :2], hEOG=eog[2:], changevoltage=True, to_remove = ['EXG7','EXG8'])
 		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
 		EEGica = EEG.copy()
-		EEGica.filter(h_freq=None, l_freq=1,
+		EEGica.filter(h_freq=None, l_freq=1.5,
 		                   fir_design='firwin', skip_by_annotation='edge')
-		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
+		EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
 		            skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
@@ -145,14 +147,16 @@ class priorityMap(FolderStructure):
 		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=event_id,
 		        tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
+		epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
+		        tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
 
 		# AUTMATED ARTIFACT DETECTION
 		epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
 		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
-		del EEGica
+		#epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+		#del EEGica
 
 		# EYE MOVEMENTS
 		epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
@@ -185,12 +189,19 @@ if __name__ == '__main__':
 	PO = priorityMap()
 
 	#Run preprocessing 
-	PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
+	#PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
 
 	#Run preprocessing EEG
-	PO.prepareEEG(sj = 2, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-			event_id = event_id, project_param = project_param, 
-			project_folder = project_folder, binary = binary, 
-			channel_plots = True, inspect = True)
-			
+	# PO.prepareEEG(sj = 2, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	# 		t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+	# 		event_id = event_id, project_param = project_param, 
+	# 		project_folder = project_folder, binary = binary, 
+	# 		channel_plots = True, inspect = True)
+	
+	# Run ping decoding
+	sj = 3
+	beh, eeg = PO.loadData(sj, name = 'ses-1', eyefilter=False, eye_window=None)  
+	eeg.baseline = None # temp_fix
+	bdm = BDM(beh, eeg, 'high_prob_loc', nr_folds= 10, method = 'auc', elec_oi = 'all', baseline = (-0.2,0),downsample = 128, bdm_filter = None)
+	dec_output = bdm.Classify(sj, ['yes','no'], 'ping', time = (-0.2,0.6), collapse = False, bdm_labels = [0,2,4,6],  
+						excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = False) 

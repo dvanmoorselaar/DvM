@@ -336,7 +336,7 @@ class Epochs(mne.Epochs, FolderStructure):
         ar = AutoReject(n_interpolates, consensus_percs, picks=picks,
                 thresh_method='random_search', random_state=42)
         
-        self = ar.fit_transform(self)  
+        self, reject_log = ar.fit_transform(self, return_log=True)  
 
     def applyRansac(self):
         '''
@@ -502,7 +502,7 @@ class Epochs(mne.Epochs, FolderStructure):
                 n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
             plt.show()
             plt.close()
-            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection])
+            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection],dtype = int)
             logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
                             missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
             bad_epochs = np.delete(bad_epochs, missing)
@@ -651,7 +651,7 @@ class Epochs(mne.Epochs, FolderStructure):
                 n_epochs=5, n_channels=picks.size, picks=picks, scalings=dict(eeg = 50))
             plt.show()
             plt.close()
-            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection])
+            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection], dtype = int)
             logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
                             missing.size, bad_epochs.size,100 * round(missing.size / float(bad_epochs.size), 2)))
             bad_epochs = np.delete(bad_epochs, missing)
@@ -756,7 +756,7 @@ class Epochs(mne.Epochs, FolderStructure):
         trigger = np.unique(self.events[:,2]) 
         events[[i for i, idx in enumerate(events[:,2]) if idx in trigger],2] = list(range(nr_events))
         sel_tr = events[self.selection, 2]
-        noise_epochs = np.array(list(set(list(range(nr_events))).difference(sel_tr)))  
+        noise_epochs = np.array(list(set(list(range(nr_events))).difference(sel_tr)), dtype = int)  
 
         # do binning based on eye-tracking data
         # check whether eye tracker exists

@@ -37,7 +37,7 @@ from mne import epochs
 ## First step is to specify all project relevant information  
 # subject specific info
 sj_info = {'1': {'replace':{}, 'expertise': 'expert', 'order': ['FA','OM','CT']}, # example replace: replace = {'15': {'session_1': {'B1': 'EXG7'}}}
-			'2': {'replace':{}},
+			'2': {'replace':{}, 'expertise': 'novice', 'order': ['OM','FA','CT']},
 			'3': {'replace':{}},
 			'4': {'replace':{}},
 			'5': {'replace':{}},
@@ -124,6 +124,7 @@ class Meditate(FolderStructure):
         """ 
  
 		# set subject specific parameters
+        missing = np.array([])
         file = 'subject_{}_session_{}_'.format(sj, session)
         replace = sj_info[str(sj)]['replace']
 
@@ -151,12 +152,16 @@ class Meditate(FolderStructure):
         # EPOCH DATA 
         events = EEG.eventSelection(event_id, binary=binary, min_duration=0) 
         epochs = Epochs(sj, session, EEG, events, event_id=event_id, 
-                tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad)  
+                tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad)
+        epochs.baseline = None # temp fix for new mne update
+        beh = pd.DataFrame({'stimulus_type': epochs.events[:,2],
+                            'condition': 'all', 
+                            'expertise': sj_info[str(sj)]['expertise'],
+                            'med_style': sj_info[str(sj)]['order'][session-1]})
 
-        embed()
 		# ARTIFACT DETECTION
         epochs.selectBadChannels(channel_plots = False, inspect = True, RT = None)    
-        z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
+        #z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# EYE MOVEMENTS
         epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
@@ -167,64 +172,11 @@ class Meditate(FolderStructure):
 
         # INTERPOLATE BADS
         epochs.interpolate_bads(reset_bads=True, mode='accurate')
+ 
+        # LINK BEHAVIOR
+        epochs.linkBeh(beh, events, event_id)
 
-		# SAVE BEHAVIOR
-        epochs.save(self.FolderTracker(extension=[ 
-                    'processed'], filename='subject-{}_session_{}-epo.fif'.format(sj, session)), split_size='2GB') 
-        if session == 2:
-            
-            eegs =[]
-            for ses in [1,2]:
-                
-                temp = mne.read_epochs(self.FolderTracker(extension = ['processed'],  
-                            filename = 'subject-{}_session_{}-epo.fif'.format(sj, ses))) 
-                eegs.append(temp)
-            all_epochs = mne.concatenate_epochs(eegs) 
-            all_epochs.save(self.FolderTracker(extension=[ 
-                    'processed'], filename='subject-{}_all-epo.fif'.format(sj)), split_size='2GB') 
- 
-         #ICA 
- 
-        # epochs.applyICA(EEG, method='picard') ## for blinks so may not be necessary 
- 
-
-        # EYE MOVEMENTS 
- 
-        #missing = np.array([]) 
- 
-        #epochs.detectEye(missing, events, len(epochs), time_window = (t_min * 1000, t_max * 1000), 
- 
-                        #tracker_shift= tracker_shift, start_event = start_event, extension = tracker_ext, 
- 
-                        #eye_freq = eye_freq, screen_res = screen_res, viewing_dist = viewing_dist, screen_h = screen_h) 
- 
- 
-        # INTERPOLATE BADS 
- 
-        epochs.interpolate_bads(reset_bads=True, mode='accurate') 
- 
-        # LINK BEHAVIOR 
- 
-       # epochs.linkBeh(beh, events, trigger) ##comment out if dont have behaviour file 
-        epochs.save(self.FolderTracker(extension=[ 
-                    'processed'], filename='subject-{}_session_{}-epo.fif'.format(sj, session)), split_size='2GB') 
-        if session == 2:
-            
-            eegs =[]
-            for ses in [1,2]:
-                
-                temp = mne.read_epochs(self.FolderTracker(extension = ['processed'],  
-                            filename = 'subject-{}_session_{}-epo.fif'.format(sj, ses))) 
-                eegs.append(temp)
-            all_epochs = mne.concatenate_epochs(eegs) 
-            all_epochs.save(self.FolderTracker(extension=[ 
-                    'processed'], filename='subject-{}_all-epo.fif'.format(sj)), split_size='2GB') 
- 
-    # def adjustBEh(self, beh): 
- 
- 
 # now we are actually going to do stuff 
- 
 if __name__ == '__main__': 
  
     # Make sure we are in the correct folder 
@@ -235,7 +187,7 @@ if __name__ == '__main__':
     PO = Meditate() 
 
     ## Run Preprocessing 
-    for sj in [1, 2]: 
+    for sj in []: 
         print('start preprocessing subject {}'.format(sj))
         for session in [1,2]: 
             PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
@@ -243,46 +195,21 @@ if __name__ == '__main__':
             project_param = project_param, project_folder = project_folder, binary = binary,  
             channel_plots = True, inspect = True) 
 
+    ## Decoding analysis 
+    #10=neg, 20=neu, 30=pseudo, 40=pure
+    # step 1: tones vs. words (collapsed across meditation style)  
+    sj = 2
+    beh, eeg = PO.loadData(sj, name = 'all', eyefilter=False, eye_window=None)   
+    beh['type'] = 'word'
+    beh.loc[beh.stimulus_type == 40, 'type'] = 'tone'
+    eeg.baseline = None # temp_fix
+    bdm = BDM(beh, eeg, 'type', nr_folds= 10, method = 'auc', elec_oi = 'all', baseline = (-0.2,0),downsample = 128, bdm_filter = None)
+    bdm.Classify(sj, ['all'], 'condition', time = (-0.5,2), collapse = False, bdm_labels = ['word','tone'],  
+                        excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False) 
    
-# # Then we do decoding 
-    
-        beh, eeg = PO.loadData(sj, False, None, beh_file = False) 
-        # # temp code for pilot 
- 
-        beh = beh.rename(columns = {'condition': 'labels'}, inplace = False) 
-        beh['condition'] = 'all' 
-      
-        #beh = PO.adjustBEh(beh) 
-    
-# Collapse across conditions for decoding
-  #10=neg, 20=neu, 30=pseudo, 40=pure
-    #Written by Ana Radanovic anaradanovica@gmail.com
-
-    #beh.loc[beh.labels == 20, 'labels'] = 10
-    #beh.loc[beh.labels == 40, 'labels'] = 30
-
-
-
-bdm = BDM(beh, eeg, 'labels', nr_folds= 10, method = 'acc', elec_oi = 'all', downsample = 128, bdm_filter = None) # bdm_filter = dict(alpha=(8,12) 
-#bdm = BDM(beh, eeg, 'labels', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, avg = 3) 
-bdm.Classify(sj, ['all'], 'condition', time = (-0.5,2), collapse = False, bdm_labels = [10,20,30,40],  
- 
-                        excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True) 
- 
- 
-# for now just simply quickly plot the results 
-dec_output = pickle.load(open(PO.FolderTracker(['bdm','all','labels'], filename = 'class_{}-broad.pickle'.format(sj)), 'rb')) 
-
-
-#Plotting the decoding output
-plt.plot(dec_output['info']['times'] , dec_output['all']['standard']) 
-    
-plt.axvline ( x = 0, ls = '--') 
     
  
-plt.savefig(PO.FolderTracker(['bdm','all','labels'], filename = 'dec_sj_{}.pdf'.format(sj))) 
- 
-plt.close() 
+
 
 
 
