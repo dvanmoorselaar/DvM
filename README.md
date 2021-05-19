@@ -25,6 +25,7 @@ The necessary steps are outlined below:
 6. pip install PySurfer mne
 7. conda install seaborn
 8. pip install opencv-python
+9. pip install -U autoreject
 
 
 ## Folderstructure

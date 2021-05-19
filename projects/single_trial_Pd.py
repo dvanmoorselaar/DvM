@@ -6,7 +6,7 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
-sys.path.append('/Users/dvm/DvM')
+sys.path.append('/research/FGB-ETP-DVM/DvM')
 
 import numpy as np
 import seaborn as sns
@@ -63,9 +63,9 @@ eog =  ['EXG1','EXG2','EXG3','EXG4']
 ref =  ['EXG5','EXG6']
 event_id = [134,144,131,141,150,120,151,152,153,133,142,130,140]
 eeg_runs = [1]
-t_min = -1
+t_min = -0.2
 t_max = 0.6
-flt_pad = 1
+flt_pad = 0.5
 binary =  0
 
 # eye tracker info
@@ -210,17 +210,18 @@ class singleTrialPd(FolderStructure):
         # # EPOCH DATA
         epochs = Epochs(sj, session, EEG, events, event_id=event_id,
                     tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
+        epochs_ica = Epochs(sj, session, EEG_ica, events, event_id=event_id,
+                    tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
 
         
-        epochs.autoRepair()
+        #epochs.autoRepair()
 
         # ARTIFACT DETECTION
-        #epochs.selectBadChannels(channel_plots = False, inspect = True, RT = None)    
-        #epochs.artifactDetection(inspect=False, run = True)
-        #z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
+        epochs.selectBadChannels(channel_plots = False, inspect = True, RT = None)    
+        z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
         # ICA
-        epochs.applyICA(EEG, EEG_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+        epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
 
         # EYE MOVEMENTS
         epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
@@ -230,7 +231,7 @@ class singleTrialPd(FolderStructure):
                         screen_h = screen_h)
 
         # INTERPOLATE BADS
-        #epochs.interpolate_bads(reset_bads=True, mode='accurate')
+        epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
         # LINK BEHAVIOR
         epochs.linkBeh(beh, events, event_id)
@@ -242,14 +243,13 @@ if __name__ == '__main__':
     os.environ['OMP_NUM_THREADS'] = '5'
 
     # Specify project parameters
-    #project_folder = '/research/FGB-ETP-DVM/single_trial_Pd' 
-    project_folder = '/Users/dvm/Desktop/Benchi' 
+    project_folder = '/research/FGB-ETP-DVM/single_trial_Pd/JoCn_exp1' 
     os.chdir(project_folder)
 
     # initiate current project
     PO = singleTrialPd()
 
-    sj = 1
+    sj = 3
     print('starting subject {}'.format(sj))
     PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
                 t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
