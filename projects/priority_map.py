@@ -15,6 +15,8 @@ import seaborn as sns
 from IPython import embed
 from beh_analyses.PreProcessing import *
 from eeg_analyses.EEG import * 
+from eeg_analyses.BDM import * 
+
 
 from support.FolderStructure import *
 from support.support import *
@@ -198,7 +200,10 @@ if __name__ == '__main__':
 	# ping decoding target only on ping trials
 	embed()
 	beh, eeg = PO.loadData(2,'ping',False, (-0.7,0.6),'HEOG', 1, eye_dict = None)
-	bdm = BDM(beh, eeg, to_decode= 'high_prob_loc', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.75, -0.55))
-	# bdm.Classify(sj, cnds = ['DTsim','DTdisP','DTdisDP'], cnd_header = 'block_type', time = (-0.75, 0.55), 
-	# 			excl_factor = None, gat_matrix = False)
-			
+	beh['condition']='all'
+	bdm = BDM(beh, eeg, to_decode= 'high_prob_loc', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-0.2, 0))
+	dec = bdm.Classify(2, cnds = ['all'], cnd_header = 'condition', time = (-0.75, 0.55), bdm_labels=[0,2,4,6],
+	 			excl_factor = dict(ping=['no']), gat_matrix = False, save = False)
+
+#plt.plot(dec['info']['times'],dec['all']['standard'])
+#plt.show()
