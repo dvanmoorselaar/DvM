@@ -16,16 +16,18 @@ else:
 #files = glob.glob('/Users/dvm/Documents/projects/dist_onset/RT/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/dist_onset/RT_exp2/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/dist_onset/RT_exp3/raw/*.txt')
+files = glob.glob('/Users/dvm/Documents/projects/dist_onset/RT_exp4/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/present_absent/target_SL/exp_1/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/present_absent/target_SL/exp_2/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/present_absent/target_SL/exp_3/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/*.txt')
-files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/object/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/object/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/control/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/probe/raw/*.txt')
 
 # set general parameters
 control_sj = True
-column_idx = 'count_ITI'
+column_idx = 'nr_trials'
 sjs = []
 comb = []
 
@@ -108,11 +110,13 @@ else:
 #df.to_csv('/Users/dvm/Documents/projects/dist_onset/RT/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/dist_onset/RT_exp2/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/dist_onset/RT_exp3/raw/raw_data.csv')
+df.to_csv('/Users/dvm/Documents/projects/dist_onset/RT_exp4/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/present_absent/target_SL/exp_1/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/present_absent/target_SL/exp_2/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/present_absent/target_SL/exp_3/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/raw_data.csv') 
 #df.to_csv('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/raw_data.csv')
-df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/object/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/object/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/control/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/probe/raw/raw_data.csv')
          

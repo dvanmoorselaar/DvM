@@ -55,7 +55,7 @@ factors = []
 labels = []
 to_filter = ['RT'] 
 project_param = ['practice','nr_trials','trigger','RT', 'subject_nr', 'correct','dist_high','dist_loc','shape',
-                'high_loc', 'target_high','target_loc','shape', 'dist_color','block_cnt']
+                'high_loc', 'target_high','target_loc', 'dist_color','block_cnt']
 
 
 # eeg info (event_id specified below)

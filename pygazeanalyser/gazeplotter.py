@@ -34,6 +34,7 @@ import os
 import numpy
 import matplotlib
 from matplotlib import pyplot, image
+from IPython import embed
 
 
 # # # # #
@@ -273,6 +274,7 @@ def draw_raw(x, y, dispsize, imagefile=None, savefilename=None):
 					fixations
 	"""
 	
+	embed()
 	# image
 	fig, ax = draw_display(dispsize, imagefile=imagefile)
 
@@ -381,8 +383,11 @@ def draw_display(dispsize, imagefile=None):
 	"""
 	
 	# construct screen (black background)
-	_, ext = os.path.splitext(imagefile)
-	ext = ext.lower()
+	if imagefile != None:
+		_, ext = os.path.splitext(imagefile)
+		ext = ext.lower()
+	else:
+		ext = '.none'	
 	data_type = 'float32' if ext == '.png' else 'uint8'
 	screen = numpy.zeros((dispsize[1],dispsize[0],3), dtype=data_type)
 	# if an image location has been passed, draw the image

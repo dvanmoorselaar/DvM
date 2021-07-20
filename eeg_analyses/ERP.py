@@ -317,6 +317,37 @@ class ERP(FolderStructure):
 				evoked = eeg[mask].average().apply_baseline(baseline = self.baseline)
 				evoked.save(self.FolderTracker(['erp', self.header],'{}_{}-ave.fif'.format(fname, rt)))
 
+	def conditionERP(self, sj, conditions, cnd_header, erp_name = '', collapsed = True, RT_split = False):
+		'''
+
+		'''
+
+		if collapsed and conditions != ['all']:
+			cnd += ['all']
+
+		# loop over unique levels of interest
+		for factor in np.unique(self.beh[self.header]):
+			
+			idx_f = np.where(self.beh[self.header] == factor)[0]	
+			
+			# loop over conditions
+			for cnd in conditions:
+				
+				# select condition indices
+				if cnd == 'all':
+					idx_c = np.arange(self.beh[cnd_header].size)
+				else:	
+					idx_c = np.where(self.beh[cnd_header] == cnd)[0]
+
+				idx = np.array([idx for idx in idx_c if idx in idx_f])
+			
+				if idx.size == 0:
+					print('no data found for {}'.format(cnd))
+					continue
+				
+				fname = 'sj_{}-{}-{}-{}'.format(sj, erp_name, factor, cnd)
+				self.createERP(self.beh, self.eeg, idx, fname, RT_split = RT_split)
+
 	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, erp_name = '', RT_split = False, permute = False):
 		''' 
 

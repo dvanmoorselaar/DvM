@@ -423,7 +423,7 @@ if __name__ == '__main__':
 		# beh.loc[beh['nr_trials'] == 0, 'nr_trials'] = 60  
 
 		# erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
-		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = {'nr_trials': list(range(21,61))})
+		# erp.selectERPData(time = [-0.1, 0.6],   excl_factor = {'nr_trials': list(range(21,61))})
 		# erp.topoFlip(left = ['2'], header = 'dist_loc')
 		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
   #                      r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist_1sthalf', RT_split = False)
