@@ -23,7 +23,8 @@ else:
 #files = glob.glob('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/object/raw/*.txt')
 #files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/control/raw/*.txt')
-files = glob.glob('/Users/dvm/Documents/projects/probe/exp_2/raw/*.txt')
+#files = glob.glob('/Users/dvm/Documents/projects/spatial_transfer/object_barble_cross/raw/*.txt')
+files = glob.glob('/Users/dvm/Documents/projects/probe/exp_5/raw/*.txt')
 
 # set general parameters
 control_sj = True
@@ -118,5 +119,6 @@ else:
 #df.to_csv('/Users/dvm/Documents/projects/present_absent/dist_SL_dprime/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/object/raw/raw_data.csv')
 #df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/control/raw/raw_data.csv')
-df.to_csv('/Users/dvm/Documents/projects/probe/exp_2/raw/raw_data.csv')
+#df.to_csv('/Users/dvm/Documents/projects/spatial_transfer/object_barble_cross/raw/raw_data.csv')
+df.to_csv('/Users/dvm/Documents/projects/probe/exp_5/raw/raw_data.csv')
          
