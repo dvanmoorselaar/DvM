@@ -26,6 +26,8 @@ The necessary steps are outlined below:
 7. conda install seaborn
 8. pip install opencv-python
 9. pip install -U autoreject
+In case you want to make use of picard during ica
+10. pip install python-picard
 
 
 ## Folderstructure

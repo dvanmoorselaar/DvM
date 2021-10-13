@@ -6,7 +6,7 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
-sys.path.append('/home/dvmoors1/BB/ANALYSIS/DvM_3')
+sys.path.append('/Users/dvm/DvM')
 #sys.path.append('/Users/Maxi/Desktop/Internship/DvM')
 
 import numpy as np
@@ -58,7 +58,7 @@ sj_info = {'1': {'replace':{}}, # example replace: replace = {'15': {'session_1'
 							}
 
 # project specific info
-project = 'templates_targets_distractors'
+project = 'negative_template'
 factors = ['this_block']
 labels = ['distractor','target']
 to_filter = ['RT'] 
@@ -72,12 +72,13 @@ eog =  ['EXG1','EXG2','EXG3','EXG4']
 ref =  ['EXG5','EXG6']
 session = 1
 eeg_runs = [1]
-t_min = - 2.6
-t_max = 0.6
+t_min = -0.2
+t_max = 0.55
 flt_pad = 0.5
 binary =  0
 event_id = [11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 31, 32, 33, 34, 35, 41, 42, 43, 44, 45,
             51, 52, 53, 54, 55, 61,62, 63, 64, 65, 71, 72, 73, 74, 75, 81, 82, 83, 84, 85]
+nr_sessions = 1
 
 
 # eye tracker info
@@ -109,53 +110,59 @@ class Templates(FolderStructure):
 
 	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, event_id, project_param, project_folder, binary, channel_plots, inspect):
 		'''
-		EEG preprocessing as preregistred @ https://osf.io/n35xa/registrations
+		EEG preprocessing as preregistred @
 		'''
 
 		# set subject specific parameters
 		file = 'subject_{}_session_{}_'.format(sj, session)
 		replace = sj_info[str(sj)]['replace']
-		self.adjustBeh(sj)
+		log_file = self.FolderTracker(extension=['processed', 'info'], 
+						filename='preprocessing_param.csv')
+
 		# start logging
 		logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                    datefmt='%m-%d %H:%M',
-                    filename= self.FolderTracker(extension=['processed', 'info'], 
-                        filename='preprocess_sj{}_ses{}.log'.format(
-                        sj, session), overwrite = False),
-                    filemode='w+')
+					format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+					datefmt='%m-%d %H:%M',
+					filename= self.FolderTracker(extension=['processed', 'info'], 
+						filename='preprocess_sj{}_ses{}.log'.format(
+						sj, session), overwrite = False),
+					filemode='w')
 
-		logging.info('Started preprocessing subject {}, session {}'.format(sj, session))
 		# READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
 		EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
-		                                  preload=True, eog=eog) for run in eeg_runs])
+											preload=True, eog=eog) for run in eeg_runs])
 
 		#EEG.replaceChannel(sj, session, replace)
 		EEG.reReference(ref_channels=ref, vEOG=eog[
-		                :2], hEOG=eog[2:], changevoltage=True, to_remove = ['EXG2','EXG4','EXG5','EXG6','EXG7','EXG8'])
-		montage = EEG.set_montage(montage='biosemi64')
+						:2], hEOG=eog[2:], changevoltage=True, to_remove = ['EXG7','EXG8'])
+		EEG.setMontage(montage='biosemi64')
 
 		#FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-		EEG.filter(h_freq=None, l_freq=0.1, fir_design='firwin',
-						skip_by_annotation='edge')
+		EEGica = EEG.copy()
+		EEGica.filter(h_freq=None, l_freq=1.5,
+							fir_design='firwin', skip_by_annotation='edge')
+		EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
+					skip_by_annotation='edge')
 
 		# MATCH BEHAVIOR FILE
+		self.adjustBeh(sj)
 		events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
+		beh, missing = EEG.matchBeh(sj, session, events, event_id, 
+										headers = project_param)
 
-		beh, missing = EEG.matchBeh(sj, session, events, event_id,
-									headers = project_param)
-
-		# # EPOCH DATA
+		# EPOCH DATA
 		epochs = Epochs(sj, session, EEG, events, event_id=event_id,
-		         tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad) 
-		
-		# ARTIFACT DETECTION
-		epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)    
-		epochs.artifactDetection(inspect=False, run = True)
+				tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
+		epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
+				tmin=t_min, tmax=t_max, baseline=(None,None), flt_pad = flt_pad, reject_by_annotation = True) 
+
+		# AUTMATED ARTIFACT DETECTION
+		epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
+		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEG, method='picard')
-
+		epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+		del EEGica
 
 		# EYE MOVEMENTS
 		epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
@@ -165,10 +172,14 @@ class Templates(FolderStructure):
 						screen_h = screen_h)
 
 		# INTERPOLATE BADS
+		bads = epochs.info['bads']   
 		epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
 		# LINK BEHAVIOR
 		epochs.linkBeh(beh, events, event_id)
+
+		logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
+					to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
 
 
 	def adjustBeh(self, sj):
@@ -180,9 +191,10 @@ class Templates(FolderStructure):
 
 		# get triggers logged in beh file
 		beh = pd.read_csv(beh_file)
+		beh['trigger'] = beh['current_search_code'] # add trigger column
 		if 'nr_trials' not in beh.columns:
 			beh = beh.rename(columns={'trial_nr': 'nr_trials'})
-			beh.to_csv(beh_file)
+		beh.to_csv(beh_file)
 
 if __name__ == '__main__':
 
@@ -191,7 +203,7 @@ if __name__ == '__main__':
 	os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
-	project_folder = '/home/dvmoors1/BB/Negative_template'
+	project_folder = '/Users/dvm/Desktop/negative_template'
 	#project_folder = '/Users/Maxi/Desktop/Internship/templates'
 	os.chdir(project_folder)
 
@@ -211,12 +223,12 @@ if __name__ == '__main__':
 
 	subjects = list(range(2,25))
 	
-	for sj in subjects:
+	for sj in [24]:
 		print('starting subject {}'.format(sj))
-		# PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-		# 		t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-		# 		event_id = event_id, project_param = project_param, 
-		# 		project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+		PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+				t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+				event_id = event_id, project_param = project_param, 
+				project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 		
 		# Start ERP analysis
 		# read in preprocessed data for main ERP analysis
