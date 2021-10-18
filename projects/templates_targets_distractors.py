@@ -62,7 +62,7 @@ project = 'negative_template'
 factors = ['this_block']
 labels = ['distractor','target']
 to_filter = ['RT'] 
-project_param = ['nr_trials','trigger','RT_search', 'subject_nr','block_nr',
+project_param = ['nr_trials','trigger','RT_search', 'subject_nr','block_nr','practice',
 				'distractor_color_code', 'distractor_position','log_memory_condition','log_search_condition','position_colors_M',
                 'random_template_color_index', 'search_response','template_position','this_block', 'codes_colors_M','template_color_code']
 
@@ -111,6 +111,7 @@ class Templates(FolderStructure):
 	def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, event_id, project_param, project_folder, binary, channel_plots, inspect):
 		'''
 		EEG preprocessing as preregistred @
+		Note: template is target in positive blocks and distractor in negative blocks
 		'''
 
 		# set subject specific parameters
@@ -161,7 +162,7 @@ class Templates(FolderStructure):
 		z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
 		# ICA
-		epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+		#epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
 		del EEGica
 
 		# EYE MOVEMENTS
@@ -221,7 +222,7 @@ if __name__ == '__main__':
 	# 'bad' sjs
 	#subjects = [2,5,6,8,13,14,18,24]
 
-	subjects = list(range(2,25))
+
 	
 	for sj in [24]:
 		print('starting subject {}'.format(sj))
@@ -230,24 +231,24 @@ if __name__ == '__main__':
 				event_id = event_id, project_param = project_param, 
 				project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 		
-		# Start ERP analysis
-		# read in preprocessed data for main ERP analysis
-		beh, eeg = PO.loadData(sj, False, (-0.2,0.55),'HEOG', 1,
-				 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = False)
+		# # Start ERP analysis
+		# # read in preprocessed data for main ERP analysis
+		# beh, eeg = PO.loadData(sj, False, (-0.2,0.55),'HEOG', 1,
+		# 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = False)
 
 		
-		temp_list = []
-		for idx in beh['trigger']:
-			idx = int(idx/10)*10
-			if idx in [10,50]:
-				temp_list.append('right')
-			if idx in [20,60]:
-				temp_list.append('down')
-			if idx in [30,70]:
-				temp_list.append('left')
-			if idx in [40,80]:
-				temp_list.append('up')
-		beh['memory_position'] = temp_list
+		# temp_list = []
+		# for idx in beh['trigger']:
+		# 	idx = int(idx/10)*10
+		# 	if idx in [10,50]:
+		# 		temp_list.append('right')
+		# 	if idx in [20,60]:
+		# 		temp_list.append('down')
+		# 	if idx in [30,70]:
+		# 		temp_list.append('left')
+		# 	if idx in [40,80]:
+		# 		temp_list.append('up')
+		# beh['memory_position'] = temp_list
 
 		# ERP ANALYSIS pipeline (flip all electrodes as if all stimuli are presented right)
 		# target tuned waveform 
@@ -282,9 +283,9 @@ if __name__ == '__main__':
 		# bdm.Classify(sj, cnds =  ['positive','negative'], cnd_header = 'this_block', bdm_labels = ['right', 'left', 'down', 'up'], time = (-2.8, 0.2), gat_matrix = False)
 
 		# STATUS DECODING
-		beh['cnd'] = 'all'
-		bdm = BDM(beh, eeg, to_decode = 'this_block', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-2.8, -2.6))
-		bdm.Classify(sj, cnds =  ['all'], cnd_header = 'cnd', bdm_labels = ['positive', 'negative'], time = (-2.8, 0.55), gat_matrix = False)
+		# beh['cnd'] = 'all'
+		# bdm = BDM(beh, eeg, to_decode = 'this_block', nr_folds = 10, method = 'auc', elec_oi = 'all', downsample = 128, baseline = (-2.8, -2.6))
+		# bdm.Classify(sj, cnds =  ['all'], cnd_header = 'cnd', bdm_labels = ['positive', 'negative'], time = (-2.8, 0.55), gat_matrix = False)
 
 
 		# # do TF analysis
