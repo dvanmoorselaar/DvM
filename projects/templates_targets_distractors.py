@@ -6,13 +6,16 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
+sys.path.append('/Users/dvm/DvM')
+#sys.path.append('/Users/Maxi/Desktop/Internship/DvM')
 sys.path.append('/research/FGB-ETP-DVM/DvM')
 
 
 import numpy as np
 import seaborn as sns
-
-
+import matplotlib.pyplot as plt
+plt.switch_backend('Qt4Agg')
+import matplotlib
 
 #import matplotlib          # run these lines only when running sript via ssh connection
 #matplotlib.use('agg')
@@ -203,6 +206,8 @@ if __name__ == '__main__':
 	os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
+	project_folder = '/Users/dvm/Desktop/negative_template'
+	#project_folder = '/Users/Maxi/Desktop/Internship/templates'
 	project_folder = '/research/FGB-ETP-DVM/negative_template' 
 	os.chdir(project_folder)
 
@@ -221,13 +226,13 @@ if __name__ == '__main__':
 	#subjects = [2,5,6,8,13,14,18,24]
 
 
-	# Preprocessing (as done by Maxi)
-	# for sj in [24]:
-	# 	print('starting subject {}'.format(sj))
-	# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-	# 			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-	# 			event_id = event_id, project_param = project_param, 
-	# 			project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+	
+	for sj in [24]:
+		print('starting subject {}'.format(sj))
+		PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+				t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+				event_id = event_id, project_param = project_param, 
+				project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 		
 	# # Start ERP analysis
 	# # read in preprocessed data for main ERP analysis
