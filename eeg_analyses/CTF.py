@@ -21,8 +21,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from helperFunctions import *
-from BDM import BDM
+from eeg_analyses.BDM import *  
 from support.FolderStructure import *
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
@@ -196,7 +195,6 @@ class CTF(BDM):
 			# loop over channels 
 			for ch in range(nr_chan):
 				# concatenate trials to speed up processing time
-				embed()
 				x = np.ravel(data[:,ch,:])
 				x_hilb = hilbert(filter_data(x, sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
 				x_hilb = np.reshape(x_hilb, (data.shape[0],-1))
@@ -344,7 +342,7 @@ class CTF(BDM):
 			# unshuffle block assignment and save to CTF
 			blocks[idx_shuf] = shuf_blocks	
 			bl_assign[i] = blocks
-			tr_per_block = sum(blocks == 0)/self.nr_bins
+			tr_per_block = int(sum(blocks == 0)/self.nr_bins)
 
 		# split up data according to number of blocks in one test and remaining training sets
 		tr_idx = np.zeros((nr_iter * self.nr_blocks, self.nr_bins, self.nr_blocks - 1, tr_per_block), dtype = int)
@@ -464,7 +462,7 @@ class CTF(BDM):
 				bin_te_X = np.empty((self.nr_bins, eegs.shape[1],te_total.shape[2])) * np.nan
 
 				for p in range(nr_perm):
-					print "\r{0:.2f}% of permutations".format((float(p)/nr_perm)*100),
+					print("\r{0:.2f}% of permutations".format((float(p)/nr_perm)*100),)
 
 					# first time train labels are not shuffled. # PERMUTATION INDICES ATE NOT YET SAVED
 					if p > 0:
@@ -608,7 +606,7 @@ class CTF(BDM):
 	
 					# loop over permutations
 					for p in range(nr_perm):
-						print "\r{0:.2f}% of permutations".format((float(p)/nr_perm)*100),
+						print("\r{0:.2f}% of permutations".format((float(p)/nr_perm)*100),)
 						# first time train labels are not shuffled. # PERMUTATION INDICES ATE NOT YET SAVED
 						tr_idx = ctf_info[cnd]['tr'][itr]
 						if p > 0:	
@@ -692,15 +690,15 @@ class CTF(BDM):
 							   'T_concentrations_p': t_sigmas[1:], 'T_concentrations': t_sigmas[0], 
 							   'E_concentrations_p': e_sigmas[1:], 'E_concentrations': e_sigmas[0]}
 
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_{}_slopes-{}_{}.pickle'.format(cnd_name,str(sj),method, list(freqs.keys())[0])),'wb') as handle:
 			print('saving slopes dict')
 			pickle.dump(ctf_inf, handle)
 
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_{}_ctfs-{}_{}.pickle'.format(cnd_name,str(sj),method, freqs.keys()[0])),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_{}_ctfs-{}_{}.pickle'.format(cnd_name,str(sj),method, list(freqs.keys())[0])),'wb') as handle:
 			print('saving ctfs')
 			pickle.dump(ctf, handle)
 			
-		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_info.pickle'.format(freqs.keys()[0])),'wb') as handle:
+		with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding, self.power], filename = '{}_info.pickle'.format(list(freqs.keys())[0])),'wb') as handle:
 			print('saving info dict')
 			pickle.dump(ctf_info, handle)
 
@@ -772,7 +770,7 @@ class CTF(BDM):
 						
 					# loop through permutations
 					for p in range(nr_perms):
-						print '\r{0}% of permutations ({1} out of {2} conditions; {3} out of {4} frequencies); iter {5}'.format((float(p)/nr_perms)*100, cond + 1, len(info['conditions']),str(freq + 1),str(info['nr_freqs']),itr + 1),
+						print('\r{0}% of permutations ({1} out of {2} conditions; {3} out of {4} frequencies); iter {5}'.format((float(p)/nr_perms)*100, cond + 1, len(info['conditions']),str(freq + 1),str(info['nr_freqs']),itr + 1),)
 
 						# Permute trial assignment within each block
 						perm_pos_bin = np.empty((pos_bin.size)) * np.nan
@@ -901,7 +899,7 @@ class CTF(BDM):
 		  				    int(np.round(num_bins/2.0) + np.round(num_bins * .1))])
 		x = np.linspace(0, np.pi - np.pi/num_bins, num_bins)
 		#u = x[int(m_idx + np.round(num_bins/2.0) - np.round(num_bins * .1) - 1)]
-		u = x[num_bins/2]
+		u = x[int(num_bins/2)]
 
 		# loop over all concentration parameters
 		# estimate best amp and baseline offset and find combination that minimizes sse
@@ -1003,8 +1001,7 @@ class CTF(BDM):
 						data = np.mean(ctfs[i][cond]['ctf'][power],axis = 1)					# average across iterations
 						nr_perms = data.shape[1]
 						p_slopes = np.empty((data.shape[0],data.shape[2],nr_perms)) * np.nan
-						for p in range(nr_perms):
-							print p												# loop over permutations
+						for p in range(nr_perms):											# loop over permutations
 							p_slopes[:,:,p] = self.calculateSlopes(data[:,p,:,:], info['nr_freqs'], info['nr_samps'])
 						slopes[cond].update({power: p_slopes})
 					else:	
@@ -1716,7 +1713,7 @@ class CTF(BDM):
 		if not info:
 			ctf = []
 			for sbjct in subject_id:
-				print sbjct
+				print (sbjct)
 				with open(self.FolderTracker(['ctf',self.channel_folder,self.decoding], filename = '{}_{}_{}_{}.pickle'.format(cnd_name,str(sbjct),dicts,band)),'rb') as handle:
 					ctf.append(pickle.load(handle))
 		else:

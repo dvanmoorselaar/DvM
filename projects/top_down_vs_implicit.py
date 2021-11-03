@@ -8,7 +8,6 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
-#sys.path.append('/Users/dockyduncan/documents/GitHub/DvM')
 sys.path.append('/research/FGB-ETP-DVM/DvM')
 
 
@@ -19,6 +18,7 @@ from scipy.interpolate import interp1d
 from IPython import embed
 from beh_analyses.PreProcessing import *
 from eeg_analyses.EEG import *
+from eeg_analyses.CTF import *
 from eeg_analyses.BDM import *  
 from support.FolderStructure import *
 from support.support import *
@@ -53,32 +53,27 @@ sj_info = {'1': {'replace':{}}, # example replace: replace = {'15': {'session_1'
 							}
 
 # project specific info
-project = 'Ping'
+project = 'Topdown_vs_implicit'
 factors = []
 labels = []
 to_filter = ['RT'] 
 nr_sessions = 1
 project_param = ['nr_trials','trigger','RT', 'subject_nr', 'block_cnt', 'practice',
-				'block_type', 'correct','dist_high','dist_loc','dist_shape', 
-				'dist_color', 'high_prob_loc', 'target_high','target_loc','target_shape',
-				'target_color','ping','ping_trigger','ping_type','trial_type']
+				'block_type', 'correct','dist_loc','dist_shape', 
+				'dist_color','target_loc','target_shape',
+				'target_color','memory_orient']
 
 
 # eeg info (event_id specified below)
-ping = 'ping'
+ping = 'Topdown_vs_implicit'
 part = 'beh'
 eog =  ['V_up','V_do','H_r','H_l']
 ref =  ['Ref_r','Ref_l']
 eeg_runs = [1]
-# ping parameters
-t_min = -0.2 
-t_max = 0.6
-event_id = [109, 100, 102, 104, 106, 209, 200, 202, 204, 206]
-# search parameters
-#t_min = -0.1 
-#t_max = 0.6
-#event_id = [12,13,14,15,16,17,18,19,21,23,24,25,26,27,28,29,31,32,34,35,36,37,38,39,41,42,43,45,46,\
-#			47,48,49,51,52,53,54,56,57,58,59,61,62,63,64,65,67,68,69,71,72,73,74,75,76,78,79,81,82,83,84,85,86,87,89]
+# epoch parameters
+t_min = -1.4
+t_max = 1.3
+event_id = [100,101,102,103,104,105,106,107,110]
 
 flt_pad = 0.5
 binary =  0
@@ -92,7 +87,7 @@ viewing_dist = 60
 screen_res = (1680, 1050) 
 screen_h = 29
 
-class priorityMap(FolderStructure):
+class TopImplicit(FolderStructure):
 
     def __init__(self): pass
 
@@ -109,80 +104,6 @@ class priorityMap(FolderStructure):
         PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
         PP.save_data_file()
 
-    def eyeTowardness(self, sj):
-        '''
-        0 = top
-        2 = left
-        4 = bottum
-        6 = right
-        '''
-
-        # read in behavior data and eyetracking data
-        beh = pd.read_csv(self.FolderTracker(extension=['beh', 'raw'], 
-                        filename='subject-{}_session_1.csv'.format(sj)))
-        # exclude exit interview
-        if sj in [1, 5, 25]:
-            beh = beh[:-1]
-        eye = read_edf(self.FolderTracker(extension=['eye', 'raw'], 
-                        filename='sub_{}.asc'.format(sj)), 'Start trial', stop='Response')
-
-        # remove practice trials
-        if sj not in [2]:
-            eye = np.array(eye)[beh.practice == 'no']
-        else:
-            eye = np.array(eye)
-        beh = beh[beh.practice == 'no']
-
-        # link behavior and eye data
-        if len(eye) != beh.shape[0]:
-            print('Eye tracking and behavior could not be linked')
-        
-        # calculate towardness (limited to spatial bias blocks)
-        # step 1: extract x and y data per trial in - window (centered at ping display)
-        x, y = np.zeros((eye.size,648)), np.zeros((eye.size,648))
-        for i, trial in enumerate(eye):
-            # get index time point 0
-            for event in trial['events']['msg']:
-                if 'Onset ping' in event[1]:
-                    idx_onset = np.argmin(abs(trial['trackertime'] - event[0]))
-
-            # step 2: if present interpolate blinks
-            x_ = trial['x']
-            y_ = trial['y']
-
-            if trial['events']['Eblk'] != []:
-                # find start/end blink and zero pad around blink on/offset
-                for bl_inf in trial['events']['Eblk']:
-                    bl_idx = [np.argmin(abs(trial['trackertime'] - t)) for t in bl_inf[:2]]
-                    bl_idx = slice(bl_idx[0]-25, bl_idx[1]+26)
-                    x_[bl_idx] = 0
-                    y_[bl_idx] = 0
-
-                # linear interpolation
-                times = np.arange(x_.size)
-                f_x = interp1d(times[np.nonzero(x_)], x_[np.nonzero(x_)], fill_value="extrapolate")
-                f_y = interp1d(times[np.nonzero(y_)], y_[np.nonzero(y_)], fill_value="extrapolate")
-                x_ = f_x(x_)
-                y_ = f_y(y_)
-            
-            # populate x, y
-            x[i] = trial['x'][idx_onset - 350:idx_onset + 298]
-            y[i] = trial['y'][idx_onset - 350:idx_onset + 298]
-
-        # step 3: get left right bias, and top-down bias (seperate for ping and no-ping trials)
-        towardness = {'ping': {},'no_ping':{}}
-        for ping_, ping in zip(['no','yes'], ['no_ping', 'ping']):
-            left = np.mean(x[(beh.high_prob_loc == 6) & (beh.ping == ping_)], axis = 0)
-            right = np.mean(x[(beh.high_prob_loc == 2) & (beh.ping == ping_)], axis = 0)
-            top = np.mean(y[(beh.high_prob_loc == 0) & (beh.ping == ping_)], axis = 0)
-            bottem = np.mean(y[(beh.high_prob_loc == 4) & (beh.ping == ping_)], axis = 0)
-
-            towardness[ping]['toward_x'] = (right - left)/2
-            towardness[ping]['toward_y'] = (bottem - top)/2
-
-        # save data
-        pickle.dump(towardness, open(self.FolderTracker(extension=['eye', 'towardness'], 
-                        filename='subject_{}.pickle'.format(sj)), 'wb'))
 
     def prepareEEG(self, sj, session, eog, ref, eeg_runs, t_min, t_max, flt_pad, sj_info, event_id, project_param, project_folder, binary, channel_plots, inspect):
         '''
@@ -222,6 +143,13 @@ class priorityMap(FolderStructure):
 
         # MATCH BEHAVIOR FILE
         events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
+        # dirty fix to deal with double triggers
+        if sj == 1:
+            events = np.delete(events, np.where(events[:,2] > 90)[0], axis = 0)
+            for i, trigger in enumerate(events[:-1,2]):
+                if trigger+10 == events[i+1,2]:
+                    events[i,2] += 100
+
         beh, missing = EEG.matchBeh(sj, session, events, event_id, 
                                         headers = project_param)
 
@@ -264,40 +192,35 @@ if __name__ == '__main__':
 
     # Specify project parameters
     #project_folder = '/Users/dockyduncan/Documents/EEG/ping'
-    project_folder = '/research/FGB-ETP-DVM/PriorityPing' 
+    project_folder = '/research/FGB-ETP-DVM/Topdown_vs_implicit' 
     os.chdir(project_folder)
 
     # initiate current project
-    PO = priorityMap()
+    PO = TopImplicit()
 
     #Run preprocessing 
-    PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
-
-    # Eye movement analyses
-    #PO.eyeTowardness(sj = 1)
+    #PO.prepareBEH(project, part, factors, labels, project_param, to_filter)
 
     #Run preprocessing EEG
-    for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]:
-     PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-             t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-             event_id = event_id, project_param = project_param, 
-             project_folder = project_folder, binary = binary, 
-             channel_plots = True, inspect = True)
+    sj = 4
+    PO.prepareEEG(sj = sj, session = 1, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+            t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+            event_id = event_id, project_param = project_param, 
+            project_folder = project_folder, binary = binary, 
+            channel_plots = True, inspect = True)
+    
+    # beh, eeg = PO.loadData(sj, name = 'ses-1', eyefilter=False, eye_window=None)  
+    # beh['condition'] = 'all'
+    # eeg.baseline = None # temp_fix
+    # beh['trigger'] %= 10
+    # ctf = CTF(beh, eeg, 'all', 'trigger', nr_iter = 10, nr_blocks = 3, nr_bins = 8, nr_chans = 8, delta = False, power = 'filtered')
 
-    # Run ping decoding
-    for sj in [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]:
-         beh, eeg = PO.loadData(sj, name = 'ses-1', eyefilter=False, eye_window=None)  
-         eeg.baseline = None # temp_fix
-         bdm = BDM(beh, eeg, 'high_prob_loc', nr_folds= 10, method = 'auc', elec_oi = 'all', baseline = (-0.2,0),downsample = 128, bdm_filter = None)
-         bdm.Classify(sj, ['yes','no'], 'ping', time = (-0.2,0.6), collapse = False, bdm_labels = [0,2,4,6],  
-                             excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False) 
+    # # step 1: search broad band of frequencies collapsed across all conditions
+    # ctf.spatialCTF(sj, [-0.2, 2], method = 'Foster', freqs = dict(all = [4,30]), downsample = 4, nr_perm = 0)
+    # # step 2: compare conditions within the alpha band
+    # ctf.spatialCTF(sj, [-0.2, 2], method = 'Foster', freqs = dict(alpha = [8,12]), downsample = 4, nr_perm = 0)
 
 
-    # Run ping decoding (exclude first blocks regularity)
-    #for sj in [1,2,3,5,25]:
-    #    beh, eeg = PO.loadData(sj, name = 'ses-1', eyefilter=False, eye_window=None)  
-    #    eeg.baseline = None # temp_fix
-    #    bdm = BDM(beh, eeg, 'high_prob_loc', nr_folds= 10, method = 'auc', elec_oi = 'all', baseline = (-0.2,0),downsample = 128, bdm_filter = None)
-    #    bdm.Classify(sj, ['yes','no'], 'ping', time = (-0.2,0.6), collapse = False, bdm_labels = [0,2,4,6],  
-    #                        excl_factor = dict(block_cnt = [2]), nr_perm = 0, gat_matrix = False, downscale = False) 
-# %%
+    # temp code to show slopes
+    times = np.linspace(-0.2, 2, 282)
+    data = pickle.load(open(PO.FolderTracker(['ctf','all','trigger','filtered'],'all_1_slopes-Foster_alpha.pickle'), 'rb'))

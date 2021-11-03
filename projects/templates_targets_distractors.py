@@ -6,14 +6,13 @@ import pickle
 import logging
 mpl_logger = logging.getLogger('matplotlib')
 mpl_logger.setLevel(logging.WARNING)
-sys.path.append('/Users/dvm/DvM')
-#sys.path.append('/Users/Maxi/Desktop/Internship/DvM')
+sys.path.append('/research/FGB-ETP-DVM/DvM')
+
 
 import numpy as np
 import seaborn as sns
-import matplotlib.pyplot as plt
-plt.switch_backend('Qt4Agg') # run next two lines to interactively scroll through plots
-import matplotlib
+
+
 
 #import matplotlib          # run these lines only when running sript via ssh connection
 #matplotlib.use('agg')
@@ -204,8 +203,7 @@ if __name__ == '__main__':
 	os.environ['OMP_NUM_THREADS'] = '5'
 	
 	# Specify project parameters
-	project_folder = '/Users/dvm/Desktop/negative_template'
-	#project_folder = '/Users/Maxi/Desktop/Internship/templates'
+	project_folder = '/research/FGB-ETP-DVM/negative_template' 
 	os.chdir(project_folder)
 
 	# initiate current project
@@ -223,19 +221,38 @@ if __name__ == '__main__':
 	#subjects = [2,5,6,8,13,14,18,24]
 
 
-	
-	for sj in [24]:
-		print('starting subject {}'.format(sj))
-		PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
-				t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
-				event_id = event_id, project_param = project_param, 
-				project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
+	# Preprocessing (as done by Maxi)
+	# for sj in [24]:
+	# 	print('starting subject {}'.format(sj))
+	# 	PO.prepareEEG(sj = sj, session = session, eog = eog, ref = ref, eeg_runs = eeg_runs, 
+	# 			t_min = t_min, t_max = t_max, flt_pad = flt_pad, sj_info = sj_info, 
+	# 			event_id = event_id, project_param = project_param, 
+	# 			project_folder = project_folder, binary = binary, channel_plots = True, inspect = True)
 		
-		# # Start ERP analysis
-		# # read in preprocessed data for main ERP analysis
-		# beh, eeg = PO.loadData(sj, False, (-0.2,0.55),'HEOG', 1,
-		# 		 eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20), use_tracker = False)
+	# # Start ERP analysis
+	# # read in preprocessed data for main ERP analysis
+	for sj in range(2,24):
+		beh, eeg = PO.loadData(sj, name = 'ses-1', eyefilter = False, eye_window = (-0.2,0.55),eye_ch = 'HEOG', 
+								eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+		
+		# ERP ANALYSIS pipeline (flip all electrodes as if all stimuli are presented right)
+		# template tuned waveform
+		erp = ERP(eeg, beh, 'template_position', (-0.2,0))
+		erp.selectERPData(time = [-0.2, 0.55], l_filter = None, h_filter = 30, excl_factor = None)
+		erp.topoFlip(left = [4,5], header = 'template_position')
+		erp.ipsiContra(sj = sj, left = [4,5], right = [1,2], l_elec = ['PO7'], conditions = ['positive','negative'], cnd_header = 'this_block',
+                      r_elec = ['PO8'], midline = {'distractor_position': [0,3]}, erp_name = 'template', RT_split = False, permute = False)
 
+		beh, eeg = PO.loadData(sj, name = 'ses-1', eyefilter = False, eye_window = (-0.2,0.55),eye_ch = 'HEOG', 
+								eye_dict = dict(windowsize = 200, windowstep = 10, threshold = 20))
+
+		# ERP ANALYSIS pipeline (flip all electrodes as if all stimuli are presented right)
+		# distractor tuned waveform
+		erp = ERP(eeg, beh, 'distractor_position', (-0.2,0))
+		erp.selectERPData(time = [-0.2, 0.55], l_filter = None, h_filter = 30, excl_factor = None)
+		erp.topoFlip(left = [4,5], header = 'distractor_position')
+		erp.ipsiContra(sj = sj, left = [4,5], right = [1,2], l_elec = ['PO7'], conditions = ['positive','negative'], cnd_header = 'this_block',
+                      r_elec = ['PO8'], midline = {'template_position': [0,3]}, erp_name = 'neutral', RT_split = False, permute = False)								
 		
 		# temp_list = []
 		# for idx in beh['trigger']:
