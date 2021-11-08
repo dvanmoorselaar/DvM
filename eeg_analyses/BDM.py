@@ -4,6 +4,7 @@ import pickle
 import random
 import copy
 import itertools
+
 #import matplotlib
 #matplotlib.use('agg') # now it works via ssh connection
 
@@ -11,6 +12,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from typing import Optional
 from support.FolderStructure import *
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from mne.decoding import (SlidingEstimator, GeneralizingEstimator,
@@ -25,7 +27,7 @@ from scipy.stats import rankdata
 from IPython import embed
 
 
-class BDM(FolderStructure):
+class BDM(Generic[FolderStructure]):
 
 	"""The BDM object supports multivariate decoding functionality to predict 
 	an experimental variable (condition) given an observed pattern of brain activity.
@@ -41,13 +43,19 @@ class BDM(FolderStructure):
 	be artificially lowered by randomly removing 100 observations). Consequently, if the design is heavily unbalanced between classes you may 
 	loose a lot of data. 
 
-	Area under the curve (AUC; Bradley, 1997), a metric derived from signal detection ttheory, is the default performance measure that BDM computes
+	Area under the curve (AUC; Bradley, 1997), a metric derived from signal detection theory, is the default performance measure that BDM computes
 
 	Args:
 		FolderStructure (object): Class that creates file paths to load raw eeg/ behavior and save decoding ouput
 	"""
 
-	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None):
+	def __init__(self, beh: pd.DataFrame, eeg: mne.Epochs, to_decode: str, nr_folds: int, 
+				method: str = 'auc', elec_oi: Optional[str, list] = 'all', downsample: int = 128, 
+				bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
+								
+
+
+
 		''' 
 		Arguments
 		- - - - - 
