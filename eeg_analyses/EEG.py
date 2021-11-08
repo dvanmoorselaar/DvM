@@ -43,7 +43,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
     Child originating from MNE built-in RawEDF, such that new methods can be added to this built in class
     '''
 
-    def __init__(self, input_fname, montage=None, eog=None, stim_channel=-1,
+    def __init__(self, input_fname, eog=None, stim_channel=-1,
                 exclude=(), preload=True, verbose=None):
 
         super(RawBDF, self).__init__(input_fname=input_fname, eog=eog,
