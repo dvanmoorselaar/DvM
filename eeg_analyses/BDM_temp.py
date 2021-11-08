@@ -30,7 +30,7 @@ from IPython import embed
 class BDM(FolderStructure):
 
 
-	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None, 
+	def __init__(self, beh, epochs, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None, 
 				sliding_window = 0, avg = 0, use_pca = 0):
 		''' 
 
@@ -38,7 +38,7 @@ class BDM(FolderStructure):
 		- - - - - 
 
 		beh (dataFrame):
-		EEG (object):
+		epochs (object):
 		to_decode (str):
 		nr_folds (int):
 		method (str): the method used to compute classifier performance. Available methods are:
@@ -60,7 +60,7 @@ class BDM(FolderStructure):
 
 
 		self.beh = beh
-		self.EEG = EEG.apply_baseline(baseline = baseline)
+		self.epochs = epochs.apply_baseline(baseline = baseline)
 		self.to_decode = to_decode
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
@@ -76,13 +76,13 @@ class BDM(FolderStructure):
 		else:	 
 			self.bdm_type = 'broad'
 
-	def selectBDMData(self, EEG, beh, time, excl_factor = None):
+	def selectBDMData(self, epochs, beh, time, excl_factor = None):
 		''' 
 
 		Arguments
 		- - - - - 
 
-		EEG (object):
+		epochs (object):
 		beh (dataFrame):
 		time (tuple | list): time samples (start to end) for decoding
 		excl_factor (dict): see Classify documentation
@@ -90,41 +90,42 @@ class BDM(FolderStructure):
 		Returns
 		- - - -
 
-		eegs (array): eeg data (trials X electrodes X time)
+		epochss (array): epochs data (trials X electrodes X time)
 		beh (dict): contains variables of interest for decoding
 
 		'''
 
 		# check whether trials need to be excluded
 		if type(excl_factor) == dict: # remove unwanted trials from beh
-			beh, EEG = trial_exclusion(beh, EEG, excl_factor)
+			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
-			 EEG = EEG.filter(h_freq=self.bdm_band[0], l_freq=self.bdm_band[1],
+			 epochs = epochs.filter(h_freq=self.bdm_band[0], l_freq=self.bdm_band[1],
                       		  method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))
 
-		if self.downsample != int(EEG.info['sfreq']):
+		if self.downsample != int(epochs.info['sfreq']):
 			print('downsampling data')
-			EEG.resample(self.downsample)
+			epochs.resample(self.downsample)
 
-		# select time window and EEG electrodes
-		s, e = [np.argmin(abs(EEG.times - t)) for t in time]
-		picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
-		picks = select_electrodes(np.array(EEG.ch_names)[picks], self.elec_oi)
-		eegs = EEG._data[:,picks,s:e]
-		times = EEG.times[s:e]
+		# select time window and epochs electrodes
+		s, e = [np.argmin(abs(epochs.times - t)) for t in time]
+		embed()
+		picks = mne.pick_types(epochs.info, epochs=True, exclude='bads')
+		picks = select_electrodes(np.array(epochs.ch_names)[picks], self.elec_oi)
+		epochss = epochs._data[:,picks,s:e]
+		times = epochs.times[s:e]
 
 		# if specified average over trials 
-		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
+		#beh, epochss = self.averageTrials(beh, epochss, self.to_decode, cnd_header, 4)
 
 		# store dictionary with variables for plotting
-		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
+		plot_dict = {'ch_names': epochs.ch_names, 'times':times, 'info':epochs.info}
 
 		with open(self.FolderTracker(['bdm',self.to_decode], filename = 'plot_dict.pickle'),'wb') as handle:
 			pickle.dump(plot_dict, handle)						
 
-		return 	eegs, beh, times
+		return 	epochss, beh, times
 
 	def averageEpochs(self, X, Y_label, Y_cnd, trial_avg):
 		'''
@@ -169,7 +170,7 @@ class BDM(FolderStructure):
 	def reshapeSlidingWindow(self, X):
 		'''
 
-		Sliding window approach that concatenates EEG patterns across timepoints into a sigle vector, in effect increasing the amount of features in the 
+		Sliding window approach that concatenates epochs patterns across timepoints into a sigle vector, in effect increasing the amount of features in the 
 		decoding analysis by a factor of the specified window size. 
 
 		Arguments
@@ -180,7 +181,7 @@ class BDM(FolderStructure):
 		Returns
 		- - - - - 
 
-		X (ndarray): demeaned EEG data (epochs by features)	
+		X (ndarray): demeaned epochs data (epochs by features)	
 
 		'''
 
@@ -227,7 +228,7 @@ class BDM(FolderStructure):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)
+		eegs, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)
 
 		# reduce to data of interest (based on condition and label info)
 		idx = np.hstack([np.where(beh[cnd_header] == cnd)[0] for cnd in cnds])
@@ -235,7 +236,7 @@ class BDM(FolderStructure):
 			bdm_labels = np.unique(beh[self.to_decode].values)  
 		idx = np.array([i for i in idx if beh[self.to_decode].values[i] in bdm_labels])  
 		
-		eegs = eegs[idx]
+		epochss = epochss[idx]
 		beh = beh[beh.index.isin(idx)]
 		#check_idx = lambda a, b: True if a in b else False
 		#beh_mask = np.array([check_idx(x, idx) for x in beh.index.values]) #hack to prevent big endian buffer error
@@ -244,9 +245,9 @@ class BDM(FolderStructure):
 		# average data (if specified)
 		if self.avg:
 			print('DATA IS NOT SHUFFLED BEFORE AVERAGING')
-			X, Y_label, Y_cnd = self.averageEpochs(eegs, beh[self.to_decode].values, beh[cnd_header].values, self.avg)
+			X, Y_label, Y_cnd = self.averageEpochs(epochss, beh[self.to_decode].values, beh[cnd_header].values, self.avg)
 		else:
-			X, Y_label, Y_cnd = eegs, beh[self.to_decode].values, beh[cnd_header].values
+			X, Y_label, Y_cnd = epochss, beh[self.to_decode].values, beh[cnd_header].values
 			
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(Y_label, Y_cnd, N = self.nr_folds)]
@@ -283,11 +284,11 @@ class BDM(FolderStructure):
 			
 			# initiate decoding array
 			if gat_matrix:
-				class_acc = np.empty((nr_perm, eegs.shape[2] - self.slide_wind, eegs.shape[2] - self.slide_wind)) * np.nan
-				t_curves = np.empty((nr_perm, eegs.shape[2] - self.slide_wind, eegs.shape[2] - self.slide_wind, labels.size)) * np.nan
+				class_acc = np.empty((nr_perm, epochss.shape[2] - self.slide_wind, epochss.shape[2] - self.slide_wind)) * np.nan
+				t_curves = np.empty((nr_perm, epochss.shape[2] - self.slide_wind, epochss.shape[2] - self.slide_wind, labels.size)) * np.nan
 			else:	
-				class_acc = np.empty((nr_perm, eegs.shape[2] - self.slide_wind)) * np.nan	
-				t_curves = np.empty((nr_perm, labels.size, eegs.shape[2]- self.slide_wind)) * np.nan
+				class_acc = np.empty((nr_perm, epochss.shape[2] - self.slide_wind)) * np.nan	
+				t_curves = np.empty((nr_perm, labels.size, epochss.shape[2]- self.slide_wind)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -326,13 +327,13 @@ class BDM(FolderStructure):
 		else:
 			return classification	
 
-	def localizerClassify(self, sj, loc_beh, loc_eeg, cnds, cnd_header, time, tr_header, te_header, collapse = False, loc_excl = None, test_excl = None, gat_matrix = False, save = True):
+	def localizerClassify(self, sj, loc_beh, loc_epochs, cnds, cnd_header, time, tr_header, te_header, collapse = False, loc_excl = None, test_excl = None, gat_matrix = False, save = True):
 		"""Training and testing is done on seperate/independent data files
 		
 		Arguments:
 			sj {int} -- Subject number
 			loc_beh {DataFrame} -- DataFrame that contains labels necessary for training the model
-			loc_eeg {object} -- EEG data used to train the model (MNE Epochs object)
+			loc_epochs {object} -- epochs data used to train the model (MNE Epochs object)
 			cnds {list} -- List of conditions. Decoding is done for each condition seperately
 			cnd_header {str} -- Name of column that contains condition info in test behavior file
 			time {tuple} -- Time window used for decoding
@@ -351,9 +352,9 @@ class BDM(FolderStructure):
 		"""
 
 		# set up localizer data 
-		tr_eegs, tr_beh, times = self.selectBDMData(loc_eeg, loc_beh, time, loc_excl)
+		tr_epochss, tr_beh, times = self.selectBDMData(loc_epochs, loc_beh, time, loc_excl)
 		# set up test data
-		te_eegs, te_beh, times = self.selectBDMData(self.EEG, self.beh, time, test_excl)
+		te_epochss, te_beh, times = self.selectBDMData(self.epochs, self.beh, time, test_excl)
 		
 		# create dictionary to save classification accuracy
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
@@ -365,7 +366,7 @@ class BDM(FolderStructure):
 		tr_idx = np.hstack([random.sample(np.where(tr_beh[tr_header] == label )[0], 
 							k = min_nr_tr_labels) for label in np.unique(tr_labels)])
 		Ytr = tr_beh[tr_header][tr_idx].values.reshape(1,-1)
-		Xtr = tr_eegs[tr_idx,:,:][np.newaxis, ...]
+		Xtr = tr_epochss[tr_idx,:,:][np.newaxis, ...]
 
 		if collapse:
 			cnds += ['collapsed']
@@ -382,7 +383,7 @@ class BDM(FolderStructure):
 					axis = 0), dtype = bool)	
 			# specify testing parameters
 			Yte = te_beh[te_header][test_mask].values.reshape(1,-1)
-			Xte = te_eegs[test_mask,:,:][np.newaxis, ...]
+			Xte = te_epochss[test_mask,:,:][np.newaxis, ...]
 	
 			# check whether epochs are averaged before decoding
 			if self.avg:
@@ -412,7 +413,7 @@ class BDM(FolderStructure):
 		print ('NR OF TRAIN LABELS DIFFER PER CONDITION in DEPENDENT DATA ANALYSIS!!!!')
 		print ('DOES NOT YET CONTAIN FACTOR SELECTION FOR DEPENDENT DATA')
 
-		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)		
+		epochss, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)		
 		nr_time = times.size
 		
 		if cnds == 'all':
@@ -423,7 +424,7 @@ class BDM(FolderStructure):
 			tr_mask = [(beh[key] == f).values for  key in tr_factor.keys() for f in tr_factor[key]]
 			for m in tr_mask: 
 				tr_mask[0] = np.logical_or(tr_mask[0],m)
-			tr_eegs = eegs[tr_mask[0]]
+			tr_epochss = epochss[tr_mask[0]]
 			tr_beh = beh.drop(np.where(~tr_mask[0])[0])
 			tr_beh.reset_index(inplace = True, drop = True)
 			max_tr = self.selectMaxTrials(tr_beh[tr_header], tr_beh[cnd_header], N = 1)
@@ -431,7 +432,7 @@ class BDM(FolderStructure):
 			te_mask = [(beh[key] == f).values for  key in te_factor.keys() for f in te_factor[key]]
 			for m in te_mask: 
 				te_mask[0] = np.logical_or(te_mask[0],m)
-			te_eegs = eegs[te_mask[0]]
+			te_epochss = epochss[te_mask[0]]
 			te_beh = beh.drop(np.where(~te_mask[0])[0])
 			te_beh.reset_index(inplace = True, drop = True)
 
@@ -456,11 +457,11 @@ class BDM(FolderStructure):
 							max_tr, replace = False) for label in np.unique(tr_beh[tr_header])])
 
 				Ytr = tr_beh[tr_header][tr_idx].values.reshape(1,-1)
-				Xtr = tr_eegs[tr_idx,:,:][np.newaxis, ...]
+				Xtr = tr_epochss[tr_idx,:,:][np.newaxis, ...]
 
 				te_mask = (te_beh[cnd_header] == te_cnd).values
 				Yte = te_beh[te_header][te_mask].values.reshape(1,-1)
-				Xte = te_eegs[te_mask,:,:][np.newaxis, ...]
+				Xte = te_epochss[te_mask,:,:][np.newaxis, ...]
 			else:
 				if cnd != 'all':
 					cnd_idx = np.where(beh[cnd_header] == cnd)[0]
@@ -471,7 +472,7 @@ class BDM(FolderStructure):
 
 				# select train and test trials	
 				train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, max_tr, {})
-				Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[tr_header], eegs, train_tr, test_tr)
+				Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[tr_header], epochss, train_tr, test_tr)
 
 				# check whether epochs are averaged before decoding
 				if self.avg:
@@ -752,14 +753,14 @@ class BDM(FolderStructure):
 
 		return max_trials
 
-	def trainTestSelect(self, tr_labels, eegs, train_tr, test_tr, te_labels = None):
+	def trainTestSelect(self, tr_labels, epochss, train_tr, test_tr, te_labels = None):
 		'''
 
 		Arguments
 		- - - - - 
 
 		tr_labels (array): decoding labels used for training
-		eegs (array): eeg data (epochs X electrodes X timepoints)
+		epochss (array): epochs data (epochs X electrodes X timepoints)
 		train_tr (array): indices of train trials (nr of folds X nr unique train labels X nr train trials)
 		test_tr (array): indices of test trials (nr of folds X nr unique test labels X nr test trials)
 		te_labels (array): only specify if train and test labels differ (e.g. in cross decoding analysis)
@@ -782,13 +783,13 @@ class BDM(FolderStructure):
 		Yte = np.zeros(test_tr.shape, dtype = tr_labels.dtype).reshape(self.nr_folds, -1)
 
 		# initiate train and test data arrays
-		Xtr = np.zeros((self.nr_folds, np.product(train_tr.shape[-2:]), eegs.shape[1],eegs.shape[2]))
-		Xte = np.zeros((self.nr_folds, np.product(test_tr.shape[-2:]), eegs.shape[1],eegs.shape[2]))
+		Xtr = np.zeros((self.nr_folds, np.product(train_tr.shape[-2:]), epochss.shape[1],epochss.shape[2]))
+		Xte = np.zeros((self.nr_folds, np.product(test_tr.shape[-2:]), epochss.shape[1],epochss.shape[2]))
 
 		# select train data and train labels
 		for n in range(train_tr.shape[0]):
-			Xtr[n] = eegs[np.hstack(train_tr[n])]
-			Xte[n] = eegs[np.hstack(test_tr[n])]
+			Xtr[n] = epochss[np.hstack(train_tr[n])]
+			Xte[n] = epochss[np.hstack(test_tr[n])]
 			Ytr[n] = tr_labels[np.hstack(train_tr[n])]
 			Yte[n] = te_labels[np.hstack(test_tr[n])]
 
@@ -875,7 +876,7 @@ class BDM(FolderStructure):
 		Arguments
 		- - - - - 
 
-		X (array): eeg data (trials X electrodes X time)
+		X (array): epochs data (trials X electrodes X time)
 		train_tr (array): trial indices per fold and unique label (folds X labels X trials)
 		test_tr (array): trial indices per fold and unique label (folds X labels X trials)
 		max_tr (int): max number unique labels
@@ -943,18 +944,18 @@ class BDM(FolderStructure):
 		clf = make_pipeline(StandardScaler(), LogisticRegression())
 		time_decod = SlidingEstimator(clf, n_jobs=1)	
 
-		# get eeg data
-		eeg = []
+		# get epochs data
+		epochs = []
 		for session in range(2):
-			eeg.append(mne.read_epochs('/Users/dirk/Desktop/suppression/processed/subject-{}_ses-{}-epo.fif'.format(sj,session + 1)))
+			epochs.append(mne.read_epochs('/Users/dirk/Desktop/suppression/processed/subject-{}_ses-{}-epo.fif'.format(sj,session + 1)))
 
 
-		times = eeg[0].times
+		times = epochs[0].times
 		# select time window and electrodes	
-		s_idx, e_idx = eeg[0].time_as_index(time)	
-		picks = mne.pick_types(eeg[0].info, eeg=True, exclude='bads')
+		s_idx, e_idx = epochs[0].time_as_index(time)	
+		picks = mne.pick_types(epochs[0].info, epochs=True, exclude='bads')
 
-		eeg = np.vstack((eeg[0]._data,eeg[1]._data))[:,picks,:][:,:,s_idx:e_idx]
+		epochs = np.vstack((epochs[0]._data,epochs[1]._data))[:,picks,:][:,:,s_idx:e_idx]
 
 
 		# get behavior data
@@ -965,7 +966,7 @@ class BDM(FolderStructure):
 		plt.figure(figsize = (20,20))
 		for i,cnd in enumerate(conditions):
 		
-			X = eeg[beh['condition'] == cnd]	
+			X = epochs[beh['condition'] == cnd]	
 			y = beh[to_decode][beh['condition'] == cnd]
 
 			scores = cross_val_multiscore(time_decod, X, y, cv=5, n_jobs=1)

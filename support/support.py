@@ -5,6 +5,8 @@ import warnings
 
 import numpy as np
 import pandas as pd
+
+from typing import Union
 from IPython import embed 
 from math import sqrt
 from sklearn.feature_extraction.image import grid_to_graph
@@ -121,34 +123,37 @@ def cnd_time_shift(EEG, beh, cnd_info, cnd_header):
 	return EEG
 
 
-
-
-def select_electrodes(ch_names, subset):
+def select_electrodes(ch_names: Union[list, np.ndarray], subset: Union[list, str]=  'all') -> np.ndarray:
 	"""allows picking a subset of all electrodes 
-	
-	Arguments:
-		ch_names {list} -- list of all electrodes in EEG object (MNE format)
-		subset {str} -- description of subset of electrodes to be used
-	
+
+	Args:
+		ch_names (Union[list, np.ndarray]): list of all electrodes in EEG object (MNE format)
+		subset (Union[list, str], optional): [description].Description of subset of electrodes to be used. 
+		In addition to all electrodes, supports selection of 'posterior', 'frontal, 'middle' and 'eye' electrodes.
+		To select a specific set of electrodes specify a list with electrode names. Defaults to 'all'.
+
 	Returns:
-		picks {array} -- indices of to be used electrodes 
+		picks (np.ndarray): indices of selected electrodes
 	"""
 
-	if subset == 'all':
-		elecs = []
-	elif subset == 'post':
-		elecs = ['Iz','Oz','O1','O2','PO7','PO8',
-				'PO3','PO4','POz','Pz','P9','P10',
-				'P7','P8','P5','P6','P3','P4','P1','P2','Pz',
-				'TP7','CP5','CP3','CP1','CPz','CP2','CP4','CP6','TP8']
-	elif subset == 'frontal':
-		elecs = ['Fp1','Fpz','Fp2','AF7','AF3','AFz','AF4',
-				'AF8','F7','F5','F3','F1','Fz','F2','F4','F6','F8',
-				'FT7','FC5','FC3','FC1','FCz','FC2','FC4','FC6','FT8']
-	elif subset == 'mid':
-		elecs = ['T7','C5','C3','C1','Cz','C2','C4','C6','T8']					
+	if type(subset) == str:
+		if subset == 'all':
+			subset = []
+		elif subset == 'post':
+			subset  = ['Iz','Oz','O1','O2','PO7','PO8',
+					'PO3','PO4','POz','Pz','P9','P10',
+					'P7','P8','P5','P6','P3','P4','P1','P2','Pz',
+					'TP7','CP5','CP3','CP1','CPz','CP2','CP4','CP6','TP8']
+		elif subset == 'frontal':
+			subset  = ['Fp1','Fpz','Fp2','AF7','AF3','AFz','AF4',
+					'AF8','F7','F5','F3','F1','Fz','F2','F4','F6','F8',
+					'FT7','FC5','FC3','FC1','FCz','FC2','FC4','FC6','FT8']
+		elif subset == 'mid':
+			subset  = ['T7','C5','C3','C1','Cz','C2','C4','C6','T8']	
+		elif subset == 'eye':
+			subset  = ['V_up','V_do','H_r', 'H_l']				
 
-	picks = mne.pick_channels(ch_names, include = elecs)
+	picks = mne.pick_channels(ch_names, include = subset)
 
 	return picks	
 

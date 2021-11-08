@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from typing import Optional
+from typing import Optional, Generic, Union
 from support.FolderStructure import *
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from mne.decoding import (SlidingEstimator, GeneralizingEstimator,
@@ -27,7 +27,7 @@ from scipy.stats import rankdata
 from IPython import embed
 
 
-class BDM(Generic[FolderStructure]):
+class BDM(FolderStructure):
 
 	"""The BDM object supports multivariate decoding functionality to predict 
 	an experimental variable (condition) given an observed pattern of brain activity.
@@ -49,27 +49,25 @@ class BDM(Generic[FolderStructure]):
 		FolderStructure (object): Class that creates file paths to load raw eeg/ behavior and save decoding ouput
 	"""
 
-	def __init__(self, beh: pd.DataFrame, eeg: mne.Epochs, to_decode: str, nr_folds: int, 
-				method: str = 'auc', elec_oi: Optional[str, list] = 'all', downsample: int = 128, 
+	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
+				method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
 				bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
-								
+		"""[summary]
 
-
-
-		''' 
-		Arguments
-		- - - - - 
-		method (str): the method used to compute classifier performance. Available methods are:
-					acc (default) - computes balanced accuracy (number of correct classifications per class,
-%                   averaged over all classes)
-					auc - computes Area Under the Curve 
-		Returns
-		- - - -
-		'''
-
-
+		Args:
+			beh (pd.DataFrame): Dataframe with behavioral parameters per epoch (see eeg)
+			eeg (mne.Epochs): epoched eeg data (linked to beh)
+			to_decode (str): column in beh that contains classes used for decoding
+			nr_folds (int): specifies how many folds will be used for k-fold cross validation
+			method (str, optional): [description]. Defaults to 'auc'.
+			elec_oi (Optional[str, list], optional): [description]. Defaults to 'all'.
+			downsample (int, optional): [description]. Defaults to 128.
+			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
+			baseline (Optional[tuple], optional): [description]. Defaults to None.
+		"""	
+										
 		self.beh = beh
-		self.EEG = EEG.apply_baseline(baseline = baseline)
+		self.epochs = epochs.apply_baseline(baseline = baseline)
 		self.to_decode = to_decode
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
@@ -82,7 +80,7 @@ class BDM(Generic[FolderStructure]):
 		else:	 
 			self.bdm_type = 'broad'
 
-	def selectBDMData(self, EEG, beh, time, excl_factor = None):
+	def selectBDMData(self, epochs, beh, time, excl_factor = None):
 		''' 
 		Arguments
 		- - - - - 
@@ -98,32 +96,26 @@ class BDM(Generic[FolderStructure]):
 
 		# check whether trials need to be excluded
 		if type(excl_factor) == dict: # remove unwanted trials from beh
-			beh, EEG = trial_exclusion(beh, EEG, excl_factor)
+			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
-			 EEG = EEG.filter(h_freq=self.bdm_band[0], l_freq=self.bdm_band[1],
+			 epochs = epochs.filter(h_freq=self.bdm_band[0], l_freq=self.bdm_band[1],
                       		  method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))
 
-		if self.downsample != int(EEG.info['sfreq']):
+		if self.downsample < int(epochs.info['sfreq']):
 			print('downsampling data')
-			EEG.resample(self.downsample)
+			epochs.resample(self.downsample)
 
 		# select time window and EEG electrodes
-		s, e = [np.argmin(abs(EEG.times - t)) for t in time]
-		picks = mne.pick_types(EEG.info, eeg=True, exclude='bads')
-		picks = select_electrodes(np.array(EEG.ch_names)[picks], self.elec_oi)
-		eegs = EEG._data[:,picks,s:e]
-		times = EEG.times[s:e]
+		s, e = [np.argmin(abs(epochs.times - t)) for t in time]
+		picks = mne.pick_types(epochs.info, eeg=True, eog= True, exclude='bads')
+		picks = select_electrodes(np.array(epochs.ch_names)[picks], self.elec_oi)
+		eegs = epochs._data[:,picks,s:e]
+		times = epochs.times[s:e]
 
 		# if specified average over trials 
 		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
-
-		# store dictionary with variables for plotting
-		plot_dict = {'ch_names': EEG.ch_names, 'times':times, 'info':EEG.info}
-
-		with open(self.FolderTracker(['bdm',self.to_decode], filename = 'plot_dict.pickle'),'wb') as handle:
-			pickle.dump(plot_dict, handle)						
 
 		return 	eegs, beh, times
 
@@ -178,7 +170,7 @@ class BDM(Generic[FolderStructure]):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)	
+		eegs, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
 		
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
