@@ -27,6 +27,25 @@ from IPython import embed
 
 class BDM(FolderStructure):
 
+	"""The BDM object supports multivariate decoding functionality to predict 
+	an experimental variable (condition) given an observed pattern of brain activity.
+	By default the BDM class employs Linear Discriminant Analysis (LDA) to perform decoding.
+
+	The BDM class makes use of k-fold cross validation, in which the trials are split up into k equally sized folds. 
+	The model is trained on k-1 folds, and testing is done on the remaining fold that was not used for training. This procedure 
+	is repeated k times until each fold (all data) has been tested exactly once, while on any given iteration the trials used 
+	for training are independent from the trials that were used for testing.
+
+	In class assignment, BDM applies event balancing by default through undersampling so that each class has the same number of observations.
+	(i.e., if one class has 200 observations, and the other class has 100 observations, the number of observations in the first class would 
+	be artificially lowered by randomly removing 100 observations). Consequently, if the design is heavily unbalanced between classes you may 
+	loose a lot of data. 
+
+	Area under the curve (AUC; Bradley, 1997), a metric derived from signal detection ttheory, is the default performance measure that BDM computes
+
+	Args:
+		FolderStructure (object): Class that creates file paths to load raw eeg/ behavior and save decoding ouput
+	"""
 
 	def __init__(self, beh, EEG, to_decode, nr_folds, method = 'auc', elec_oi = 'all', downsample = 128, bdm_filter = None, baseline = None):
 		''' 
