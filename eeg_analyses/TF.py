@@ -126,10 +126,6 @@ class TF(FolderStructure):
 
 		return filtdat, emp_vals
 
-
-
-
-
 	@staticmethod	
 	def nextpow2(i):
 		'''

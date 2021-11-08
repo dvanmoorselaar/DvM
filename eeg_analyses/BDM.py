@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 
 from typing import Optional, Generic, Union
 from support.FolderStructure import *
+from mne.filter import filter_data
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from mne.decoding import (SlidingEstimator, GeneralizingEstimator,
                           cross_val_multiscore, LinearModel, get_coef)
@@ -23,6 +24,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from support.support import select_electrodes, trial_exclusion
 from scipy.stats import rankdata
+from scipy.signal import hilbert
 
 from IPython import embed
 
@@ -52,7 +54,7 @@ class BDM(FolderStructure):
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
 				bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
-		"""[summary]
+		"""set decoding parameters that will be used in BDM class
 
 		Args:
 			beh (pd.DataFrame): Dataframe with behavioral parameters per epoch (see eeg)
@@ -65,7 +67,7 @@ class BDM(FolderStructure):
 			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
 			baseline (Optional[tuple], optional): [description]. Defaults to None.
 		"""	
-										
+							
 		self.beh = beh
 		self.epochs = epochs.apply_baseline(baseline = baseline)
 		self.to_decode = to_decode
@@ -75,8 +77,7 @@ class BDM(FolderStructure):
 		self.bdm_filter = bdm_filter
 		self.method = method
 		if bdm_filter != None:
-			self.bdm_type = bdm_filter.keys()[0]
-			self.bdm_band = bdm_filter[self.bdm_type]
+			self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
 		else:	 
 			self.bdm_type = 'broad'
 
@@ -100,8 +101,17 @@ class BDM(FolderStructure):
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
-			 epochs = epochs.filter(h_freq=self.bdm_band[0], l_freq=self.bdm_band[1],
-                      		  method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5))
+			print('filtering raw eeg data')
+			T = np.empty(epochs._data.shape, dtype= np.complex_) * np.nan
+			# selecting eeg electrodes
+			for ch in range(epochs._data.shape[1]):
+				x = np.ravel(epochs._data[:,ch,:])
+				x_hilb = hilbert(filter_data(x, epochs.info['sfreq'],self.bdm_band[0], self.bdm_band[1], 
+								method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
+				x_hilb = np.reshape(x_hilb, (epochs._data.shape[0],-1))
+				T[:,ch] = np.abs(x_hilb)**2
+
+			epochs._data= T
 
 		if self.downsample < int(epochs.info['sfreq']):
 			print('downsampling data')
