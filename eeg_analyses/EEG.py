@@ -207,7 +207,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         return events
 
-    def matchBeh(self, sj, session, events, event_id, headers):
+    def matchBeh(self, sj, session, events, event_id, trigger_header = 'trigger', headers = []):
         '''
         Alligns bdf file with csv file with experimental variables
 
@@ -236,7 +236,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         if 'practice' in headers:
             beh = beh[beh['practice'] == 'no']
             beh = beh.drop(['practice'], axis=1)
-        beh_triggers = beh['trigger'].values  
+        beh_triggers = beh[trigger_header].values  
 
         # get triggers bdf file
         if type(event_id) == dict:
@@ -287,7 +287,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
    
         # log number of matches between beh and bdf    
         logging.info('{} matches between beh and epoched data out of {}'.
-            format(sum(beh['trigger'].values == bdf_triggers), bdf_triggers.size))           
+            format(sum(beh[trigger_header].values == bdf_triggers), bdf_triggers.size))           
 
         return beh, missing
 
