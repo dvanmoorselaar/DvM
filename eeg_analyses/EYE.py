@@ -50,7 +50,7 @@ class EYE(FolderStructure):
 		self.scr_h = screen_h
 		self.sfreq = sfreq
 
-	def readEyeData(self, sj, eye_files = 'all', beh_files = 'all', start = 'start_trial'):
+	def readEyeData(self, sj, eye_files = 'all', beh_files = 'all', start = 'Start trial'):
 		''' 
 
 		Reads in eyetracker and behavioral file for subsequent processing 
@@ -86,7 +86,7 @@ class EYE(FolderStructure):
 		if eye_files[0][-3:] == 'tsv':			
 			eye = [read_eyetribe(file, start = start) for file in eye_files]
 		elif eye_files[0][-3:] == 'asc':	
-			eye = [read_edf(file, start = start) for file in eye_files]
+			eye = [read_edf(file, start = start, stop='Response') for file in eye_files]
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
@@ -368,7 +368,7 @@ class EYE(FolderStructure):
 			x, y = self.setXY(x,y, times, drift_correct)
 			bins, angles = np.array(self.createAngleBins(x,y, 0,3,0.25, 40))
 			# temp test code
-			window_bins = eog_filt( np.vstack(angles), 500, windowsize = 100, windowstep = 10, threshold = 0.5) 
+			window_bins = eog_filt( np.vstack(angles), 500, windowsize = 100, windowstep = 10, threshold = 0.5)
 			trial_nrs = beh['nr_trials'].values
 
 		return bins, window_bins, trial_nrs
