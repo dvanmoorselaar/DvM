@@ -53,7 +53,7 @@ class BDM(FolderStructure):
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
+				avg_runs: int = 1, bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
 		"""set decoding parameters that will be used in BDM class
 
 		Args:
@@ -76,6 +76,7 @@ class BDM(FolderStructure):
 		self.downsample = downsample
 		self.bdm_filter = bdm_filter
 		self.method = method
+		self.avg_runs = avg_runs
 		if bdm_filter != None:
 			self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
 		else:	 
@@ -223,11 +224,11 @@ class BDM(FolderStructure):
 			
 			# initiate decoding array
 			if gat_matrix:
-				class_acc = np.empty((nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
-				label_info = np.empty((nr_perm, eegs.shape[2], eegs.shape[2], labels.size)) * np.nan
+				class_acc = np.empty((self.avg_runs, nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
+				label_info = np.empty((self.avg_runs, nr_perm, eegs.shape[2], eegs.shape[2], labels.size)) * np.nan
 			else:	
-				class_acc = np.empty((nr_perm, eegs.shape[2])) * np.nan	
-				label_info = np.empty((nr_perm, eegs.shape[2], labels.size)) * np.nan
+				class_acc = np.empty((self.avg_runs, nr_perm, eegs.shape[2])) * np.nan	
+				label_info = np.empty((self.avg_runs,nr_perm, eegs.shape[2], labels.size)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -241,16 +242,20 @@ class BDM(FolderStructure):
 						bdm_info = {}
 
 					# select train and test trials
-					train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info)
-					Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)
-					# TRIAL AVERAGING NEEDS UPDATING
-					#self.trial_avg = 3
-					#if self.trial_avg > 1:
-					#	Xtr, Ytr = self.averageTrials(Xtr, Ytr, 2)
-					#	Xte, Yte = self.averageTrials(Xte, Yte, 2)
-					# do actual classification
-					#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
-					class_acc[p], label_info[p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
+					for run in range(self.avg_runs):
+						train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, {}) #  labels not saved
+						Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)
+						# TRIAL AVERAGING NEEDS UPDATING
+						#self.trial_avg = 3
+						#if self.trial_avg > 1:
+						#	Xtr, Ytr = self.averageTrials(Xtr, Ytr, 2)
+						#	Xte, Yte = self.averageTrials(Xte, Yte, 2)
+						# do actual classification
+						#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
+						
+						class_acc[run, p], label_info[run,p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
+
+					class_acc = class_acc.mean(axis = 0)	
 					if i == 0:
 						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'bdm_info': bdm_info})
 					else:
