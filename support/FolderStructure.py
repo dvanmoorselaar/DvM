@@ -45,7 +45,7 @@ class FolderStructure(object):
 			if not overwrite:
 				while os.path.isfile(os.path.join(folder,filename)):
 					end_idx = len(filename) - filename.index('.')
-					filename = filename[:-end_idx] + '*' + filename[-end_idx:]
+					filename = filename[:-end_idx] + '+' + filename[-end_idx:]
 			folder = os.path.join(folder,filename)
 			
 		return folder	
