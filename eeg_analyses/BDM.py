@@ -116,7 +116,7 @@ class BDM(FolderStructure):
 
 		if self.downsample < int(epochs.info['sfreq']):
 			print('downsampling data')
-			epochs.resample(self.downsample)
+			epochs.resample(self.downsample, npad='auto')
 
 		# select time window and EEG electrodes
 		s, e = [np.argmin(abs(epochs.times - t)) for t in time]
