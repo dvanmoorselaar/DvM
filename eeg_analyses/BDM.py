@@ -123,10 +123,6 @@ class BDM(FolderStructure):
 		picks = mne.pick_types(epochs.info, eeg=True, eog= True, exclude='bads')
 		picks = select_electrodes(np.array(epochs.ch_names)[picks], self.elec_oi)
 		eegs = epochs._data[:,picks,s:e]
-		# temp check to check effect of dwonsampling
-		# d_sample = np.arange(0,409, 4)
-		# eegs = eegs[:,:,d_sample]
-
 		times = epochs.times[s:e]
 
 		# if specified average over trials 
