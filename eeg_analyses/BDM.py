@@ -9,6 +9,7 @@ import itertools
 #matplotlib.use('agg') # now it works via ssh connection
 
 import numpy as np
+from numpy.fft import ifft2
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -69,7 +70,13 @@ class BDM(FolderStructure):
 		"""	
 							
 		self.beh = beh
-		self.epochs = epochs.apply_baseline(baseline = baseline)
+		if bdm_filter != None:
+			self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
+			self.epochs = epochs # baseline correction is done at a later stage
+		else:	 
+			self.bdm_type = 'broad'
+			self.epochs = epochs.apply_baseline(baseline = baseline)
+		self.baseline = baseline
 		self.to_decode = to_decode
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
@@ -77,10 +84,7 @@ class BDM(FolderStructure):
 		self.bdm_filter = bdm_filter
 		self.method = method
 		self.avg_runs = avg_runs
-		if bdm_filter != None:
-			self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
-		else:	 
-			self.bdm_type = 'broad'
+
 
 	def selectBDMData(self, epochs, beh, time, excl_factor = None):
 		''' 
@@ -102,17 +106,12 @@ class BDM(FolderStructure):
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
-			print('filtering raw eeg data')
-			T = np.empty(epochs._data.shape, dtype= np.complex_) * np.nan
-			# selecting eeg electrodes
-			for ch in range(epochs._data.shape[1]):
-				x = np.ravel(epochs._data[:,ch,:])
-				x_hilb = hilbert(filter_data(x, epochs.info['sfreq'],self.bdm_band[0], self.bdm_band[1], 
-								method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
-				x_hilb = np.reshape(x_hilb, (epochs._data.shape[0],-1))
-				T[:,ch] = np.abs(x_hilb)**2
-
-			epochs._data= T
+			print('eeg data is filtered before downsampling and slicing the time window of interest')
+			epochs.filter(self.bdm_band[0],self.bdm_band[1], method = 'iir', 
+						iir_params = dict(ftype = 'butterworth', order = 5))
+			epochs.apply_hilbert(envelope=True)	
+			epochs._data = abs(epochs._data)**2
+			epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
 
 		if self.downsample < int(epochs.info['sfreq']):
 			print('downsampling data')
@@ -242,7 +241,9 @@ class BDM(FolderStructure):
 						bdm_info = {}
 
 					# select train and test trials
+					self.run_info = 0
 					for run in range(self.avg_runs):
+						self.run_info += 1
 						train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, {}) #  labels not saved
 						Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)
 						# TRIAL AVERAGING NEEDS UPDATING
@@ -454,7 +455,7 @@ class BDM(FolderStructure):
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
 		for n in range(N):
-			print('\r Fold {} out of {} folds'.format(n + 1,N),end='')
+			print('\r Fold {} out of {} folds in average run {}'.format(n + 1,N, self.run_info),end='')
 			Ytr_ = Ytr[n]
 			Yte_ = Yte[n]
 			
