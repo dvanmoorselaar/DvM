@@ -110,8 +110,18 @@ class BDM(FolderStructure):
 			epochs.filter(self.bdm_band[0],self.bdm_band[1], method = 'iir', 
 						iir_params = dict(ftype = 'butterworth', order = 5))
 			epochs.apply_hilbert(envelope=True)	
-			epochs._data = abs(epochs._data)**2
-			epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
+			tf_data = abs(epochs._data)**2
+			# db convert
+			base_slice = slice(*[np.argmin(abs(epochs.times - t)) for t in self.baseline])
+			print('baseline correct TF data via db convert')
+			tf_data = tf_data.reshape(-1,epochs.times.size)
+			tf_data = np.array(np.matrix(tf_data) / np.matrix(tf_data[:,base_slice]).mean(axis = 1)
+					  ).reshape(-1,len(epochs.info['ch_names']),epochs.times.size)
+			epochs._data = 10 * np.log10(tf_data)
+
+			# or 'standard' baseline correction
+			#epochs._data = abs(epochs._data)**2
+			#epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
 
 		if self.downsample < int(epochs.info['sfreq']):
 			print('downsampling data')
