@@ -145,15 +145,17 @@ class EYE(FolderStructure):
 				if start_event in event[1]:
 
 					# adjust trial times such that start_event is at 0 ms
-					tr_times = trial['trackertime'] - event[0]
+					print(trial['trackertime'].size)
+					if trial['trackertime'].size > 0:
+						tr_times = trial['trackertime'] - event[0]
 
-					# get x, y cordinates between start and end
-					s, e = [np.argmin(abs(tr_times - t)) for t in (start,end)]
-					x_ = np.array(trial['x'][s:e]) # array makes sure that any subsequent manipulations do not effect information in eye
-					y_ = np.array(trial['y'][s:e])
+						# get x, y cordinates between start and end
+						s, e = [np.argmin(abs(tr_times - t)) for t in (start,end)]
+						x_ = np.array(trial['x'][s:e]) # array makes sure that any subsequent manipulations do not effect information in eye
+						y_ = np.array(trial['y'][s:e])
 
-					x[i,:x_.size] = x_
-					y[i,:y_.size] = y_
+						x[i,:x_.size] = x_
+						y[i,:y_.size] = y_
 
 		return x, y, times	
 
