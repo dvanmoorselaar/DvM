@@ -85,7 +85,6 @@ class BDM(FolderStructure):
 		self.method = method
 		self.avg_runs = avg_runs
 
-
 	def selectBDMData(self, epochs, beh, time, excl_factor = None):
 		''' 
 		Arguments
@@ -140,6 +139,54 @@ class BDM(FolderStructure):
 
 		return 	eegs, beh, times
 
+	def sliding_window(self, X: np.array, window_size: int = 20, demean: bool = True):
+		"""	Copied from temp_dec developed by @author: jasperhajonides (github.com/jasperhajonides/temp_dec)
+			
+			Reformat array so that time point t includes all information from
+			features up to t-n where n is the size of the predefined window.
+
+			example:
+				
+			100, 60, 240 = X.shape
+			data_out = sliding_window(X, window_size=5)
+			100, 300, 240 = output.shape
+
+		Args:
+			X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
+			window_size (int, optional): number of time points to include in the sliding window. Defaults to 20.
+			demean (bool, optional): subtract mean from each feature within the specified sliding window. Defaults to True.
+
+		Raises:
+			ValueError: In case data has incorrect format
+
+		Returns:
+			output [type]: reshaped array where second dimension increased by size of size_window
+		"""
+    
+		try:
+			n_obs, n_elec, n_time = X.shape
+		except ValueError:
+			raise ValueError("Input data has the wrong shape")
+		
+		if window_size <= 1 or len(X.shape) < 3 or n_time < window_size:
+			print('Input data not suitable. Data will be returned')
+			return X
+
+		# predefine variables
+		output = np.zeros((n_obs, n_elec*window_size, n_time))
+		
+		# loop over time dimension
+		for t in range(window_size-1, n_time):
+			#concatenate elecs within window (and demean elecs if selected)	
+			mean_value = X[:, :, (t-window_size+1):(t+1)].mean(2)
+			x_window = X[:, :, (t-window_size+1):(t+1)].reshape(
+				n_obs, n_elec*window_size) - np.tile(mean_value.T, window_size).reshape(
+				n_obs, n_elec*window_size)*float(demean)        
+			# add to array
+			output[:, :, t] = x_window 
+
+		return output
+
 	def averageTrials(self, X, Y, trial_avg):
 
 
@@ -192,6 +239,9 @@ class BDM(FolderStructure):
 
 		# read in data 
 		eegs, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
+		print(eegs.shape)
+		#eegs = self.sliding_window(eegs, 2, False)
+		print(eegs.shape)
 		
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
