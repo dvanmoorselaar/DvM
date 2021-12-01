@@ -18,9 +18,9 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import LinearSVC
 from sklearn.calibration import CalibratedClassifierCV
-from mne.decoding import (SlidingEstimator, GeneralizingEstimator,
-                          cross_val_multiscore, LinearModel, get_coef)
+
 from sklearn.pipeline import make_pipeline
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
@@ -38,7 +38,8 @@ class BDM(FolderStructure):
 	By default the BDM class employs Linear Discriminant Analysis (LDA) to perform decoding.
 
 	The BDM class makes use of k-fold cross validation, in which the trials are split up into k equally sized folds. 
-	The model is trained on k-1 folds, and testing is done on the remaining fold that was not used for training. This procedure 
+	The model is trained on k-1 folds, and testing is done on the remaining fold that was not used for training. It is 
+	ensured that each class has the same number of observations in both the training and the testing set. This procedure 
 	is repeated k times until each fold (all data) has been tested exactly once, while on any given iteration the trials used 
 	for training are independent from the trials that were used for testing.
 
@@ -55,8 +56,8 @@ class BDM(FolderStructure):
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				avg_runs: int = 1, sliding_window: tuple = (1, True), bdm_filter: Optional[dict] = None, 
-				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
+				avg_runs: int = 1, sliding_window: tuple = (1, True), pca_components: Union[int, float] = 0,
+				bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
 
 		Args:
@@ -75,6 +76,8 @@ class BDM(FolderStructure):
 			by giving the classifier access to all time points in the window (see Grootswagers et al. 2017, JoCN). Second argument in tuple specifies 
 			whether (True) or not (False) the activity in each sliding window is demeaned (see Hajonides et al. 2021, NeuroImage). Defaults to (1,True) meaning that 
 			no data transformation will be applied.
+			pca_components (int, float, optional): Apply dimensionality reduction before decoding. Reduce features to N principal components,
+            if N < 1 it indicates the % of explained variance (and the number of components is inferred). Defaults to 0 (i.e., no PCA reduction)
 			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
 			baseline (Optional[tuple], optional): [description]. Defaults to None.
 			seed (Optional[int]): Sets a random seed such that cross-validation procedure can be repeated. 
@@ -96,6 +99,7 @@ class BDM(FolderStructure):
 		self.elec_oi = elec_oi
 		self.downsample = downsample
 		self.window_size = sliding_window
+		self.pca_components = pca_components
 		self.bdm_filter = bdm_filter
 		self.method = method
 		self.avg_runs = avg_runs
@@ -328,7 +332,7 @@ class BDM(FolderStructure):
 					The number sets the number of permutations
 		gat_matrix (bool): If True, train X test decoding analysis is performed
 		downscale (bool): If True, decoding is repeated with increasingly less trials. Set to True if you are 
-						interested in the minumum number of trials that support classification
+						interested in the minimum number of trials that support classification
 		save (bool): sets whether output is saved (via standard file organization) or returned 	
 		Returns
 		- - - -
@@ -339,9 +343,6 @@ class BDM(FolderStructure):
 
 		# read in data 
 		eegs, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
-		print(eegs.shape)
-		#eegs = self.sliding_window(eegs, 2, False)
-		print(eegs.shape)
 		
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
@@ -576,8 +577,7 @@ class BDM(FolderStructure):
 
 	def crossTimeDecoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False):
 		'''
-		At the moment only supports linear classification as implemented in sklearn. Decoding is done 
-		across all time points. 
+		Decoding is done across all time points. 
 		Arguments
 		- - - - - 
 		Xtr (array): 
@@ -621,6 +621,12 @@ class BDM(FolderStructure):
 
 					Xtr_ = Xtr[n,:,:,tr_t]
 					Xte_ = Xte[n,:,:,te_t]
+
+					# if specified apply dimensionality reduction using PCA
+					if self.pca_components
+						pca = PCA(n_components=self.pca_components, svd_slver = 'full')
+						print('NOT YET IMPLEMENTED!!!!!')
+
 
 					# train model and predict
 					clf.fit(Xtr_,Ytr_)
