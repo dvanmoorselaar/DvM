@@ -40,16 +40,16 @@ class BDM(FolderStructure):
 
 	The BDM class makes use of k-fold cross validation, in which the trials are split up into k equally sized folds. 
 	The model is trained on k-1 folds, and testing is done on the remaining fold that was not used for training. It is 
-	ensured that each class has the same number of observations in both the training and the testing set. This procedure 
-	is repeated k times until each fold (all data) has been tested exactly once, while on any given iteration the trials used 
-	for training are independent from the trials that were used for testing.
+	ensured that each class has the same number of observations (i.e., balanced classes) in both the training and the testing set. 
+	This procedure is repeated k times until each fold (all data) has been tested exactly once, while on any given iteration the training  
+	are independent from the test trials.
 
 	In class assignment, BDM applies event balancing by default through undersampling so that each class has the same number of observations.
 	(i.e., if one class has 200 observations, and the other class has 100 observations, the number of observations in the first class would 
 	be artificially lowered by randomly removing 100 observations). Consequently, if the design is heavily unbalanced between classes you may 
 	loose a lot of data. 
 
-	Area under the curve (AUC; Bradley, 1997), a metric derived from signal detection theory, is the default performance measure that BDM computes
+	Area under the curve (AUC; Bradley, 1997), a metric derived from signal detection theory, is the default performance measure that BDM computes.
 
 	Args:
 		FolderStructure (object): Class that creates file paths to load raw eeg/ behavior and save decoding ouput
