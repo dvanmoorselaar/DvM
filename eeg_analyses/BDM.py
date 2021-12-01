@@ -4,12 +4,12 @@ import pickle
 import random
 import copy
 import itertools
+import warnings
 
 import numpy as np
 from numpy.fft import ifft2
 import pandas as pd
 import matplotlib.pyplot as plt
-
 
 from typing import Optional, Generic, Union, Tuple, Any
 from support.FolderStructure import *
@@ -30,6 +30,7 @@ from scipy.signal import hilbert
 
 from IPython import embed
 
+warnings.simplefilter('default')
 
 class BDM(FolderStructure):
 
@@ -56,8 +57,9 @@ class BDM(FolderStructure):
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				avg_runs: int = 1, sliding_window: tuple = (1, True), pca_components: Union[int, float] = 0,
-				bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
+				avg_runs: int = 1, sliding_window: tuple = (1, True), scale: dict = {'standardize': False, 'scale': False}, 
+				pca_components: Union[int, float] = 0, bdm_filter: Optional[dict] = None, 
+				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
 
 		Args:
@@ -76,6 +78,8 @@ class BDM(FolderStructure):
 			by giving the classifier access to all time points in the window (see Grootswagers et al. 2017, JoCN). Second argument in tuple specifies 
 			whether (True) or not (False) the activity in each sliding window is demeaned (see Hajonides et al. 2021, NeuroImage). Defaults to (1,True) meaning that 
 			no data transformation will be applied.
+			scale (dict): Dictinary with two keys specifying whether data should be standardized (True) or not (False). The scale argument specifies whether or not 
+			data should also be scaled to unit variance (or equivalently, unit standard deviation). Defaults to {'standardize': False, 'scale': False}, no standardization
 			pca_components (int, float, optional): Apply dimensionality reduction before decoding. Reduce features to N principal components,
             if N < 1 it indicates the % of explained variance (and the number of components is inferred). Defaults to 0 (i.e., no PCA reduction)
 			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
@@ -99,6 +103,7 @@ class BDM(FolderStructure):
 		self.elec_oi = elec_oi
 		self.downsample = downsample
 		self.window_size = sliding_window
+		self.scale = scale
 		self.pca_components = pca_components
 		self.bdm_filter = bdm_filter
 		self.method = method
@@ -283,8 +288,7 @@ class BDM(FolderStructure):
 			times = np.linspace(times[0], times[-self.window_size[0]], eegs.shape[-1])
 			s_freq =epochs.info['sfreq']
 			time_red = 1/s_freq * 1000 * self.window_size[0]
-			print(f'Final timepoint in analysis is reduced by {time_red} ms as each timepoint in analysis now \
-			reflects {self.window_size[0]} data samples at a sampling rate of {s_freq} Hz')
+			warnings.warn(f'Final timepoint in analysis is reduced by {time_red} ms as each timepoint in analysis now reflects {self.window_size[0]} data samples at a sampling rate of {s_freq} Hz', UserWarning)
 
 		# if specified average over trials 
 		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
@@ -622,12 +626,21 @@ class BDM(FolderStructure):
 					Xtr_ = Xtr[n,:,:,tr_t]
 					Xte_ = Xte[n,:,:,te_t]
 
+					# if specified standardize features
+					if self.scale['standardize']:
+						scaler = StandardScaler(with_std = self.scale['scale']).fit(Xtr_)
+						Xtr_ = scaler.transform(Xtr_)
+						Xte_ = scaler.transform(Xte_)
+
 					# if specified apply dimensionality reduction using PCA
-					if self.pca_components
-						pca = PCA(n_components=self.pca_components, svd_slver = 'full')
-						print('NOT YET IMPLEMENTED!!!!!')
+					if self.pca_components:
+						if not self.scale['standardize'] and tr_t == 0 and n == 0 and self.run_info == 1: # filthy hack to prevent multiple warning messages
+							warnings.warn('It is recommended to standardize the data before applying PCA correction', UserWarning)
 
-
+						pca = PCA(n_components=self.pca_components, svd_solver = 'full').fit(Xtr_)
+						Xtr_ = pca.transform(Xtr_)
+						Xte_ = pca.transform(Xte_)
+						
 					# train model and predict
 					clf.fit(Xtr_,Ytr_)
 					scores = clf.predict_proba(Xte_) # get posteriar probability estimates
@@ -638,7 +651,6 @@ class BDM(FolderStructure):
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
 						label_info[n, tr_t, :] = [sum(predict == l) for l in labels]
 						class_acc[n,tr_t,:] = class_perf # 
-
 					else:
 						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
 						label_info[n, tr_t, te_t] = [sum(predict == l) for l in labels]	

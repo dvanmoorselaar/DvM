@@ -29,7 +29,6 @@ from pygazeanalyser.detectors import *
 from pygazeanalyser.gazeplotter import *
 from support.support import eog_filt
 
-warnings.filterwarnings('ignore')
 
 class EYE(FolderStructure):
 
