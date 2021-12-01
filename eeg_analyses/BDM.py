@@ -5,18 +5,19 @@ import random
 import copy
 import itertools
 
-#import matplotlib
-#matplotlib.use('agg') # now it works via ssh connection
-
 import numpy as np
 from numpy.fft import ifft2
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from typing import Optional, Generic, Union, Tuple
+
+from typing import Optional, Generic, Union, Tuple, Any
 from support.FolderStructure import *
 from mne.filter import filter_data
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.naive_bayes import GaussianNB
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
 from mne.decoding import (SlidingEstimator, GeneralizingEstimator,
                           cross_val_multiscore, LinearModel, get_coef)
 from sklearn.pipeline import make_pipeline
@@ -53,7 +54,7 @@ class BDM(FolderStructure):
 	"""
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
-				method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
+				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
 				avg_runs: int = 1, sliding_window: tuple = (1, True), bdm_filter: Optional[dict] = None, 
 				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
@@ -63,6 +64,8 @@ class BDM(FolderStructure):
 			eeg (mne.Epochs): epoched eeg data (linked to beh)
 			to_decode (str): column in beh that contains classes used for decoding
 			nr_folds (int): specifies how many folds will be used for k-fold cross validation
+			classifier (str, optional): Sets which classifier is used for decoding. Supports 'LDA' (linear discriminant analysis),
+			'svm' (support vector machine), 'GNB' (Gaussian Naive Bayes)
 			method (str, optional): [description]. Defaults to 'auc'.
 			elec_oi (Optional[str, list], optional): [description]. Defaults to 'all'.
 			downsample (int, optional): [description]. Defaults to 128.
@@ -86,6 +89,7 @@ class BDM(FolderStructure):
 		else:	 
 			self.bdm_type = 'broad'
 			self.epochs = epochs.apply_baseline(baseline = baseline)
+		self.classifier = classifier
 		self.baseline = baseline
 		self.to_decode = to_decode
 		self.nr_folds = nr_folds
@@ -96,6 +100,28 @@ class BDM(FolderStructure):
 		self.method = method
 		self.avg_runs = avg_runs
 		self.seed = seed
+
+	def select_classifier(self) -> Any:
+		"""
+		Function that initialises the classifier
+
+		Raises:
+			ValueError: In case incorrect classifier is selected
+
+		Returns:
+			clf: sklearn classifier class
+		"""
+		
+		if self.classifier == 'LDA':
+			clf = LinearDiscriminantAnalysis()
+		elif self.classifier == 'GNB':
+			clf = GaussianNB()
+		elif self.classifier == 'svm':
+			clf = CalibratedClassifierCV(LinearSVC())
+		else:
+			raise ValueError('Classifier not correctly defined.')
+		
+		return clf
 
 	def sliding_window(self, X: np.array, window_size: int = 20, demean: bool = True) -> np.array:
 		"""	
@@ -153,7 +179,7 @@ class BDM(FolderStructure):
 		Number of folds determines the ratio between training and test trials. With 10 folds, 90%
 		of the data is used for training and 10% for testing. Ensures that the number of observations per class
 		is balanced both in the training and the testing set
-
+ 
 		Args:
 			idx (np.array): trial indices of decoding labels
 			labels (np.array): array of decoding labels
@@ -173,7 +199,8 @@ class BDM(FolderStructure):
 		steps = int(max_tr/N)
 
 		# select final sample for BDM and store those trials in dict so that they can be saved
-		random.seed(self.seed) # set seed 
+		if self.seed:
+			random.seed(self.seed) # set seed 
 		if bdm_info['run_' + str(self.run_info)] == {}:
 			for i, l in enumerate(np.unique(labels)):
 				bdm_info['run_' + str(self.run_info)].update({l:idx[random.sample(list(np.where(labels==l)[0]),max_tr)]})	
@@ -575,8 +602,8 @@ class BDM(FolderStructure):
 		else:
 			nr_test_time = 1	
 
-		# initiate linear classifier
-		lda = LinearDiscriminantAnalysis()
+		# initiate classifier
+		clf = self.select_classifier()
 
 		# initiate decoding arrays
 		class_acc = np.zeros((N,nr_time, nr_test_time))
@@ -596,9 +623,9 @@ class BDM(FolderStructure):
 					Xte_ = Xte[n,:,:,te_t]
 
 					# train model and predict
-					lda.fit(Xtr_,Ytr_)
-					scores = lda.predict_proba(Xte_) # get posteriar probability estimates
-					predict = lda.predict(Xte_)
+					clf.fit(Xtr_,Ytr_)
+					scores = clf.predict_proba(Xte_) # get posteriar probability estimates
+					predict = clf.predict(Xte_)
 					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) # 
 
 					if not gat_matrix:
