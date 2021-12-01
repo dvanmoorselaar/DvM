@@ -54,7 +54,7 @@ class BDM(FolderStructure):
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				avg_runs: int = 1, bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
+				avg_runs: int = 1, sliding_window: tuple = (1, True), bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
 		"""set decoding parameters that will be used in BDM class
 
 		Args:
@@ -65,6 +65,12 @@ class BDM(FolderStructure):
 			method (str, optional): [description]. Defaults to 'auc'.
 			elec_oi (Optional[str, list], optional): [description]. Defaults to 'all'.
 			downsample (int, optional): [description]. Defaults to 128.
+			avg_runs (int, optional): Determines how often (random) cross-validation procedure is performed. 
+			Decoding output reflects the average of all cross-validation runs
+			sliding_window (tuple, optional): Increases the  number of features used for decoding by a factor of the size of the sliding_window
+			by giving the classifier access to all time points in the window (see Grootswagers et al. 2017, JoCN). Second argument in tuple specifies 
+			whether (True) or not (False) the activity in each sliding window is demeaned (see Hajonides et al. 2021, NeuroImage). Defaults to (1,True) meaning that 
+			no data transformation will be applied.
 			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
 			baseline (Optional[tuple], optional): [description]. Defaults to None.
 		"""	
@@ -81,6 +87,7 @@ class BDM(FolderStructure):
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
 		self.downsample = downsample
+		self.window_size = sliding_window
 		self.bdm_filter = bdm_filter
 		self.method = method
 		self.avg_runs = avg_runs
@@ -133,6 +140,15 @@ class BDM(FolderStructure):
 		picks = select_electrodes(np.array(epochs.ch_names)[picks], self.elec_oi)
 		eegs = epochs._data[:,picks,s:e]
 		times = epochs.times[s:e]
+
+		# transform eeg data in case of sliding window approach
+		if self.window_size[0] > 1:
+			eegs = self.sliding_window(eegs, self.window_size[0], self.window_size[1])[:,:,self.window_size[0]-1:]
+			times = np.linspace(times[0], times[-self.window_size[0]], eegs.shape[-1])
+			s_freq =epochs.info['sfreq']
+			time_red = 1/s_freq * 1000 * self.window_size[0]
+			print(f'Final timepoint in analysis is reduced by {time_red} ms as each timepoint in analysis now \
+			reflects {self.window_size[0]} data samples at a sampling rate of {s_freq} Hz')
 
 		# if specified average over trials 
 		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
@@ -190,7 +206,7 @@ class BDM(FolderStructure):
 	def averageTrials(self, X, Y, trial_avg):
 
 
-		# DOWNSIDE OF ONLY AVERAGING AT THIS STAGE AND WHIT PRSENT METHOD IS THAT TRIALS ARE LOSSED
+		# DOWNSIDE OF ONLY AVERAGING AT THIS STAGE AND WHIT PRESENT METHOD IS THAT TRIALS ARE LOSSED
 		# initiate arrays
 		x_, y_ = [], []
 
@@ -406,7 +422,7 @@ class BDM(FolderStructure):
 
 	def crossClassify(self, sj, cnds, cnd_header, time, tr_header, te_header, tr_te_rel = 'ind', excl_factor = None, tr_factor = None, te_factor = None, bdm_labels = 'all', gat_matrix = False, save = True, bdm_name = 'cross'):	
 		'''
-		UPdate function but it does the trick
+		Update function but it does the trick
 		'''
 
 		# read in data 
@@ -511,7 +527,7 @@ class BDM(FolderStructure):
 		# initiate linear classifier
 		lda = LinearDiscriminantAnalysis()
 
-		# inititate decoding arrays
+		# initiate decoding arrays
 		class_acc = np.zeros((N,nr_time, nr_test_time))
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
 
@@ -519,7 +535,7 @@ class BDM(FolderStructure):
 			print('\r Fold {} out of {} folds in average run {}'.format(n + 1,N, self.run_info),end='')
 			Ytr_ = Ytr[n]
 			Yte_ = Yte[n]
-			
+
 			for tr_t in range(nr_time):
 				for te_t in range(nr_test_time):
 					if not gat_matrix:
