@@ -13,7 +13,7 @@ from numpy.fft import ifft2
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from typing import Optional, Generic, Union
+from typing import Optional, Generic, Union, Tuple
 from support.FolderStructure import *
 from mne.filter import filter_data
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -54,7 +54,8 @@ class BDM(FolderStructure):
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				avg_runs: int = 1, sliding_window: tuple = (1, True), bdm_filter: Optional[dict] = None, baseline: Optional[tuple] = None):
+				avg_runs: int = 1, sliding_window: tuple = (1, True), bdm_filter: Optional[dict] = None, 
+				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
 
 		Args:
@@ -73,6 +74,9 @@ class BDM(FolderStructure):
 			no data transformation will be applied.
 			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
 			baseline (Optional[tuple], optional): [description]. Defaults to None.
+			seed (Optional[int]): Sets a random seed such that cross-validation procedure can be repeated. 
+			In case of False, no seed is applied before cross validation. In case avg_runs > 1, seed will 
+			be increased by 1 for each run. Defaults to 42213 (A1Z26 cipher of DvM)
 		"""	
 							
 		self.beh = beh
@@ -91,6 +95,107 @@ class BDM(FolderStructure):
 		self.bdm_filter = bdm_filter
 		self.method = method
 		self.avg_runs = avg_runs
+		self.seed = seed
+
+	def sliding_window(self, X: np.array, window_size: int = 20, demean: bool = True) -> np.array:
+		"""	
+		Copied from temp_dec developed by @author: jasperhajonides (github.com/jasperhajonides/temp_dec)
+			
+		Reformat array so that time point t includes all information from
+		features up to t-n where n is the size of the predefined window.
+
+		example:
+			
+		100, 60, 240 = X.shape
+		data_out = sliding_window(X, window_size=5)
+		100, 300, 240 = output.shape
+
+		Args:
+			X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
+			window_size (int, optional): number of time points to include in the sliding window. Defaults to 20.
+			demean (bool, optional): subtract mean from each feature within the specified sliding window. Defaults to True.
+
+		Raises:
+			ValueError: In case data has incorrect format
+
+		Returns:
+			output (np.array): reshaped array where second dimension increased by size of size_window
+		"""
+    
+		try:
+			n_obs, n_elec, n_time = X.shape
+		except ValueError:
+			raise ValueError("Input data has the wrong shape")
+		
+		if window_size <= 1 or len(X.shape) < 3 or n_time < window_size:
+			print('Input data not suitable. Data will be returned')
+			return X
+
+		# predefine variables
+		output = np.zeros((n_obs, n_elec*window_size, n_time))
+		
+		# loop over time dimension
+		for t in range(window_size-1, n_time):
+			#concatenate elecs within window (and demean elecs if selected)	
+			mean_value = X[:, :, (t-window_size+1):(t+1)].mean(2)
+			x_window = X[:, :, (t-window_size+1):(t+1)].reshape(
+				n_obs, n_elec*window_size) - np.tile(mean_value.T, window_size).reshape(
+				n_obs, n_elec*window_size)*float(demean)        
+			# add to array
+			output[:, :, t] = x_window 
+
+		return output
+
+	def trainTestSplit(self, idx: np.array, labels: np.array, max_tr: int, bdm_info: dict) -> Tuple[np.array, np.array, dict]:
+		"""
+		Splits up data into training and test sets. The number of training and test sets is 
+		equal to the number of folds. Splitting is done such that all data is tested exactly once.
+		Number of folds determines the ratio between training and test trials. With 10 folds, 90%
+		of the data is used for training and 10% for testing. Ensures that the number of observations per class
+		is balanced both in the training and the testing set
+
+		Args:
+			idx (np.array): trial indices of decoding labels
+			labels (np.array): array of decoding labels
+			max_tr (int): max number unique labels
+			bdm_info (dict): dictionary with selected trials per label. If the value of the current run is {}, 
+			a random subset of trials will be selected
+
+		Returns:
+			train_tr (np.array): trial indices per fold and unique label (folds X labels X trials)
+			test_tr (np.array): trial indices per fold and unique label (folds X labels X trials)
+			bdm_info (dict): cross-validation info per decoding run (can be reported for replication purposes)
+		"""
+
+		# set up params
+		N = self.nr_folds
+		nr_labels = np.unique(labels).size
+		steps = int(max_tr/N)
+
+		# select final sample for BDM and store those trials in dict so that they can be saved
+		random.seed(self.seed) # set seed 
+		if bdm_info['run_' + str(self.run_info)] == {}:
+			for i, l in enumerate(np.unique(labels)):
+				bdm_info['run_' + str(self.run_info)].update({l:idx[random.sample(list(np.where(labels==l)[0]),max_tr)]})	
+
+		# initiate train and test arrays	
+		train_tr = np.zeros((N,nr_labels, steps*(N-1)),dtype = int)
+		test_tr = np.zeros((N,nr_labels,steps),dtype = int)
+
+		# split up the dataset into N equally sized subsets for cross validation 
+		for i, b in enumerate(np.arange(0,max_tr,steps)):
+			
+			idx_train = np.ones(max_tr,dtype = bool)
+			idx_test = np.zeros(max_tr, dtype = bool)
+
+			idx_train[b:b + steps] = False
+			idx_test[b:b + steps] = True
+
+			for j, key in enumerate(bdm_info['run_' + str(self.run_info)].keys()):
+				train_tr[i,j,:] = np.sort(bdm_info['run_' + str(self.run_info)][key][idx_train])
+				test_tr[i,j,:] = np.sort(bdm_info['run_' + str(self.run_info)][key][idx_test])
+
+		return train_tr, test_tr, bdm_info
 
 	def selectBDMData(self, epochs, beh, time, excl_factor = None):
 		''' 
@@ -154,54 +259,6 @@ class BDM(FolderStructure):
 		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
 
 		return 	eegs, beh, times
-
-	def sliding_window(self, X: np.array, window_size: int = 20, demean: bool = True):
-		"""	Copied from temp_dec developed by @author: jasperhajonides (github.com/jasperhajonides/temp_dec)
-			
-			Reformat array so that time point t includes all information from
-			features up to t-n where n is the size of the predefined window.
-
-			example:
-				
-			100, 60, 240 = X.shape
-			data_out = sliding_window(X, window_size=5)
-			100, 300, 240 = output.shape
-
-		Args:
-			X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
-			window_size (int, optional): number of time points to include in the sliding window. Defaults to 20.
-			demean (bool, optional): subtract mean from each feature within the specified sliding window. Defaults to True.
-
-		Raises:
-			ValueError: In case data has incorrect format
-
-		Returns:
-			output [type]: reshaped array where second dimension increased by size of size_window
-		"""
-    
-		try:
-			n_obs, n_elec, n_time = X.shape
-		except ValueError:
-			raise ValueError("Input data has the wrong shape")
-		
-		if window_size <= 1 or len(X.shape) < 3 or n_time < window_size:
-			print('Input data not suitable. Data will be returned')
-			return X
-
-		# predefine variables
-		output = np.zeros((n_obs, n_elec*window_size, n_time))
-		
-		# loop over time dimension
-		for t in range(window_size-1, n_time):
-			#concatenate elecs within window (and demean elecs if selected)	
-			mean_value = X[:, :, (t-window_size+1):(t+1)].mean(2)
-			x_window = X[:, :, (t-window_size+1):(t+1)].reshape(
-				n_obs, n_elec*window_size) - np.tile(mean_value.T, window_size).reshape(
-				n_obs, n_elec*window_size)*float(demean)        
-			# add to array
-			output[:, :, t] = x_window 
-
-		return output
 
 	def averageTrials(self, X, Y, trial_avg):
 
@@ -318,20 +375,14 @@ class BDM(FolderStructure):
 						bdm_info = {}
 
 					# select train and test trials
-					self.run_info = 0
+					self.run_info = 1
 					for run in range(self.avg_runs):
-						self.run_info += 1
-						train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, {}) #  labels not saved
-						Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)
-						# TRIAL AVERAGING NEEDS UPDATING
-						#self.trial_avg = 3
-						#if self.trial_avg > 1:
-						#	Xtr, Ytr = self.averageTrials(Xtr, Ytr, 2)
-						#	Xte, Yte = self.averageTrials(Xte, Yte, 2)
-						# do actual classification
-						#class_acc[p], label_info[p] = self.linearClassification(eegs, train_tr, test_tr, n, cnd_labels, gat_matrix)
-						
+						bdm_info.update({'run_' +str(self.run_info): {}})
+						train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info) 
+						Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)	
 						class_acc[run, p], label_info[run,p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
+						self.seed += 1 # update seed
+						self.run_info += 1
 
 					class_acc = class_acc.mean(axis = 0)	
 					if i == 0:
@@ -738,53 +789,7 @@ class BDM(FolderStructure):
 		return Xtr, Xte, Ytr, Yte	
 
 
-	def trainTestSplit(self, idx, labels, max_tr, bdm_info):
-		''' 
-		Splits up data into training and test sets. The number of training and test sets is 
-		equal to the number of folds. Splitting is done such that all data is tested exactly once.
-		Number of folds determines the ratio between training and test trials. With 10 folds, 90%
-		of the data is used for training and 10% for testing. 
-		
-		Arguments
-		- - - - - 
-		idx (array): trial indices of decoding labels
-		labels (array): decoding labels
-		max_tr (int): max number unique labels
-		bdm_info (dict): dictionary with selected trials per label. If {}, a random subset of trials
-		will be selected
-		Returns
-		- - - -
-		train_tr (array): trial indices per fold and unique label (folds X labels X trials)
-		test_tr (array): trial indices per fold and unique label (folds X labels X trials)
-		'''
-
-		N = self.nr_folds
-		nr_labels = np.unique(labels).size
-		steps = int(max_tr/N)
-
-		# select final sample for BDM and store those trials in dict so that they can be saved
-		if bdm_info == {}:
-			for i, l in enumerate(np.unique(labels)):
-				bdm_info.update({l:idx[random.sample(list(np.where(labels==l)[0]),max_tr)]})	
-
-		# initiate train and test arrays	
-		train_tr = np.zeros((N,nr_labels, steps*(N-1)),dtype = int)
-		test_tr = np.zeros((N,nr_labels,steps),dtype = int)
-
-		# split up the dataset into N equally sized subsets for cross validation 
-		for i, b in enumerate(np.arange(0,max_tr,steps)):
-			
-			idx_train = np.ones(max_tr,dtype = bool)
-			idx_test = np.zeros(max_tr, dtype = bool)
-
-			idx_train[b:b + steps] = False
-			idx_test[b:b + steps] = True
-
-			for j, key in enumerate(bdm_info.keys()):
-				train_tr[i,j,:] = np.sort(bdm_info[key][idx_train])
-				test_tr[i,j,:] = np.sort(bdm_info[key][idx_test])
-
-		return train_tr, test_tr, bdm_info	
+	
 
 
 	def linearClassification(self, X, train_tr, test_tr, max_tr, labels, gat_matrix = False):
