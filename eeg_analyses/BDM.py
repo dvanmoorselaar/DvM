@@ -57,7 +57,7 @@ class BDM(FolderStructure):
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				avg_runs: int = 1, sliding_window: tuple = (1, True), scale: dict = {'standardize': False, 'scale': False}, 
+				avg_runs: int = 1, avg_trials: int= 1, sliding_window: tuple = (1, True), scale: dict = {'standardize': False, 'scale': False}, 
 				pca_components: Union[int, float] = 0, bdm_filter: Optional[dict] = None, 
 				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
@@ -74,6 +74,8 @@ class BDM(FolderStructure):
 			downsample (int, optional): [description]. Defaults to 128.
 			avg_runs (int, optional): Determines how often (random) cross-validation procedure is performed. 
 			Decoding output reflects the average of all cross-validation runs
+			avg_trials (int, Optional): If larger then 1, specifies the number of trials that are averaged together before cross validation.
+			Averaging is done across each unique combination of condition and decoding label. Defaults to  1 (i.e., no trial averaging). 
 			sliding_window (tuple, optional): Increases the  number of features used for decoding by a factor of the size of the sliding_window
 			by giving the classifier access to all time points in the window (see Grootswagers et al. 2017, JoCN). Second argument in tuple specifies 
 			whether (True) or not (False) the activity in each sliding window is demeaned (see Hajonides et al. 2021, NeuroImage). Defaults to (1,True) meaning that 
@@ -108,6 +110,7 @@ class BDM(FolderStructure):
 		self.bdm_filter = bdm_filter
 		self.method = method
 		self.avg_runs = avg_runs
+		self.avg_trials = avg_trials
 		self.seed = seed
 
 	def select_classifier(self) -> Any:
@@ -181,6 +184,68 @@ class BDM(FolderStructure):
 
 		return output
 
+	def averageTrials(self, X: np.array, beh: pd.DataFrame, cnd_header: str = 'condition') -> Tuple[np.array, pd.DataFrame]:
+		"""
+		Reduces shape of eeg data by averaging across trials. The number of trials used for averaging is set as a BDM parameter.
+		Averaging is done across all unique labels and conditions as specified in the behavior info. Remaining trials after grouping 
+		will averaged together.
+
+		example 1 (data contains two labels, each with four observations):
+			
+		8, 64, 240 = X.shape
+		self.tr_avg = 4
+		X, beh = self.averageTrials(X, beh) 
+		2, 64, 240 = X.shape
+
+		example 2 (data contains two labels, each with four observations):
+
+		8, 64, 240 = X.shape
+		self.tr_avg = 3
+		X, beh = self.averageTrials(X, beh) 
+		4, 64, 240 = X.shape
+
+		Args:
+			X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
+			beh (pd.DataFrame): behavior dataframe with two columns (conditions and labels)
+			cnd_header (str, optional): Header of condition column in beh. Defaults to 'condition'.
+
+		Returns:
+			X_ (np.array): 3-dimensional array of eeg data after trial averaging
+			beh (pd.DataFrame): behavior dataframe with two columns (conditions and labels)
+		"""
+
+		print(f'Averaging across {self.avg_trials} trials')
+
+		# initiate condition and label list
+		cnds, labels, X_ = [], [], []
+
+		# loop over each label and condition pair
+		options = dict(beh.apply(lambda col: col.unique()))
+		keys, values = zip(*options.items())
+		for var_combo in [dict(zip(keys, v)) for v in itertools.product(*values)]:
+			for i, (k, v) in enumerate(var_combo.items()):
+				if i == 0:
+					df_filt = f'{k} == \'{v}\'' if isinstance(v,str) else f'{k} == {v}'
+				else:
+					if isinstance(v,str):
+						df_filt += f' and {k} == \'{v}\''
+					else:
+						df_filt += f' and {k} == {v}'
+
+			# select subset of data and average across random selection
+			avg_idx = beh.query(df_filt).index.values
+			random.shuffle(avg_idx)
+			avg_idx = [avg_idx[i:i+self.avg_trials] for i in np.arange(0,avg_idx.size, self.avg_trials)]
+			X_ += [X[idx].mean(axis = 0) for idx in avg_idx]
+			labels  += [var_combo[self.to_decode]] * len(avg_idx)
+			cnds += [var_combo[cnd_header]] * len(avg_idx)
+
+		# set data
+		X_ = np.stack(X_)
+		beh = pd.DataFrame.from_dict({cnd_header: cnds, self.to_decode: labels})
+
+		return X_, beh
+
 	def trainTestSplit(self, idx: np.array, labels: np.array, max_tr: int, bdm_info: dict) -> Tuple[np.array, np.array, dict]:
 		"""
 		Splits up data into training and test sets. The number of training and test sets is 
@@ -233,6 +298,44 @@ class BDM(FolderStructure):
 
 		return train_tr, test_tr, bdm_info
 
+	def trainTestSelect(self, X: np.array, Y: np.array, train_tr: np.array, test_tr: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
+		"""
+		Based on training and test data (as returned by trainTestSplit) splits data into training and test data
+
+		Args:
+			X (np.array): input data (nr trials X electrodes X timepoints)
+			Y (np.array): decoding labels 
+			train_tr (np.array): indices of train trials per fold and unique label (nr of folds X nr unique train labels X nr train trials)
+			test_tr (np.array): indices of test trials per fold and unique label (nr of folds X nr unique train labels X nr train trials)
+
+		Returns:
+			Xtr (array): training data (nr folds X nr trials X elecs X timepoints) 
+			Xte (array): test data (nr folds X nr trials X elecs X timepoints) 
+			Ytr (array): training labels. Training label for trial epoch in Xtr
+			Yte (array): test labels. Test label for each trial in Xte
+		"""
+
+		# check test labels
+		#if te_labels is None:
+		#	te_labels = tr_labels
+
+		# initiate train and test label arrays
+		Ytr = np.zeros(train_tr.shape, dtype = Y.dtype).reshape(self.nr_folds, -1)
+		Yte = np.zeros(test_tr.shape, dtype = Y.dtype).reshape(self.nr_folds, -1)
+
+		# initiate train and test data arrays
+		Xtr = np.zeros((self.nr_folds, np.product(train_tr.shape[-2:]), X.shape[1],X.shape[2]))
+		Xte = np.zeros((self.nr_folds, np.product(test_tr.shape[-2:]), X.shape[1],X.shape[2]))
+
+		# select train data and train labels
+		for n in range(train_tr.shape[0]):
+			Xtr[n] = X[np.hstack(train_tr[n])]
+			Xte[n] = X[np.hstack(test_tr[n])]
+			Ytr[n] = Y[np.hstack(train_tr[n])]
+			Yte[n] = Y[np.hstack(test_tr[n])]
+
+		return Xtr, Xte, Ytr, Yte	
+
 	def selectBDMData(self, epochs, beh, time, excl_factor = None):
 		''' 
 		Arguments
@@ -265,11 +368,10 @@ class BDM(FolderStructure):
 			# tf_data = np.array(np.matrix(tf_data) / np.matrix(tf_data[:,base_slice]).mean(axis = 1)
 			# 		  ).reshape(-1,len(epochs.info['ch_names']),epochs.times.size)
 			#epochs._data = 10 * np.log10(tf_data)
-			epochs._data = tf_data
 
 			# or 'standard' baseline correction
-			#epochs._data = abs(epochs._data)**2
-			#epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
+			epochs._data = abs(epochs._data)**2
+			epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
 
 		if self.downsample < int(epochs.info['sfreq']):
 			print('downsampling data')
@@ -294,28 +396,6 @@ class BDM(FolderStructure):
 		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
 
 		return 	eegs, beh, times
-
-	def averageTrials(self, X, Y, trial_avg):
-
-
-		# DOWNSIDE OF ONLY AVERAGING AT THIS STAGE AND WHIT PRESENT METHOD IS THAT TRIALS ARE LOSSED
-		# initiate arrays
-		x_, y_ = [], []
-
-		# loop over each label in Y
-		for label in np.unique(Y):
-			idx = np.where(Y[0] == label)[0]
-			# note that trial order is shuffled 
-			list_of_groups = zip(*(iter(idx),) * trial_avg)
-			for sub in list_of_groups:
-				x_.append(X[:,np.array(sub)].mean(axis = 1))
-				y_.append(label)
-
-		# create averaged x and y arrays
-		x_ = np.swapaxes(np.stack(x_),0,1)
-		y_ = np.array([y_,]*Y.shape[0])
-
-		return x_, y_
 
 	def Classify(self,sj, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
@@ -346,8 +426,11 @@ class BDM(FolderStructure):
 		nr_perm += 1
 
 		# read in data 
-		eegs, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
-		
+		X, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
+		if self.avg_trials > 1:
+			X, beh = self.averageTrials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
+		y = beh[self.to_decode]
+
 		# select minumum number of trials given the specified conditions
 		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
 
@@ -389,11 +472,11 @@ class BDM(FolderStructure):
 			
 			# initiate decoding array
 			if gat_matrix:
-				class_acc = np.empty((self.avg_runs, nr_perm, eegs.shape[2], eegs.shape[2])) * np.nan
-				label_info = np.empty((self.avg_runs, nr_perm, eegs.shape[2], eegs.shape[2], labels.size)) * np.nan
+				class_acc = np.empty((self.avg_runs, nr_perm, X.shape[2], X.shape[2])) * np.nan
+				label_info = np.empty((self.avg_runs, nr_perm, X.shape[2], X.shape[2], labels.size)) * np.nan
 			else:	
-				class_acc = np.empty((self.avg_runs, nr_perm, eegs.shape[2])) * np.nan	
-				label_info = np.empty((self.avg_runs,nr_perm, eegs.shape[2], labels.size)) * np.nan
+				class_acc = np.empty((self.avg_runs, nr_perm, X.shape[2])) * np.nan	
+				label_info = np.empty((self.avg_runs,nr_perm, X.shape[2], labels.size)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -411,9 +494,9 @@ class BDM(FolderStructure):
 					for run in range(self.avg_runs):
 						bdm_info.update({'run_' +str(self.run_info): {}})
 						train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info) 
-						Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[self.to_decode], eegs, train_tr, test_tr)	
+						Xtr, Xte, Ytr, Yte = self.trainTestSelect(X, y, train_tr, test_tr)	
 						class_acc[run, p], label_info[run,p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
-						self.seed += 1 # update seed
+						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
 					class_acc = class_acc.mean(axis = 0)	
@@ -795,43 +878,7 @@ class BDM(FolderStructure):
 
 		return max_trials
 
-	def trainTestSelect(self, tr_labels, eegs, train_tr, test_tr, te_labels = None):
-		'''
-		Arguments
-		- - - - - 
-		tr_labels (array): decoding labels used for training
-		eegs (array): eeg data (epochs X electrodes X timepoints)
-		train_tr (array): indices of train trials (nr of folds X nr unique train labels X nr train trials)
-		test_tr (array): indices of test trials (nr of folds X nr unique test labels X nr test trials)
-		te_labels (array): only specify if train and test labels differ (e.g. in cross decoding analysis)
-		Returns
-		- - - -
-		Xtr (array): data that serves as training input (nr folds X epochs X elecs X timepoints) 
-		Xte (array): data that serves to evaluate model
-		Ytr (array): training labels. Training label for each epoch in Xtr
-		Yte (array): test labels. Test label for each epoch in Xte
-		'''
 
-		# check test labels
-		if te_labels is None:
-			te_labels = tr_labels
-
-		# initiate train and test label arrays
-		Ytr = np.zeros(train_tr.shape, dtype = tr_labels.dtype).reshape(self.nr_folds, -1)
-		Yte = np.zeros(test_tr.shape, dtype = tr_labels.dtype).reshape(self.nr_folds, -1)
-
-		# initiate train and test data arrays
-		Xtr = np.zeros((self.nr_folds, np.product(train_tr.shape[-2:]), eegs.shape[1],eegs.shape[2]))
-		Xte = np.zeros((self.nr_folds, np.product(test_tr.shape[-2:]), eegs.shape[1],eegs.shape[2]))
-
-		# select train data and train labels
-		for n in range(train_tr.shape[0]):
-			Xtr[n] = eegs[np.hstack(train_tr[n])]
-			Xte[n] = eegs[np.hstack(test_tr[n])]
-			Ytr[n] = tr_labels[np.hstack(train_tr[n])]
-			Yte[n] = te_labels[np.hstack(test_tr[n])]
-
-		return Xtr, Xte, Ytr, Yte	
 
 
 	
