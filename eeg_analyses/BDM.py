@@ -388,7 +388,7 @@ class BDM(FolderStructure):
 			epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
 
 		if self.downsample < int(epochs.info['sfreq']):
-			if not self.window_size[2]:
+			if self.window_size[0] == 1:
 				print('downsampling data')
 				epochs.resample(self.downsample, npad='auto')
 			else:
