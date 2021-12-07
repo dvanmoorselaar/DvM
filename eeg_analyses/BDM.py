@@ -57,7 +57,7 @@ class BDM(FolderStructure):
 
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				avg_runs: int = 1, avg_trials: int= 1, sliding_window: tuple = (1, True), scale: dict = {'standardize': False, 'scale': False}, 
+				avg_runs: int = 1, avg_trials: int= 1, sliding_window: tuple = (1, True, False), scale: dict = {'standardize': False, 'scale': False}, 
 				pca_components: Union[int, float] = 0, bdm_filter: Optional[dict] = None, 
 				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
@@ -78,8 +78,9 @@ class BDM(FolderStructure):
 			Averaging is done across each unique combination of condition and decoding label. Defaults to  1 (i.e., no trial averaging). 
 			sliding_window (tuple, optional): Increases the  number of features used for decoding by a factor of the size of the sliding_window
 			by giving the classifier access to all time points in the window (see Grootswagers et al. 2017, JoCN). Second argument in tuple specifies 
-			whether (True) or not (False) the activity in each sliding window is demeaned (see Hajonides et al. 2021, NeuroImage). Defaults to (1,True) meaning that 
-			no data transformation will be applied.
+			whether (True) or not (False) the activity in each sliding window is demeaned (see Hajonides et al. 2021, NeuroImage). If thethird argument
+			is set to True rather than increasing the number of features, each  time point reflects the average within the sliding window.
+			Defaults to (1,True,False) meaning that no data transformation will be applied.
 			scale (dict): Dictinary with two keys specifying whether data should be standardized (True) or not (False). The scale argument specifies whether or not 
 			data should also be scaled to unit variance (or equivalently, unit standard deviation). Defaults to {'standardize': False, 'scale': False}, no standardization
 			pca_components (int, float, optional): Apply dimensionality reduction before decoding. Reduce features to N principal components,
@@ -135,7 +136,7 @@ class BDM(FolderStructure):
 		
 		return clf
 
-	def sliding_window(self, X: np.array, window_size: int = 20, demean: bool = True) -> np.array:
+	def sliding_window(self, X: np.array, window_size: int = 20, demean: bool = True, avg_window: bool = False) -> np.array:
 		"""	
 		Copied from temp_dec developed by @author: jasperhajonides (github.com/jasperhajonides/temp_dec)
 			
@@ -152,6 +153,8 @@ class BDM(FolderStructure):
 			X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
 			window_size (int, optional): number of time points to include in the sliding window. Defaults to 20.
 			demean (bool, optional): subtract mean from each feature within the specified sliding window. Defaults to True.
+			avg_window (bool, optional): If True rather than increasing number of features, each timepoint reflects the 
+			average activity within that time window and subsequent timepoint as defined by the size of the window. Defaults to False 
 
 		Raises:
 			ValueError: In case data has incorrect format
@@ -170,7 +173,10 @@ class BDM(FolderStructure):
 			return X
 
 		# predefine variables
-		output = np.zeros((n_obs, n_elec*window_size, n_time))
+		if avg_window:
+			output = np.zeros(X.shape)
+		else:
+			output = np.zeros((n_obs, n_elec*window_size, n_time))
 		
 		# loop over time dimension
 		for t in range(window_size-1, n_time):
@@ -180,7 +186,15 @@ class BDM(FolderStructure):
 				n_obs, n_elec*window_size) - np.tile(mean_value.T, window_size).reshape(
 				n_obs, n_elec*window_size)*float(demean)        
 			# add to array
-			output[:, :, t] = x_window 
+			if avg_window:
+				output[:, :, t] = mean_value
+			else:	
+				output[:, :, t] = x_window 
+
+		if self.window_size[2]:
+			print('downsampling data')
+			output = mne.filter.resample(output, down=self.down_factor, 
+									npad='auto', pad='edge')
 
 		return output
 
@@ -374,8 +388,12 @@ class BDM(FolderStructure):
 			epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
 
 		if self.downsample < int(epochs.info['sfreq']):
-			print('downsampling data')
-			epochs.resample(self.downsample, npad='auto')
+			if not self.window_size[2]:
+				print('downsampling data')
+				epochs.resample(self.downsample, npad='auto')
+			else:
+				self.down_factor = int(epochs.info['sfreq'])/self.downsample
+				print('downsampling will be done after data averaging')
 
 		# select time window and EEG electrodes
 		s, e = [np.argmin(abs(epochs.times - t)) for t in time]
@@ -386,14 +404,11 @@ class BDM(FolderStructure):
 
 		# transform eeg data in case of sliding window approach
 		if self.window_size[0] > 1:
-			eegs = self.sliding_window(eegs, self.window_size[0], self.window_size[1])[:,:,self.window_size[0]-1:]
+			eegs = self.sliding_window(eegs, self.window_size[0], self.window_size[1], self.window_size[2])[:,:,self.window_size[0]-1:]
 			times = np.linspace(times[0], times[-self.window_size[0]], eegs.shape[-1])
 			s_freq =epochs.info['sfreq']
 			time_red = 1/s_freq * 1000 * self.window_size[0]
 			warnings.warn(f'Final timepoint in analysis is reduced by {time_red} ms as each timepoint in analysis now reflects {self.window_size[0]} data samples at a sampling rate of {s_freq} Hz', UserWarning)
-
-		# if specified average over trials 
-		#beh, eegs = self.averageTrials(beh, eegs, self.to_decode, cnd_header, 4)
 
 		return 	eegs, beh, times
 
