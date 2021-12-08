@@ -1,0 +1,84 @@
+"""
+analyze EEG data
+
+Created by Dirk van Moorselaar on 8-12-2021.
+Copyright (c) 2021 DvM. All rights reserved.
+"""
+
+import logging
+
+from eeg_analyses.EEG import *
+from support.FolderStructure import FolderTracker
+
+def preproc_eeg(sj: int, session: int, eeg_runs: list, eog: list, ref: list, , t_min: float, 
+                t_max: float, event_id: list, project_folder: str, sj_info: dict, project_param: list,
+                trigger_header: str = 'trigger', flt_pad: float = 0.5, binary: int = 0, 
+                channel_plots: bool = True, inspect: bool = True):
+
+
+    # set subject specific parameters
+    file = 'subject_{}_session_{}_'.format(sj, session)
+    replace = sj_info[str(sj)]['replace']
+    log_file = FolderTracker(extension=['preprocessing', 'group_info'], 
+                    filename='preprocessing_param.csv')
+
+    # start logging
+    logging.basicConfig(level=logging.DEBUG,
+                format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                datefmt='%m-%d %H:%M',
+                filename= self.FolderTracker(extension=['preprocessing', 'group_info', 'sj_logs'], 
+                filename='preprocess_sj{}_ses{}.log'.format(
+                sj, session), overwrite = False),
+                filemode='w')
+
+    # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
+    EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
+                                        preload=True, eog=eog) for run in eeg_runs])
+
+    #EEG.replaceChannel(sj, session, replace)
+    EEG.reReference(ref_channels=ref, vEOG=eog[
+                    :2], hEOG=eog[2:], changevoltage=True, to_remove = ['EXG7','EXG8'])
+    EEG.setMontage(montage='biosemi64')
+
+    #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+    EEGica = EEG.copy()
+    EEGica.filter(h_freq=None, l_freq=1.5,
+                        fir_design='firwin', skip_by_annotation='edge')
+    EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
+                skip_by_annotation='edge')
+
+    # MATCH BEHAVIOR FILE
+    events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
+    beh, missing = EEG.matchBeh(sj, session, events, event_id, trigger_header = trigger_header,
+                                    headers = project_param)
+
+    # EPOCH DATA
+    epochs = Epochs(sj, session, EEG, events, event_id=event_id,
+            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
+    epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
+            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
+
+    # # AUTMATED ARTIFACT DETECTION
+    epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
+    z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
+
+    # # ICA
+    epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+    del EEGica
+
+    # EYE MOVEMENTS
+    epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
+                    tracker_shift = tracker_shift, start_event = start_event, 
+                    extension = tracker_ext, eye_freq = eye_freq, 
+                    screen_res = screen_res, viewing_dist = viewing_dist, 
+                    screen_h = screen_h)
+
+    # INTERPOLATE BADS
+    bads = epochs.info['bads']   
+    epochs.interpolate_bads(reset_bads=True, mode='accurate')
+
+    # LINK BEHAVIOR
+    epochs.linkBeh(beh, events, event_id)
+
+    logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
+                to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
