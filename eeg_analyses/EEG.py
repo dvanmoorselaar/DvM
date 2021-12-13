@@ -319,7 +319,93 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # save number of detected events
         self.nr_events = len(self)
+        self.drop_beh = []
         logging.info('{} epochs created'.format(len(self)))
+
+    def align_behavior(self, sj: int, session: int, trigger_header: str = 'trigger', headers: list = []):
+        """
+        Aligns bdf file with csv file with experimental variables. In case there are more behavioral trials than eeg trials
+        (e.g., because trigger was not properly sent/detected), trials are removed from the raw behavioral data such that
+        bothh datasets are aligned. Information about this process can be found in individual preprocessing log files. 
+
+        Args:
+            sj (int): current subject number 
+            session (int): current session number
+            trigger_header (str, optional): Column in raw behavior that contains trigger values used for epoching. Defaults to 'trigger'.
+            headers (list, optional): List of headers that should be linked to eeg data. Defaults to [].
+
+        Raises:
+            ValueError: In case behavior and eeg data do not align (i.e., contain different trial numbers) raises an error in case 
+            there is no column 'nr_trials', which prevents informed alignment of eeg and behavior
+
+        Returns:
+            beh (pd.DataFrame): Behavior data after aligning to eeg data (index is reset)
+            missing (np.array): array with trials that are removed from beh because no matching trigger was detected. Is used 
+            when aligning eyetracker data
+        """
+
+        # read in data file
+        beh_file = self.FolderTracker(extension=[
+                    'beh', 'raw'], filename='subject-{}_session_{}.csv'.format(sj, session))
+
+        # get triggers logged in beh file
+        beh = pd.read_csv(beh_file)
+        beh = beh[headers]
+        if 'practice' in headers:
+            logging.info('{} practice trials removed from behavior'.format(beh[beh.practice == 'yes'].shape[0]))
+            beh = beh[beh.practice == 'no']
+            beh = beh.drop(['practice'], axis=1)
+        beh_triggers = beh[trigger_header].values 
+        
+        # get eeg triggers in epoched order ()
+        bdf_triggers = events[self.selection, 2]
+
+        # log number of unique triggers
+        unique = np.unique(bdf_triggers)
+        logging.info('{} detected unique triggers (min = {}, max = {})'.
+                        format(unique.size, unique.min(), unique.max()))
+
+        # make sure trigger info between beh and bdf data matches
+        missing_trials = []
+        nr_miss = beh_triggers.size - bdf_triggers.size
+        logging.info(f'{nr_miss} trials will be removed from beh file')
+
+        # check whether trial info is present in beh file
+        if nr_miss > 0 and 'nr_trials' not in beh.columns:
+            raise ValueError('Behavior file does not contain a column with trial info named nr_trials. Please adjust')
+
+        while nr_miss > 0:
+            stop = True
+            # continue to remove beh trials until data files are lined up
+            for i, tr in enumerate(bdf_triggers):
+                if tr != beh_triggers[i]: # remove trigger from beh_file
+                    miss = beh['nr_trials'].iloc[i]
+                    missing_trials.append(miss)
+                    logging.info('Removed trial {} from beh file,because no matching trigger exists in bdf file'.format(miss))
+                    beh.drop(beh.index[i], inplace=True)
+                    beh_triggers = np.delete(beh_triggers, i, axis = 0)
+                    nr_miss -= 1
+                    stop = False
+                    break
+                 
+            # check whether there are missing trials at end of beh file        
+            if beh_triggers.size > bdf_triggers.size and stop:
+
+                # drop the last items from the beh file
+                missing_trials = np.hstack((missing_trials, beh['nr_trials'].iloc[-nr_miss:].values))
+                beh.drop(beh.index[-nr_miss:], inplace=True)
+                logging.info('Removed last {} trials because no matches detected'.format(nr_miss))         
+                nr_miss = 0
+      
+        # keep track of missing trials to allign eye tracking data (if available)   
+        missing = np.array(missing_trials)  
+        beh.reset_index(inplace = True)
+
+        # log number of matches between beh and bdf    
+        logging.info('{} matches between beh and epoched data out of {}'.
+            format(sum(beh[trigger_header].values == bdf_triggers), bdf_triggers.size))   
+
+        return beh, missing
 
     def autoRepair(self):
         '''
@@ -357,7 +443,6 @@ class Epochs(mne.Epochs, FolderStructure):
         print('The following electrodes are selected as bad by Ransac:')
         print('\n'.join(ransac.bad_chs_))
         self.info['bads'] = ransac.bad_chs_
-
 
     def selectBadChannels(self, run_ransac = True, channel_plots=True, inspect=True, n_epochs=10, n_channels=32, RT = None):
         '''
@@ -523,6 +608,7 @@ class Epochs(mne.Epochs, FolderStructure):
                 plt.close()
 
         # drop bad epochs and save list of dropped epochs
+        self.drop_beh = bad_epochs
         np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
             self.sj), self.session], filename='noise_epochs.txt'), bad_epochs)
         print('{} epochs dropped ({}%)'.format(len(bad_epochs),
@@ -720,6 +806,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         '''
         
+        self.eye_bins = True
         sac_epochs = []
 
         # CODE FOR HEOG DATA
@@ -751,20 +838,22 @@ class Epochs(mne.Epochs, FolderStructure):
         # CODE FOR EYETRACKER DATA 
         EO = EYE(sfreq = eye_freq, viewing_dist = viewing_dist, 
                  screen_res = screen_res, screen_h = screen_h)
-        
-        # read in epochs removed via artifact detection
-        trigger = np.unique(self.events[:,2]) 
-        events[[i for i, idx in enumerate(events[:,2]) if idx in trigger],2] = list(range(nr_events))
-        sel_tr = events[self.selection, 2]
-        noise_epochs = np.array(list(set(list(range(nr_events))).difference(sel_tr)), dtype = int)  
-
         # do binning based on eye-tracking data
         # check whether eye tracker exists
         eye_bins, window_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
                                 int((self.tmin + self.flt_pad + tracker_shift)*1000), int((self.tmax - self.flt_pad + tracker_shift)*1000),
                                 drift_correct = (-200,0), start_event = start_event, extension = extension)
+        if eye_bins.size > 0:
 
-        logging.info('Window method detected {} epochs exceeding 0.5 threshold'.format(window_bins.size))
+            # infer dropped epochs information
+            trigger = np.unique(self.events[:,2]) 
+            events[[i for i, idx in enumerate(events[:,2]) if idx in trigger],2] = list(range(nr_events))
+            sel_tr = events[self.selection, 2]
+            noise_epochs = np.array(list(set(list(range(nr_events))).difference(sel_tr)), dtype = int)  
+
+
+
+            logging.info('Window method detected {} epochs exceeding 0.5 threshold'.format(window_bins.size))
 
         # correct for missing data (if eye recording is stopped during experiment)
         if eye_bins.size > 0 and eye_bins.size < self.nr_events:
@@ -780,20 +869,22 @@ class Epochs(mne.Epochs, FolderStructure):
             eye_bins = np.empty(self.nr_events + missing.size) * np.nan
             trial_nrs = np.arange(self.nr_events + missing.size) + 1
 
-        # remove trials that are not present in bdf file, if any
-        miss_mask = np.in1d(trial_nrs, missing, invert = True)
-        eye_bins = eye_bins[miss_mask]      
+        # ADJUST TO NEW CODE    
 
-        # remove trials that have been deleted from eeg 
-        eye_bins = np.delete(eye_bins, noise_epochs)
-        # start logging eye_tracker info
-        unique_bins = np.array(np.unique(eye_bins), dtype = np.float64)
-        for eye_bin in np.unique(unique_bins[~np.isnan(unique_bins)]):
-            logging.info('{0:.1f}% of trials exceed {1} degree of visual angle'.format(sum(eye_bins> eye_bin) / eye_bins.size*100, eye_bin))
+        # # remove trials that are not present in bdf file, if any
+        # miss_mask = np.in1d(trial_nrs, missing, invert = True)
+        # eye_bins = eye_bins[miss_mask]      
 
-        # save array of deviation bins    
-        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-            self.sj), self.session], filename='eye_bins.txt'), eye_bins)
+        # # remove trials that have been deleted from eeg 
+        # eye_bins = np.delete(eye_bins, noise_epochs)
+        # # start logging eye_tracker info
+        # unique_bins = np.array(np.unique(eye_bins), dtype = np.float64)
+        # for eye_bin in np.unique(unique_bins[~np.isnan(unique_bins)]):
+        #     logging.info('{0:.1f}% of trials exceed {1} degree of visual angle'.format(sum(eye_bins> eye_bin) / eye_bins.size*100, eye_bin))
+
+        # # save array of deviation bins    
+        # np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+        #     self.sj), self.session], filename='eye_bins.txt'), eye_bins)
 
 
     def applyICA(self, raw, ica_fit, method='extended-infomax', decim=None, fit_params = None, inspect = True):
@@ -906,13 +997,19 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # create behavior dictionary (only include clean trials after preprocessing)
         # also include eye binned data
-        eye_bins = np.loadtxt(self.FolderTracker(extension=[
-                                'preprocessing', 'subject-{}'.format(self.sj), self.session], 
-                                filename='eye_bins.txt'))
+        # if hasattr(self, 'eye_bins'):
+        #     eye_bins = np.loadtxt(self.FolderTracker(extension=[
+        #                         'preprocessing', 'subject-{}'.format(self.sj), self.session], 
+        #                         filename='eye_bins.txt'))
+        # else:
+        #     eye_bins = None
 
-        beh_dict = {'clean_idx': sel_tr, 'eye_bins': eye_bins}
-        for header in beh.columns:
-            beh_dict.update({header: beh[header].values[sel_tr]})
+        # update beh dict after removing noise trials
+        beh.drop(self.drop_beh, axis = 'index', inplace = True)
+        beh_dict = beh.to_dict(orient = 'list')
+        #beh_dict = {'clean_idx': sel_tr, 'eye_bins': eye_bins}
+        # for header in beh.columns:
+        #     beh_dict.update({header: beh[header].values[sel_tr]})
 
         # save behavior
         with open(self.FolderTracker(extension=['beh', 'processed'],

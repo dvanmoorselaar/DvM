@@ -8,10 +8,10 @@ Copyright (c) 2021 DvM. All rights reserved.
 import logging
 
 from eeg_analyses.EEG import *
-from support.FolderStructure import FolderTracker
+from support.FolderStructure import *
 
-def preproc_eeg(sj: int, session: int, eeg_runs: list, eog: list, ref: list, , t_min: float, 
-                t_max: float, event_id: list, project_folder: str, sj_info: dict, project_param: list,
+def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: list, ref: list, t_min: float, 
+                t_max: float, event_id: list, project_folder: str, sj_info: dict, eye_info: dict, project_param: list,
                 trigger_header: str = 'trigger', flt_pad: float = 0.5, binary: int = 0, 
                 channel_plots: bool = True, inspect: bool = True):
 
@@ -19,14 +19,14 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, eog: list, ref: list, , t
     # set subject specific parameters
     file = 'subject_{}_session_{}_'.format(sj, session)
     replace = sj_info[str(sj)]['replace']
-    log_file = FolderTracker(extension=['preprocessing', 'group_info'], 
+    log_file = FolderStructure.FolderTracker(extension=['preprocessing', 'group_info'], 
                     filename='preprocessing_param.csv')
 
     # start logging
     logging.basicConfig(level=logging.DEBUG,
                 format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
                 datefmt='%m-%d %H:%M',
-                filename= self.FolderTracker(extension=['preprocessing', 'group_info', 'sj_logs'], 
+                filename= FolderStructure.FolderTracker(extension=['preprocessing', 'group_info', 'sj_logs'], 
                 filename='preprocess_sj{}_ses{}.log'.format(
                 sj, session), overwrite = False),
                 filemode='w')
@@ -47,18 +47,18 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, eog: list, ref: list, , t
     EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
                 skip_by_annotation='edge')
 
-    # MATCH BEHAVIOR FILE
+    # EPOCH DATA
     events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
-    beh, missing = EEG.matchBeh(sj, session, events, event_id, trigger_header = trigger_header,
+    epochs = Epochs(sj, session, EEG, events, event_id=event_id,
+            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
+    epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
+            tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad, reject_by_annotation = False) 
+
+    # MATCH BEHAVIOR FILE
+    beh, missing = epochs.align_behavior(sj, session, events, event_id, trigger_header = trigger_header,
                                     headers = project_param)
 
-    # EPOCH DATA
-    epochs = Epochs(sj, session, EEG, events, event_id=event_id,
-            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
-    epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
-            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = True) 
-
-    # # AUTMATED ARTIFACT DETECTION
+    # # AUTOMATED ARTIFACT DETECTION
     epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
     z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
@@ -68,10 +68,10 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, eog: list, ref: list, , t
 
     # EYE MOVEMENTS
     epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
-                    tracker_shift = tracker_shift, start_event = start_event, 
-                    extension = tracker_ext, eye_freq = eye_freq, 
-                    screen_res = screen_res, viewing_dist = viewing_dist, 
-                    screen_h = screen_h)
+                    tracker_shift = eye_info['tracker_shift'], start_event = eye_info['start_event'], 
+                    extension = eye_info['tracker_ext'], eye_freq = eye_info['eye_freq'], 
+                    screen_res = eye_info['screen_res'], viewing_dist = eye_info['viewing_dist'], 
+                    screen_h = eye_info['screen_h'])
 
     # INTERPOLATE BADS
     bads = epochs.info['bads']   
