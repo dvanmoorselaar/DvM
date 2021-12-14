@@ -62,7 +62,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
     z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
-    # # ICA
+    # ICA
     if preproc_param['run_ica']:
         epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
                 tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 

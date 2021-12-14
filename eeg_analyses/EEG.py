@@ -992,15 +992,15 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # update beh dict after removing noise trials
         beh.drop(self.drop_beh, axis = 'index', inplace = True)
-        
+
         # also include eye binned data
         if hasattr(self, 'eye_bins'):
             eye_bins = np.loadtxt(self.FolderTracker(extension=[
                                 'preprocessing', 'subject-{}'.format(self.sj), self.session], 
                                 filename='eye_bins.txt'))
         else:
-            eye_bins = None
-        beh['eye_bins'] = eye_bins
+            eye_bins = np.nan
+        beh['eye_bins'] = pd.Series(eye_bins)
 
         # save behavior as pickle
         beh_dict = beh.to_dict(orient = 'list')
@@ -1014,8 +1014,7 @@ class Epochs(mne.Epochs, FolderStructure):
                     split_size='2GB', overwrite = True)
 
         # update preprocessing information
-        logging.info('Nr clean trials is {0} ({1:.0f}%)'.format(
-            sel_tr.size, float(sel_tr.size) / beh.shape[0] * 100))
+        logging.info('Nr clean trials is {0}'.format(beh.shape[0]))
 
         if 'condition' in beh.index:
             cnd = beh['condition'].values
