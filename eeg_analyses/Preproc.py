@@ -9,12 +9,12 @@ import logging
 
 from eeg_analyses.EEG import *
 from support.FolderStructure import *
+from IPython import embed
 
 def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: list, ref: list, t_min: float, 
-                t_max: float, event_id: list, project_folder: str, sj_info: dict, eye_info: dict, project_param: list,
-                trigger_header: str = 'trigger', flt_pad: float = 0.5, binary: int = 0, 
+                t_max: float, event_id: list, preproc_param: dict, project_folder: str, sj_info: dict, eye_info: dict, 
+                project_param: list, trigger_header: str = 'trigger', flt_pad: float = 0.5, binary: int = 0, 
                 channel_plots: bool = True, inspect: bool = True):
-
 
     # set subject specific parameters
     file = 'subject_{}_session_{}_'.format(sj, session)
@@ -41,30 +41,33 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     EEG.setMontage(montage='biosemi64')
 
     #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-    EEGica = EEG.copy()
-    EEGica.filter(h_freq=None, l_freq=1.5,
-                        fir_design='firwin', skip_by_annotation='edge')
-    EEG.filter(h_freq=None, l_freq=0.01, fir_design='firwin',
+    if preproc_param['run_ica']:
+        EEGica = EEG.copy()
+        EEGica.filter(h_freq=None, l_freq=1.5,
+                                fir_design='firwin', skip_by_annotation='edge')
+
+    if preproc_param['high_pass']:                         
+        EEG.filter(h_freq=None, l_freq=preproc_param['high_pass'], fir_design='firwin',
                 skip_by_annotation='edge')
 
     # EPOCH DATA
     events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
             tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
-    epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
-            tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad, reject_by_annotation = False) 
 
     # MATCH BEHAVIOR FILE
-    beh, missing = epochs.align_behavior(sj, session, events, event_id, trigger_header = trigger_header,
-                                    headers = project_param)
+    beh, missing = epochs.align_behavior(events, trigger_header = trigger_header, headers = project_param)
 
     # # AUTOMATED ARTIFACT DETECTION
     epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
     z = epochs.artifactDetection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
     # # ICA
-    epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
-    del EEGica
+    if preproc_param['run_ica']:
+        epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
+                tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad, reject_by_annotation = False) 
+        epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+        del EEGica
 
     # EYE MOVEMENTS
     epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 
