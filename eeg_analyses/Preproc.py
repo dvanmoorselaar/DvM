@@ -65,7 +65,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     # # ICA
     if preproc_param['run_ica']:
         epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
-                tmin=t_min, tmax=t_max, baseline=(None, None), flt_pad = flt_pad, reject_by_annotation = False) 
+                tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
         epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
         del EEGica
 
@@ -81,7 +81,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
     # LINK BEHAVIOR
-    epochs.linkBeh(beh, events, event_id)
+    epochs.link_behavior(beh)
 
     logPreproc((sj, session), log_file, nr_sj = len(sj_info.keys()), nr_sessions = nr_sessions, 
                 to_update = dict(nr_clean = len(epochs), z_value = z, nr_bads = len(bads), bad_el = bads))
