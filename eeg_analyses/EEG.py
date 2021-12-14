@@ -121,9 +121,9 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         idx_h = [eog.ch_names.index(hor) for hor in hEOG]
 
         if len(idx_v) == 2:
-            eog._data[idx_v[0]] -= self._data[idx_v[1]]
+            eog._data[idx_v[0]] -= eog._data[idx_v[1]]
         if len(idx_h) == 2:   
-            eog._data[idx_h[0]] -= self._data[idx_h[1]]
+            eog._data[idx_h[0]] -= eog._data[idx_h[1]]
 
         print(
             'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
