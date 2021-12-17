@@ -322,7 +322,7 @@ class Epochs(mne.Epochs, FolderStructure):
         self.drop_beh = []
         logging.info('{} epochs created'.format(len(self)))
 
-    def align_behavior(self, events: np.array,  trigger_header: str = 'trigger', headers: list = []):
+    def align_behavior(self, events: np.array,  trigger_header: str = 'trigger', headers: list = [], bdf_remove: np.array =  None):
         """
         Aligns bdf file with csv file with experimental variables. In case there are more behavioral trials than eeg trials
         (e.g., because trigger was not properly sent/detected), trials are removed from the raw behavioral data such that
@@ -332,10 +332,12 @@ class Epochs(mne.Epochs, FolderStructure):
             events (np.array): event info as returned by RAW.event_selection
             trigger_header (str, optional): Column in raw behavior that contains trigger values used for epoching. Defaults to 'trigger'.
             headers (list, optional): List of headers that should be linked to eeg data. Defaults to [].
+            bdf_remove (np.array, optional): Indices of trigger events that need to be removed. Only specify when to many trials are recorded. 
 
         Raises:
-            ValueError: In case behavior and eeg data do not align (i.e., contain different trial numbers) raises an error in case 
-            there is no column 'nr_trials', which prevents informed alignment of eeg and behavior
+            ValueError: In case behavior and eeg data do not align (i.e., contain different trial numbers). If there are more behavior trials than epochs,
+            raises an error in case there is no column 'nr_trials', which prevents informed alignment of eeg and behavior. Also raises an error if there are
+            too many epochs and automatic allignment fails
 
         Returns:
             beh (pd.DataFrame): Behavior data after aligning to eeg data (index is reset)
@@ -358,6 +360,10 @@ class Epochs(mne.Epochs, FolderStructure):
         
         # get eeg triggers in epoched order ()
         bdf_triggers = events[self.selection, 2]
+        if bdf_remove is not  None:
+            self.drop(bdf_remove)
+            logging.info('{} bdf triggers and epochs removed as specified by the user'.format(bdf_remove.size))
+            bdf_triggers = np.delete(bdf_triggers, bdf_remove)
 
         # log number of unique triggers
         unique = np.unique(bdf_triggers)
@@ -372,6 +378,17 @@ class Epochs(mne.Epochs, FolderStructure):
         # check whether trial info is present in beh file
         if nr_miss > 0 and 'nr_trials' not in beh.columns:
             raise ValueError('Behavior file does not contain a column with trial info named nr_trials. Please adjust')
+        elif nr_miss < 0:
+            while nr_miss < 0:
+                # continue to remove bdf triggers until data files are lined up 
+                for i, tr in enumerate(beh_triggers):
+                    if tr != bdf_triggers[i]: # remove trigger from beh_file
+                        bdf_triggers = np.delete(bdf_triggers, i, axis = 0)
+                        nr_miss += 1
+            # check file sizes
+            if sum(beh_triggers == bdf_triggers) < bdf_triggers.size:
+                raise ValueError('Behavior and eeg cannot be linked as too many eeg triggers received. Please pass indices of trials to be removed \
+                to subject_info dict with key bdf_remove')
 
         while nr_miss > 0:
             stop = True

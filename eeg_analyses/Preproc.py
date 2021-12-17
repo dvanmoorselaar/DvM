@@ -56,7 +56,8 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
             tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
 
     # MATCH BEHAVIOR FILE
-    beh, missing = epochs.align_behavior(events, trigger_header = trigger_header, headers = project_param)
+    bdm_remove = sj_info[str(sj)]['bdf_remove'] if 'bdf_remove' in sj_info[str(sj)].keys() else None
+    beh, missing = epochs.align_behavior(events, trigger_header = trigger_header, headers = project_param, bdf_remove = bdm_remove)
 
     # # AUTOMATED ARTIFACT DETECTION
     epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
