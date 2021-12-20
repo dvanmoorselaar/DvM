@@ -58,7 +58,7 @@ class BDM(FolderStructure):
 	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
 				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
 				avg_runs: int = 1, avg_trials: int= 1, sliding_window: tuple = (1, True, False), scale: dict = {'standardize': False, 'scale': False}, 
-				pca_components: Union[int, float] = 0, bdm_filter: Optional[dict] = None, 
+				pca_components: tuple = (0, 'across'), bdm_filter: Optional[dict] = None, 
 				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
 
@@ -83,8 +83,10 @@ class BDM(FolderStructure):
 			Defaults to (1,True,False) meaning that no data transformation will be applied.
 			scale (dict): Dictinary with two keys specifying whether data should be standardized (True) or not (False). The scale argument specifies whether or not 
 			data should also be scaled to unit variance (or equivalently, unit standard deviation). Defaults to {'standardize': False, 'scale': False}, no standardization
-			pca_components (int, float, optional): Apply dimensionality reduction before decoding. Reduce features to N principal components,
-            if N < 1 it indicates the % of explained variance (and the number of components is inferred). Defaults to 0 (i.e., no PCA reduction)
+			pca_components (tuple, optional): Apply dimensionality reduction before decoding. The first arguments specifies how features should reduce to N principal components,
+            if N < 1 it indicates the % of explained variance (and the number of components is inferred). The secnd argument specifies whether transfrmation is estimated
+			on both training and test data ('all') or estimated on training data only and applied to the test data in each cross validation step.		
+			Defaults to (0, 'across') (i.e., no PCA reduction)
 			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
 			baseline (Optional[tuple], optional): [description]. Defaults to None.
 			seed (Optional[int]): Sets a random seed such that cross-validation procedure can be repeated. 
@@ -510,7 +512,7 @@ class BDM(FolderStructure):
 						bdm_info.update({'run_' +str(self.run_info): {}})
 						train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info) 
 						Xtr, Xte, Ytr, Yte = self.trainTestSelect(X, y, train_tr, test_tr)	
-						class_acc[run, p], label_info[run,p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix)
+						class_acc[run, p], label_info[run,p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix, X)
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
@@ -677,7 +679,7 @@ class BDM(FolderStructure):
 		else:
 			return classification	
 
-	def crossTimeDecoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False):
+	def crossTimeDecoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False, X=[]):
 		'''
 		Decoding is done across all time points. 
 		Arguments
@@ -731,13 +733,18 @@ class BDM(FolderStructure):
 						Xte_ = scaler.transform(Xte_)
 
 					# if specified apply dimensionality reduction using PCA
-					if self.pca_components:
+					if self.pca_components[0] and self.pca_components[1] == 'across':
 						if not self.scale['standardize'] and tr_t == 0 and n == 0 and self.run_info == 1: # filthy hack to prevent multiple warning messages
 							warnings.warn('It is recommended to standardize the data before applying PCA correction', UserWarning)
 
 						pca = PCA(n_components=self.pca_components, svd_solver = 'full').fit(Xtr_)
 						Xtr_ = pca.transform(Xtr_)
 						Xte_ = pca.transform(Xte_)
+					elif self.pca_components[0] and self.pca_components[1] == 'all':
+						# pca is fitted on all data rather than training data only
+						pca = PCA(n_components=self.pca_components, svd_solver = 'full').fit(X)
+						Xtr_ = pca.transform(Xtr_)
+						Xte_ = pca.transform(Xte_)						
 						
 					# train model and predict
 					clf.fit(Xtr_,Ytr_)
