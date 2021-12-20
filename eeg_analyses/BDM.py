@@ -500,13 +500,11 @@ class BDM(FolderStructure):
 		# select minimum number of trials given the specified conditions
 		if not cross:
 			max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
+			if downscale:
+				max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
 		else:
-			# ensures that training is not biased towards a label
+			# split train and test conditions
 			cnds, test_cnd = cnds
-			max_tr = [self.selectMaxTrials(beh, cnds[0], bdm_labels,cnd_header)]
-
-		if downscale:
-			max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
 
 		# create dictionary to save classification accuracy
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
