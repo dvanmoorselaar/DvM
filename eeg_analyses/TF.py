@@ -345,8 +345,8 @@ class TF(FolderStructure):
 			# get indices of electrode pair
 			contra_idx = ch_names.index(contra_elec)
 			ipsi_idx = ch_names.index(ipsi_elec)
-			contra_ipsi_norm = (raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx])/(raw_power[:,:,contra_idx] + raw_power[:,:,ipsi_idx])
-			norm[pair_idx] = contra_ipsi_norm.mean(axis = 0)
+			# contra_ipsi_norm = (raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx])/(raw_power[:,:,contra_idx] + raw_power[:,:,ipsi_idx])
+			# norm[pair_idx] = contra_ipsi_norm.mean(axis = 0)
 
 			# # get the real difference
 			real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
@@ -479,6 +479,7 @@ class TF(FolderStructure):
 						m = m[:nr_time * cnd_idx.size + nr_time - 1]
 						m = np.reshape(m[math.ceil((nr_time-1)/2 - 1):int(-(nr_time-1)/2-1)], 
 									  (nr_time, -1), order = 'F').T 
+
 					elif method == 'hilbert': # NEEDS EXTRA CHECK
 						X = eegs[cnd_idx,ch_idx].ravel()
 						m = self.hilbertMethod(X, frex[f][0], frex[f][1], s_freq)
