@@ -82,7 +82,7 @@ class BDM(FolderStructure):
 			is set to True rather than increasing the number of features, each  time point reflects the average within the sliding window.
 			Defaults to (1,True,False) meaning that no data transformation will be applied.
 			scale (dict): Dictinary with two keys specifying whether data should be standardized (True) or not (False). The scale argument specifies whether or not 
-			data should also be scaled to unit variance (or equivalently, unit standard deviation). Defaults to {'standardize': False, 'scale': False}, no standardization
+			data should also be scaled to unit variance (or equivalently, unit standard deviation). This step is always performed before PCA. Defaults to {'standardize': False, 'scale': False}, no standardization
 			pca_components (tuple, optional): Apply dimensionality reduction before decoding. The first arguments specifies how features should reduce to N principal components,
             if N < 1 it indicates the % of explained variance (and the number of components is inferred). The secnd argument specifies whether transfrmation is estimated
 			on both training and test data ('all') or estimated on training data only and applied to the test data in each cross validation step.		
@@ -742,6 +742,9 @@ class BDM(FolderStructure):
 						Xte_ = pca.transform(Xte_)
 					elif self.pca_components[0] and self.pca_components[1] == 'all':
 						# pca is fitted on all data rather than training data only
+						if self.scale['standardize']:
+							scaler = StandardScaler(with_std = self.scale['scale']).fit(X)
+							X = scaler.transform(X)
 						pca = PCA(n_components=self.pca_components, svd_solver = 'full').fit(X)
 						Xtr_ = pca.transform(Xtr_)
 						Xte_ = pca.transform(Xte_)						
