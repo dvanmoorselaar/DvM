@@ -526,7 +526,7 @@ class Epochs(mne.Epochs, FolderStructure):
         logging.info('{} channels marked as bad: {}'.format(
             len(self.info['bads']), self.info['bads']))
 
-    def artifactDetection(self, z_thresh=4, band_pass=[110, 140], plot=True, inspect=True):
+    def automatic_artifact_detection(self, z_thresh=4, band_pass=[110, 140], plot=True, inspect=True):
         """ Detect artifacts> modification of FieldTrip's automatic artifact detection procedure 
         (https://www.fieldtriptoolbox.org/tutorial/automatic_artifact_rejection/). 
         Artifacts are detected in three steps:
@@ -561,6 +561,7 @@ class Epochs(mne.Epochs, FolderStructure):
         #self_copy.filter(band_pass[0], band_pass[1], method='iir', iir_params=dict(order=6, ftype='butter'))    
         self_copy.apply_hilbert(envelope=True)
 
+        embed()
         # get the data and apply box smoothing
         data = self_copy.get_data()
         nr_epochs = data.shape[0]

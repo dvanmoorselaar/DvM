@@ -262,7 +262,7 @@ class BDM(FolderStructure):
 
 		return X_, beh
 
-	def trainTestSplit(self, idx: np.array, labels: np.array, max_tr: int, bdm_info: dict) -> Tuple[np.array, np.array, dict]:
+	def train_test_split(self, idx: np.array, labels: np.array, max_tr: int, bdm_info: dict) -> Tuple[np.array, np.array, dict]:
 		"""
 		Splits up data into training and test sets. The number of training and test sets is 
 		equal to the number of folds. Splitting is done such that all data is tested exactly once.
@@ -314,7 +314,56 @@ class BDM(FolderStructure):
 
 		return train_tr, test_tr, bdm_info
 
-	def trainTestSelect(self, X: np.array, Y: np.array, train_tr: np.array, test_tr: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
+	def train_test_cross(self, X: np.array, y: np.array, tr_idx: np.array, test_idx: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
+		"""
+		Creates independent training and test sets (based on training and test conditions). Ensures that the number of observations per class
+		is balanced both in the training and the testing set
+
+		Args:
+			X (np.array):  input data (nr trials X electrodes X timepoints)
+			y (np.array): decoding labels 
+			tr_idx (np.array): indices of train trials (i.e., condition specific data as selected in classify)
+			test_idx (np.array): indices of test trials 
+
+		Returns:
+			Xtr (array): training data (nr trials X elecs X timepoints) 
+			Xte (array): test data (nr trials X elecs X timepoints) 
+			Ytr (array): training labels. Training label for trial epoch in Xtr
+			Yte (array): test labels. Test label for each trial in Xte
+		"""
+
+		if self.seed:
+			random.seed(self.seed) # set seed 
+
+		# make sure that train label counts is balanced
+		tr_labels = y[train_idx]
+		labels, label_counts = np.unique(tr_labels, return_counts = True)
+		min_tr = min(label_counts)	
+
+		# select train data and labels
+		tr_idx = np.hstack([random.sample(list(np.where(tr_labels == label)[0]),  k = min_tr) 
+									for label in labels])
+		Xtr = X[tr_idx]
+		Ytr = tr_labels[tr_idx]
+
+		# match test and train labels (if not already the case)
+		test_idx = [idx for idx in test_idx if y[idx] in tr_labels]
+
+		# make sure that test label counts is balanced
+		test_labels = y[test_idx]
+		labels, label_counts = np.unique(test_labels, return_counts = True)
+		min_tr = min(label_counts)	
+
+		# select test data and labels
+		test_idx = np.hstack([random.sample(list(np.where(test_labels == label)[0]),  k = min_tr) 
+									for label in labels])
+		Xte = X[test_idx]
+		Yte = test_labels[test_idx]
+
+		return Xtr, Xte, Ytr, Yte
+
+
+	def train_test_select(self, X: np.array, Y: np.array, train_tr: np.array, test_tr: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
 		"""
 		Based on training and test data (as returned by trainTestSplit) splits data into training and test data
 
@@ -414,7 +463,7 @@ class BDM(FolderStructure):
 
 		return 	eegs, beh, times
 
-	def Classify(self,sj, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
+	def classify(self,sj, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
 		Arguments
 		- - - - - 
@@ -448,8 +497,13 @@ class BDM(FolderStructure):
 			X, beh = self.averageTrials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
 		y = beh[self.to_decode]
 
-		# select minumum number of trials given the specified conditions
-		max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
+		# select minimum number of trials given the specified conditions
+		if not cross:
+			max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
+		else:
+			# ensures that training is not biased towards a label
+			cnds, test_cnd = cnds
+			max_tr = [self.selectMaxTrials(beh, cnds[0], bdm_labels,cnd_header)]
 
 		if downscale:
 			max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
@@ -457,7 +511,7 @@ class BDM(FolderStructure):
 		# create dictionary to save classification accuracy
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
 
-		if collapse:
+		if collapse and not cross:
 			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
 	
@@ -474,7 +528,7 @@ class BDM(FolderStructure):
 			else:
 				# reset max_tr again such that analysis is not underpowered
 				max_tr = [self.selectMaxTrials(beh, ['yes'], bdm_labels,'collapsed')]
-				cnd_idx =  np.where(np.sum(
+				cnd_idx = np.where(np.sum(
 					[(beh[cnd_header] == c).values for c in cnds], 
 					axis = 0))[0]
 			cnd_labels = beh[self.to_decode][cnd_idx].values
@@ -510,9 +564,15 @@ class BDM(FolderStructure):
 					self.run_info = 1
 					for run in range(self.avg_runs):
 						bdm_info.update({'run_' +str(self.run_info): {}})
-						train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, n, bdm_info) 
-						Xtr, Xte, Ytr, Yte = self.trainTestSelect(X, y, train_tr, test_tr)	
-						class_acc[run, p], label_info[run,p] = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix, X)
+						if cross:
+							# TODO1: make sure that multiple test conditions can be classified
+							# TODO2: make sure that bdm_info is saved conditions can be classified
+							test_idx = np.where(beh[cnd_header] == test_cnd)[0]
+							Xtr, Xte, Ytr, Yte = self.train_test_cross(X, y, cnd_idx, test_idx)
+						else:
+							train_tr, test_tr, bdm_info = self.train_test_split(cnd_idx, cnd_labels, n, bdm_info) 
+							Xtr, Xte, Ytr, Yte = self.train_test_select(X, y, train_tr, test_tr)	
+						class_acc[run, p], label_info[run,p] = self.cross_time_decoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix, X)
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
@@ -526,6 +586,7 @@ class BDM(FolderStructure):
 				classification[cnd].update({'perm': class_acc[1:]})
 	
 		# store classification dict	
+		TODO: create extension creator based on settings
 		if save: 
 			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
@@ -679,7 +740,7 @@ class BDM(FolderStructure):
 		else:
 			return classification	
 
-	def crossTimeDecoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False, X=[]):
+	def cross_time_decoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False, X=[]):
 		'''
 		Decoding is done across all time points. 
 		Arguments

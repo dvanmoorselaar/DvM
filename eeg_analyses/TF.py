@@ -68,10 +68,11 @@ class TF(FolderStructure):
 		eegs = EEG._data[:,picks,:]
 
 		if laplacian:
-			embed()
-			x,y,z = np.vstack([EEG.info['chs'][i]['loc'][:3] for i in picks]).T
-			leg_order = 10 if picks.size <=100 else 12
-			eegs = laplacian_filter(eegs, x, y, z, leg_order = leg_order, smoothing = 1e-5)
+			pass
+			# TODO: Implement laplacian
+			# x,y,z = np.vstack([EEG.info['chs'][i]['loc'][:3] for i in picks]).T
+			# leg_order = 10 if picks.size <=100 else 12
+			# eegs = laplacian_filter(eegs, x, y, z, leg_order = leg_order, smoothing = 1e-5)
 	
 		return eegs, beh
 
