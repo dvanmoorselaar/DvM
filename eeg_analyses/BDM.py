@@ -116,6 +116,20 @@ class BDM(FolderStructure):
 		self.avg_trials = avg_trials
 		self.seed = seed
 
+	def set_folder_path(self) -> list:
+
+		base = ['bdm']
+		base += [self.to_decode, f'{self.elec_oi}_elecs']
+
+		if self.bdm_type != 'broad':
+			base += [self.classifier]
+
+		if self.classifier != 'LDA':
+			base += [self.self.bdm_type]
+
+		return base
+		
+
 	def select_classifier(self) -> Any:
 		"""
 		Function that initialises the classifier
@@ -262,6 +276,54 @@ class BDM(FolderStructure):
 
 		return X_, beh
 
+	def get_condition_labels(self, beh: pd.DataFrame, cnd_header: str, condition: str, max_tr:list, labels: Union[str, list] = 'all', collapse: bool = False) -> Tuple[pd.DataFrame, np.array, np.array, np.array, list]:
+		"""
+		Based on input data selects the condition indices and labels. These serve as input for train_test_split  (and train_test_cross) to create training
+		and test data
+
+		Args:
+			beh (pd.DataFrame): behavior dataframe with variables of interest
+			cnd_header (str): column name that contains condition information
+			condition (str): current condition used for decoding. In a cross training analysis this is the train condition
+			max_tr (list): contains the maximum number of observations that allows for balanced class assignment. 
+			Is only adjusted in case collapse is set to True
+			labels (str, list): unique decoding labels. Defaults to 'all'.
+			collapse (bool, optional): specifies wheter or not  decoding is performed on collapsed condition data. Defaults to False.
+
+		Returns:
+			beh (pd.DataFrame): behavior dataframe with variables of interest
+			cnd_idx (np.array): trial indices of current condition
+			cnd_labels (np.array): condition labels
+			labels (np.array): unique decoding labels
+			max_tr (list): contains the maximum number of observations that allows for balanced class assignment
+		"""
+
+		# get condition indices
+		if condition != 'collapsed':
+			cnd_idx = np.where(beh[cnd_header] == condition)[0]
+			if collapse:
+				beh.loc[cnd_idx,'collapsed'] = 'yes'
+		else:
+			# reset max_tr again such that analysis is not underpowered
+			max_tr = [self.selectMaxTrials(beh, ['yes'], labels,'collapsed')]
+			cnd_idx = np.where(beh.collapsed == 'yes')[0]
+		cnd_labels = beh[self.to_decode][cnd_idx].values
+
+		# make sure that labels that should not be part of analysis are excluded
+		# if not already done so
+		if labels != 'all':
+			sub_idx = [i for i,l in enumerate(cnd_labels) if l in labels]	
+			cnd_idx = cnd_idx[sub_idx]
+			cnd_labels = cnd_labels[sub_idx]
+
+		# print decoding update
+		labels, counts = np.unique(cnd_labels, return_counts = True)
+		if not self.cross:
+			print ('\nYou are decoding {}. The nr of trials used for folding is set to {}'.format(condition, max_tr[0]))
+		print ('\nThe difference between the highest and the lowerst number of observations per class is {}'.format(max(counts) - min(counts)))
+
+		return beh, cnd_idx, cnd_labels, labels, max_tr
+
 	def train_test_split(self, idx: np.array, labels: np.array, max_tr: int, bdm_info: dict) -> Tuple[np.array, np.array, dict]:
 		"""
 		Splits up data into training and test sets. The number of training and test sets is 
@@ -314,7 +376,7 @@ class BDM(FolderStructure):
 
 		return train_tr, test_tr, bdm_info
 
-	def train_test_cross(self, X: np.array, y: np.array, tr_idx: np.array, test_idx: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
+	def train_test_cross(self, X: np.array, y: np.array, train_idx: np.array, test_idx: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
 		"""
 		Creates independent training and test sets (based on training and test conditions). Ensures that the number of observations per class
 		is balanced both in the training and the testing set
@@ -322,7 +384,7 @@ class BDM(FolderStructure):
 		Args:
 			X (np.array):  input data (nr trials X electrodes X timepoints)
 			y (np.array): decoding labels 
-			tr_idx (np.array): indices of train trials (i.e., condition specific data as selected in classify)
+			train_idx (np.array): indices of train trials (i.e., condition specific data as selected in classify)
 			test_idx (np.array): indices of test trials 
 
 		Returns:
@@ -336,7 +398,7 @@ class BDM(FolderStructure):
 			random.seed(self.seed) # set seed 
 
 		# make sure that train label counts is balanced
-		tr_labels = y[train_idx]
+		tr_labels = y[train_idx].values
 		labels, label_counts = np.unique(tr_labels, return_counts = True)
 		min_tr = min(label_counts)	
 
@@ -350,7 +412,7 @@ class BDM(FolderStructure):
 		test_idx = [idx for idx in test_idx if y[idx] in tr_labels]
 
 		# make sure that test label counts is balanced
-		test_labels = y[test_idx]
+		test_labels = y[test_idx].values
 		labels, label_counts = np.unique(test_labels, return_counts = True)
 		min_tr = min(label_counts)	
 
@@ -360,8 +422,13 @@ class BDM(FolderStructure):
 		Xte = X[test_idx]
 		Yte = test_labels[test_idx]
 
-		return Xtr, Xte, Ytr, Yte
+		# add new (empty) axis to data so that cross time decoding can index folds
+		Xtr = Xtr[np.newaxis, ...]
+		Xte = Xte[np.newaxis, ...]
+		Ytr = Ytr[np.newaxis, ...]
+		Yte = Yte[np.newaxis, ...]
 
+		return Xtr, Xte, Ytr, Yte
 
 	def train_test_select(self, X: np.array, Y: np.array, train_tr: np.array, test_tr: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
 		"""
@@ -463,7 +530,7 @@ class BDM(FolderStructure):
 
 		return 	eegs, beh, times
 
-	def classify(self,sj, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
+	def classify(self,sj: int, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
 		''' 
 		Arguments
 		- - - - - 
@@ -488,28 +555,37 @@ class BDM(FolderStructure):
 		- - - -
 		'''	
 
-		# first round of classification is always done on non-permuted labels
-		nr_perm += 1
-
-		# read in data 
+		# read in data and set labels
 		X, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
 		if self.avg_trials > 1:
+			# TODO: allow averaging across multiple factors
 			X, beh = self.averageTrials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
 		y = beh[self.to_decode]
 
-		# select minimum number of trials given the specified conditions
-		if not cross:
-			max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)]
+		# check input variables to set decoing type
+		if isinstance(cnds[0], list):
+			# if cnds consists of list, decoding is done across conditions
+			self.cross = True
+			if self.nr_folds > 1:
+				self.nr_folds = 1
+				print('cross time decoding only requires a single fold. Nr folds is reset to 1')
+			# split train and test conditions
+			# TODO: allow for multiple test conditions
+			cnds, test_cnd = cnds
+			max_tr = []
+		else:
+			self.cross = False 
+			max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)] 
 			if downscale:
 				max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
-		else:
-			# split train and test conditions
-			cnds, test_cnd = cnds
 
-		# create dictionary to save classification accuracy
+		# first round of classification is always done on non-permuted labels
+		nr_perm += 1
+
+		# set up dict to save decoding scores
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
 
-		if collapse and not cross:
+		if collapse :
 			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
 	
@@ -519,27 +595,11 @@ class BDM(FolderStructure):
 			# reset selected trials
 			bdm_info = {}
 
-			if cnd != 'collapsed':
-				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-				if collapse:
-					beh['collapsed'][cnd_idx] = 'yes'
-			else:
-				# reset max_tr again such that analysis is not underpowered
-				max_tr = [self.selectMaxTrials(beh, ['yes'], bdm_labels,'collapsed')]
-				cnd_idx = np.where(np.sum(
-					[(beh[cnd_header] == c).values for c in cnds], 
-					axis = 0))[0]
-			cnd_labels = beh[self.to_decode][cnd_idx].values
+			# get condition indices and labels
+			beh, cnd_idx, cnd_labels, labels, max_tr = self.get_condition_labels(beh, cnd_header, 
+														cnd, max_tr, bdm_labels, collapse)
 
-			if bdm_labels != 'all':
-				sub_idx = [i for i,l in enumerate(cnd_labels) if l in bdm_labels]	
-				cnd_idx = cnd_idx[sub_idx]
-				cnd_labels = cnd_labels[sub_idx]
-
-			labels = np.unique(cnd_labels)
-			print ('\nYou are decoding {}. The nr of trials used for folding is set to {}'.format(cnd, max_tr[0]))
-			
-			# initiate decoding array
+			# initiate decoding arrays
 			if gat_matrix:
 				class_acc = np.empty((self.avg_runs, nr_perm, X.shape[2], X.shape[2])) * np.nan
 				label_info = np.empty((self.avg_runs, nr_perm, X.shape[2], X.shape[2], labels.size)) * np.nan
@@ -562,7 +622,7 @@ class BDM(FolderStructure):
 					self.run_info = 1
 					for run in range(self.avg_runs):
 						bdm_info.update({'run_' +str(self.run_info): {}})
-						if cross:
+						if self.cross:
 							# TODO1: make sure that multiple test conditions can be classified
 							# TODO2: make sure that bdm_info is saved conditions can be classified
 							test_idx = np.where(beh[cnd_header] == test_cnd)[0]
@@ -584,9 +644,9 @@ class BDM(FolderStructure):
 				classification[cnd].update({'perm': class_acc[1:]})
 	
 		# store classification dict	
-		TODO: create extension creator based on settings
 		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, self.to_decode], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
+			extension = self.set_folder_path()
+			with open(self.FolderTracker(extension, filename = 'class_{}.pickle'.format(sj)) ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
