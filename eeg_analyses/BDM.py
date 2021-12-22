@@ -121,6 +121,9 @@ class BDM(FolderStructure):
 		base = ['bdm']
 		base += [self.to_decode, f'{self.elec_oi}_elecs']
 
+		if self.cross:
+			base += ['cross']
+
 		if self.bdm_type != 'broad':
 			base += [self.classifier]
 
@@ -422,7 +425,7 @@ class BDM(FolderStructure):
 		Xte = X[test_idx]
 		Yte = test_labels[test_idx]
 
-		# add new (empty) axis to data so that cross time decoding can index folds
+		# add new (empty) axis to data so that cross time decoding can index (arteficial) folds
 		Xtr = Xtr[np.newaxis, ...]
 		Xte = Xte[np.newaxis, ...]
 		Ytr = Ytr[np.newaxis, ...]
