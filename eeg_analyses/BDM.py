@@ -518,7 +518,7 @@ class BDM(FolderStructure):
 
 		# select time window and EEG electrodes
 		s, e = [np.argmin(abs(epochs.times - t)) for t in time]
-		picks = mne.pick_types(epochs.info, eeg=True, eog= True, exclude='bads')
+		picks = mne.pick_types(epochs.info, eeg=True, eog= True, misc = True, exclude='bads')
 		picks = select_electrodes(np.array(epochs.ch_names)[picks], self.elec_oi)
 		eegs = epochs._data[:,picks,s:e]
 		times = epochs.times[s:e]

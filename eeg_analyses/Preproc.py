@@ -59,16 +59,14 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     bdm_remove = sj_info[str(sj)]['bdf_remove'] if 'bdf_remove' in sj_info[str(sj)].keys() else None
     beh, missing = epochs.align_behavior(events, trigger_header = trigger_header, headers = project_param, bdf_remove = bdm_remove)
 
-    # # AUTOMATED ARTIFACT DETECTION
-    epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
-    z = epochs.autmatic_artifact_detection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
-
     # ICA
-    if preproc_param['run_ica']:
-        epochs_ica = Epochs(sj, session, EEGica, events, event_id=event_id,
-                tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
-        epochs.applyICA(EEG, epochs_ica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
+    if preproc_param['run_ica']: 
+        epochs.applyICA(EEG, EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
         del EEGica
+
+    # # AUTOMATED ARTIFACT DETECTION
+    # epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
+    z = epochs.automatic_artifact_detection(z_thresh=4, band_pass=[110, 140], plot=True, inspect=True)
 
     # EYE MOVEMENTS
     epochs.detectEye(missing, events, beh.shape[0], time_window=(t_min*1000, t_max*1000), 

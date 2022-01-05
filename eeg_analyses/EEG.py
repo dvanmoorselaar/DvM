@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from scipy.stats import zscore
 
+from typing import Optional, Generic, Union, Tuple, Any
 from termios import tcflush, TCIFLUSH
 from eeg_analyses.EYE import *
 from math import sqrt
@@ -37,6 +38,415 @@ from mne.preprocessing import create_eog_epochs, create_ecg_epochs
 from math import ceil, floor
 from autoreject import Ransac, AutoReject
 
+
+class ArtefactReject(FolderStructure):
+    """ Multiple (automatic artefact rejection procedures)
+    Work in progress
+    """
+
+    def __init__(self, z_thresh: float = 4.0, max_bad: int = 5, flt_pad: float = 0, filter_z: bool = True):
+        self.flt_pad = flt_pad
+        self.filter_z = filter_z
+        self.z_thresh = z_thresh
+        self.max_bad = max_bad
+
+    def plot_auto_repair(self, epochs, bad_epochs, cleaned_epochs):
+
+        # show bad epochs
+        all_epochs = np.arange(len(epochs))
+        all_epochs = np.delete(all_epochs, bad_epochs)
+        for plot, title in zip([bad_epochs, cleaned_epochs, all_epochs], ['bad_epochs', 'cleaned_epochs', 'all_epochs']):
+            epochs[plot].average().plot(spatial_colors = True, gfp = True)
+            plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                        epochs.sj), epochs.session], filename=f'{title}.pdf'))
+            plt.close()
+       
+    def iterative_interpolation(self, epochs, elecs_z, noise_inf, z_thresh, band_pass):
+        
+        channels = np.array(epochs.info['ch_names'])
+        # track bad and cleaned epochs
+        bad_epochs, cleaned_epochs = [], []
+        for event in noise_inf:
+            bad_epoch = epochs[event[0]]
+            # search for bad channels in detected artefact periods
+            z = np.concatenate([elecs_z[event[0]][:,slice_[0]] for slice_ in event[1:]], axis = 1)
+            # limit interpolation to 'max_bad' noisiest channels 
+            interp_chs = channels[np.argsort(z.mean(axis = 1))[-self.max_bad:]][::-1]
+            for ch in interp_chs:
+                bad_epoch.info['bads'] = [ch]
+                bad_epoch.interpolate_bads()
+                epochs._data[event[0]] = bad_epoch._data
+                # repeat preprocesing after interpolation to check whether epoch is now 'clean'
+                Z_, _, _, _ = self.preprocess_epochs(epochs[event[0]], band_pass = band_pass)
+
+                if not np.any(abs(Z_) > z_thresh):
+                    # epoch no longer marked as bad
+                    break
+
+            if ch == interp_chs[-1]:
+                bad_epochs.append(event[0])
+            else:
+                cleaned_epochs.append(event[0])
+
+        return bad_epochs, cleaned_epochs
+
+    def auto_repair_noise(self, epochs: mne.Epochs, band_pass: list =[110, 140], z_thresh: float = 4.0):
+
+        # z score data (after hilbert transform)
+        Z, elecs_z, z_thresh, times = self.preprocess_epochs(epochs, band_pass = band_pass)
+
+        # mark noise epochs
+        noise_inf = self.mark_bads(Z,z_thresh,times)
+        
+        # clean epochs
+        bad_epochs, cleaned_epochs = self.iterative_interpolation(epochs, elecs_z, noise_inf, z_thresh, band_pass)
+        self.plot_auto_repair(epochs, bad_epochs, cleaned_epochs)
+
+        return bad_epochs, cleaned_epochs
+
+        print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
+        bad_eegs = self[bad_epochs]
+        idx_bads = bad_eegs.selection
+        # display bad eegs with 50mV range
+        bad_eegs.plot(
+            n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
+        plt.show()
+        plt.close()
+        missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection],dtype = int)
+        logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
+                        missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
+        bad_epochs = np.delete(bad_epochs, missing)   
+
+        
+
+
+
+    def preprocess_epochs(self, epochs: mne.Epochs, band_pass: list =[110, 140]):       
+
+        # set params
+        flt_pad = self.flt_pad
+        times = epochs.times
+        tmin, tmax = epochs.tmin, epochs.tmax
+        sfreq = epochs.info['sfreq']
+
+        # filter data, apply hilbert (limited to 'good' EEG channels) and smooth the data (using defaults)
+        X = self.apply_hilbert(epochs, band_pass[0], band_pass[1])
+        X = self.box_smoothing(X, sfreq)
+
+        # z score data (while ignoring flt_pad samples) using default settings
+        mask = np.logical_and(tmin + self.flt_pad <= times, times <= tmax - self.flt_pad)
+        Z, elecs_z, z_thresh = self.z_score_data(X, self.z_thresh, mask, (self.filter_z, sfreq))
+
+        # control for filter padding
+        time_idx = epochs.time_as_index([tmin + flt_pad, tmax - flt_pad])
+        Z = Z[:, slice(*time_idx)]
+        elecs_z = elecs_z[:,:,slice(*time_idx)]
+        times = times[slice(*time_idx)]
+
+        return Z, elecs_z, z_thresh, times
+
+    def apply_hilbert(self, epochs: mne.Epochs, lower_band: int = 110, upper_band: int = 140) -> np.array:
+        """
+        Takes an mne epochs object as input and returns the eeg data after Hilbert transform
+
+        Args:
+            epochs (mne.Epochs): mne epochs object before muscle artefact detection
+            lower_band (int, optional): Lower limit of the bandpass filter. Defaults to 110.
+            upper_band (int, optional): Upper limit of the bandpass filter. Defaults to 140.
+
+        Returns:
+            X (np.array): eeg data after applying hilbert transform within the given frequency band
+        """
+
+        # exclude channels that are marked as overall bad
+        epochs.pick_types(eeg=True, exclude='bads')
+
+        # filter data and apply Hilbert
+        epochs.filter(lower_band, upper_band, fir_design='firwin', pad='reflect_limited')    
+        epochs.apply_hilbert(envelope=True)
+
+        # get data
+        X = epochs.get_data()
+
+        return X
+
+    def filt_pad(self, X: np.array, pad_length: int) -> np.array:
+        """
+        performs padding (using local mean method) on the data, i.e., adds samples before and after the data
+        TODO: MOVE to signal processing folder (see https://github.com/fieldtrip/fieldtrip/blob/master/preproc/ft_preproc_padding.m))
+
+        Args:
+            X (np.array):  2-dimensional array [nr_elec X nr_time]
+            pad_length (int): number of samples that will be padded
+
+        Returns:
+            X (np.array): 2-dimensional array with padded data [nr_elec X nr_time]
+        """
+
+        # set number of pad samples        
+        pre_pad = int(min([pad_length, floor(X.shape[1]) / 2.0]))
+
+        # get local mean on both sides
+        edge_left = X[:, :pre_pad].mean(axis=1)
+        edge_right = X[:, -pre_pad:].mean(axis=1)
+
+        # pad data
+        X = np.concatenate((np.tile(edge_left.reshape(X.shape[0], 1), pre_pad), X, np.tile(
+            edge_right.reshape(X.shape[0], 1), pre_pad)), axis=1)
+
+        return X
+
+    def box_smoothing(self, X: np.array, sfreq: float, boxcar: float = 0.2) -> np.array:
+        """
+        performs boxcar smoothing with specified length. Modified version of ft_preproc_smooth as
+        implemented in the FieldTrip toolbox (https://www.fieldtriptoolbox.org)
+
+        Args:
+            X (np.array): 3-dimensional array [nr_epoch X nr_elec X nr_time]
+            sfreq (float): sampling frequency
+            boxcar (float, optional): parameter that determines the length of the filter kernel. Defaults to 0.2 (optimal accrding to fieldtrip documentation).
+
+        Returns:
+            np.array: [description]
+        """
+
+        # create smoothing kernel
+        pad = int(round(boxcar * sfreq))
+        # make sure that kernel has an odd number of samples
+        if pad % 2 == 0:
+            pad += 1
+        kernel = np.ones(pad) / pad
+
+        # padding and smoothing functions expect 2-d input (nr_elec X nr_time)
+        pad_length = int(ceil(pad / 2))
+        for i, x in enumerate(X):
+            # pad the data 
+            x = self.filt_pad(x, pad_length = pad_length)
+
+            # smooth the data
+            x_smooth = sp.signal.convolve2d(
+                                    x, kernel.reshape(1, kernel.shape[0]), 'same')
+            X[i] = x_smooth[:, pad_length:(x_smooth.shape[1] - pad_length)]
+ 
+        return X
+
+    def z_score_data(self, X: np.array, z_thresh: int = 4, mask: np.array = None, filter_z: tuple = (False, 512)) -> Tuple[np.array, np.array, float]:
+        """
+        Z scores input data over the second dimension (i.e., electrodes). The z threshold, which is used to mark artefact segments,
+        is then calculated using a data driven approach, where the upper limit of the 'bandwith' of obtained z scores is added 
+        to the provided default threshold. Also returns z scored data per electrode which can be used during iterative automatic cleaning
+        procedure.
+
+        Args:
+            X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
+            z_thresh (int, optional): starting z value cut off. Defaults to 4.
+            mask (np.array, optional): a boolean array that masks out time points such that they are excluded during z scoring. Note these datapoints are 
+            still returned in Z_n and elecs_z (see below).
+            filter_z (tuple, optional): prevents false-positive transient peaks by low-pass filtering
+            the resulting z-score time series at 4 Hz. Note: Should never be used without filter padding the data. 
+            Second argument in the tuple specifies the sampling frequency. Defaults to False, i.e., no filtering.
+
+        Returns:
+            Z_n (np.array):  2-dimensional array of normalized z scores across electrodes[trial repeats by time points].
+            elecs_z (np.array): 3-dimensional array of z scores data per sample [trial repeats by electrodes by time points].
+            z_thresh (float): z_score theshold used to mark segments of muscle artefacts
+        """
+
+        # set params
+        nr_epoch, nr_elec, nr_time = X.shape
+
+        # get the data and z_score over electrodes
+        X = X.swapaxes(0,1).reshape(nr_elec,-1) 
+        X_z = zscore(X, axis = 1) 
+        if mask is not None:
+            mask = np.tile(mask, nr_epoch)
+            X_z[:, mask] = zscore(X[:,mask], axis = 1) 
+
+        # reshape to get get epoched data in terms of z scores
+        elecs_z = X_z.reshape(nr_elec, nr_epoch,-1).swapaxes(0,1)
+
+        # normalize z_score
+        Z_n = X_z.sum(axis = 0)/sqrt(nr_elec) 
+        if mask is not None:
+            Z_n[mask] = X_z[:,mask].sum(axis = 0)/sqrt(nr_elec) 
+        if filter_z[0]:
+            Z_n = filter_data(Z_n, filter_z[1], None, 4, pad='reflect_limited') 
+
+        # adjust threshold (data driven) 
+        if mask is None:
+            mask = np.ones(Z_n.size, dtype = bool)  
+        z_thresh += np.median(Z_n[mask]) + abs(Z_n[mask].min() - np.median(Z_n[mask])) 
+        
+        # transform back into epochs
+        Z_n = Z_n.reshape(nr_epoch, -1) 
+
+        return Z_n, elecs_z, z_thresh
+
+    def mark_bads(self, Z: np.array, z_thresh: float, times: np.array) -> list:
+        """
+        Marks which epochs contain samples that exceed the data driven z threshold (as set by z_score_data).
+        Outputs a list with marked epochs. Per marked epoch alongside the index, a slice of the artefact, the start and end point and the duration
+        of the artefact are saved
+
+        Args:
+            Z (np.array): 2-dimensional array of normalized z scores across electrodes [trial repeats by time points]
+            z_thresh (float): z_score theshold used to mark segments of muscle artefacts
+            times (np.array): sample time points
+
+        Returns:
+            noise_events (list): indices of  marked epochs. Per epoch time information of each artefact is logged
+            [idx, (artefact slice, start_time, end_time, duration)]
+        """
+
+        # start with empty  list
+        noise_events = []
+        # loop over each epoch
+        for ep, x in enumerate(Z):
+            # mask noise samples
+            noise_mask = abs(x) > z_thresh
+            # get start and end point of continuous noise segments
+            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:]))
+            if noise_mask[0]:
+                starts = np.insert(starts, 0, 0)
+            ends = np.argwhere((noise_mask[:-1] & ~noise_mask[1:])) + 1
+            # update noise_events
+            if starts.size > 0:
+                starts = np.hstack(starts)
+                if ends.size == 0:
+                    ends = np.array([times.size-1])
+                else:
+                    ends = np.hstack(ends)
+                ep_noise = [ep] + [(slice(s, e), times[s],times[e], abs(times[e] - times[s])) for s,e in zip(starts, ends)]
+                noise_events.append(ep_noise)
+
+        return noise_events
+
+
+
+    def automatic_artifact_detection(self, z_thresh=4, band_pass=[110, 140], plot=True, inspect=True):
+        """ Detect artifacts> modification of FieldTrip's automatic artifact detection procedure 
+        (https://www.fieldtriptoolbox.org/tutorial/automatic_artifact_rejection/). 
+        Artifacts are detected in three steps:
+        1. Filtering the data within specified frequency range
+        2. Z-transforming the filtered data across channels and normalize it over channels
+        3. Threshold the accumulated z-score
+
+        Counter to fieldtrip the z_threshold is ajusted based on the noise level within the data
+        Note: all data included for filter padding is now taken into consideration to calculate z values
+
+        Afer running this function, Epochs contains information about epeochs marked as bad (self.marked_epochs)
+        
+        Arguments:
+            
+        Keyword Arguments:
+            z_thresh {float|int} -- Value that is added to difference between median 
+                    and min value of accumulated z-score to obtain z-threshold
+            band_pass {list} --  Low and High frequency cutoff for band_pass filter
+            plot {bool} -- If True save detection plots (overview of z scores across epochs, 
+                    raw signal of channel with highest z score, z distributions, 
+                    raw signal of all electrodes)
+            inspect {bool} -- If True gives the opportunity to overwrite selected components
+        """
+        
+        # select data for artifact rejection
+        sfreq = self.info['sfreq']
+        self_copy = self.copy() 
+        self_copy.pick_types(eeg=True, exclude='bads')
+
+        #filter data and apply Hilbert
+        self_copy.filter(band_pass[0], band_pass[1], fir_design='firwin', pad='reflect_limited') 
+        #self_copy.filter(band_pass[0], band_pass[1], method='iir', iir_params=dict(order=6, ftype='butter'))    
+        self_copy.apply_hilbert(envelope=True)
+
+        # get the data and apply box smoothing
+        data = self_copy.get_data()
+        nr_epochs = data.shape[0]
+        for i in range(data.shape[0]):
+            data[i] = self.boxSmoothing(data[i])
+
+        # get the data and z_score over electrodes
+        data = data.swapaxes(0,1).reshape(data.shape[1],-1) 
+        z_score = zscore(data, axis = 1) # check whether axis is correct!!!!!!!!!!!
+
+        # z score per electrode and time point (adjust number of electrodes)
+        elecs_z = z_score.reshape(nr_epochs, 64, -1)
+
+        # normalize z_score
+        z_score = z_score.sum(axis = 0)/sqrt(data.shape[0]) 
+        #z_score = filter_data(z_score, self.info['sfreq'], None, 4, pad='reflect_limited') 
+
+        # adjust threshold (data driven)    
+        z_thresh += np.median(z_score) + abs(z_score.min() - np.median(z_score)) 
+        
+        # transform back into epochs
+        z_score = z_score.reshape(nr_epochs, -1) 
+
+        # control for filter padding
+        if self.flt_pad > 0:
+            idx_ep = self.time_as_index([self.tmin + self.flt_pad, self.tmax - self.flt_pad])
+            z_score = z_score[:, slice(*idx_ep)]
+            elecs_z
+
+        # mark bad epochs
+        bad_epochs = []
+        noise_events = []
+        cnt = 0
+        for ep, X in enumerate(z_score):
+            # get start, endpoint and duration in ms per continuous artefact
+            noise_mask = X > z_thresh
+            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:]))
+            ends = np.argwhere((noise_mask[:-1] & ~noise_mask[1:])) + 1
+            ep_noise = [(slice(s[0], e[0]), self.times[s][0],self.times[e][0], abs(self.times[e][0] - self.times[s][0])) for s,e in zip(starts, ends)]
+            noise_events.append(ep_noise)
+            noise_smp = np.where(X > z_thresh)[0]
+            if noise_smp.size > 0:
+                bad_epochs.append(ep)
+
+        if inspect:
+            print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
+            bad_eegs = self[bad_epochs]
+            idx_bads = bad_eegs.selection
+            # display bad eegs with 50mV range
+            bad_eegs.plot(
+                n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
+            plt.show()
+            plt.close()
+            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection],dtype = int)
+            logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
+                            missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
+            bad_epochs = np.delete(bad_epochs, missing)
+        
+        if plot:
+            plt.figure(figsize=(10, 10))
+            with sns.axes_style('dark'):
+
+                plt.subplot(111, xlabel='samples', ylabel='z_value',
+                            xlim=(0, z_score.size), ylim=(-20, 40))
+                plt.plot(np.arange(0, z_score.size), z_score.flatten(), color='b')
+                plt.plot(np.arange(0, z_score.size),
+                         np.ma.masked_less(z_score.flatten(), z_thresh), color='r')
+                plt.axhline(z_thresh, color='r', ls='--')
+
+                plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                    self.sj), self.session], filename='automatic_artdetect.pdf'))
+                plt.close()
+
+        # drop bad epochs and save list of dropped epochs
+        self.drop_beh = bad_epochs
+        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+            self.sj), self.session], filename='noise_epochs.txt'), bad_epochs)
+        print('{} epochs dropped ({}%)'.format(len(bad_epochs),
+                                               100 * round(len(bad_epochs) / float(len(self)), 2)))
+        logging.info('{} epochs dropped ({}%)'.format(
+            len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2)))
+        self.drop(np.array(bad_epochs), reason='art detection ecg')
+        logging.info('{} epochs left after artifact detection'.format(len(self)))
+
+        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
+                   ['Artifact detection z threshold set to {}. \n{} epochs dropped ({}%)'.
+                    format(round(z_thresh, 1), len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2))], fmt='%.100s')
+
+        return z_thresh
 
 class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
     '''
@@ -550,7 +960,7 @@ class Epochs(mne.Epochs, FolderStructure):
                     raw signal of all electrodes)
             inspect {bool} -- If True gives the opportunity to overwrite selected components
         """
-
+        embed()
         # select data for artifact rejection
         sfreq = self.info['sfreq']
         self_copy = self.copy() 
@@ -561,7 +971,6 @@ class Epochs(mne.Epochs, FolderStructure):
         #self_copy.filter(band_pass[0], band_pass[1], method='iir', iir_params=dict(order=6, ftype='butter'))    
         self_copy.apply_hilbert(envelope=True)
 
-        embed()
         # get the data and apply box smoothing
         data = self_copy.get_data()
         nr_epochs = data.shape[0]
@@ -578,7 +987,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # adjust threshold (data driven)    
         z_thresh += np.median(z_score) + abs(z_score.min() - np.median(z_score)) 
-        
+
         # transform back into epochs
         z_score = z_score.reshape(nr_epochs, -1) 
 
