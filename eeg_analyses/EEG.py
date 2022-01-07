@@ -50,6 +50,105 @@ class ArtefactReject(FolderStructure):
         self.z_thresh = z_thresh
         self.max_bad = max_bad
 
+    def run_blink_ICA(self, fit_inst, raw, method = 'picard', threshold = 0.9, report  = None):
+
+        # step 1: fit the data
+        ica = self.fit_ICA(fit_inst, method = 'picard')
+
+        # step 2: select the blink component (assumed to be component 1)
+        eog_epochs, eog_inds, eog_scores = self.automated_ica_blink_selection(ica, raw, threshold = threshold)
+        ica.exclude = [eog_inds[0]]
+
+        if report is not None:
+            report.add_ica(
+                ica=ica,
+                title='ICA blink cleaning',
+                picks=range(15), 
+                inst=eog_epochs,
+                eog_evoked=eog_epochs.average(),
+                eog_scores=eog_scores[0],
+                )
+
+    def fit_ICA(self, fit_inst, method = 'picard'):
+
+        if method == 'picard':
+            fit_params = dict(fastica_it=5)
+        elif method == 'extended_infomax':
+            fit_params = dict(extended=True)
+        elif method == 'fastica':
+            fit_params = None
+
+        #logging.info('started fitting ICA')
+        picks = mne.pick_types(fit_inst.info, eeg=True, exclude='bads')
+        ica = ICA(n_components=picks.size, method=method, fit_params = fit_params, random_state=97)
+  
+        # do actual fitting
+        ica.fit(fit_inst, picks=picks)
+
+        return ica
+
+    def automated_ica_blink_selection(self, ica, raw, threshold = 0.9):
+
+        pick_eog = mne.pick_types(raw.info, meg=False, eeg=False, ecg=False,
+                                eog=True)
+        ch_names = [raw.info['ch_names'][pick] for pick in pick_eog]
+
+        if pick_eog.any():
+            # create blink epochs
+            eog_epochs = create_eog_epochs(raw, ch_name=ch_names,
+                                        baseline=(None, -0.2),
+                                        tmin=-0.5, tmax=0.5)
+
+            eog_inds, eog_scores = ica.find_bads_eog(
+                eog_epochs, threshold=threshold)
+
+        else:
+            eog_epochs = None
+            eog_inds = list()
+            print('No EOG channel is present. Cannot automate IC detection '
+                'for EOG')
+
+        return eog_epochs, eog_inds, eog_scores
+
+    def manual_check_ica(self, ica, eog_inds):
+        
+        time.sleep(5)
+        tcflush(sys.stdin, TCIFLUSH)
+        print('You are preprocessing subject {}, session {}'.format(self.sj, self.session))
+        conf = input(
+            'Advanced detection selected component(s) {}. Do you agree (y/n)'.format(eog_inds))
+        if conf == 'n':
+            eog_inds = []
+            nr_comp = input(
+                'How many components do you want to select (<10)?')
+            for i in range(int(nr_comp)):
+                eog_inds.append(
+                    int(input('What is component nr {}?'.format(i + 1))))
+
+        ica.exclude = eog_inds
+
+        return ica
+
+
+    def apply_ICA(self, ica, picks):
+
+        # remove selected component
+        ica.apply(self, exclude=picks)
+
+    def visualize_blinks(self, raw):
+    
+        eog_epochs = create_eog_epochs(raw, ch_name = ['V_up', 'V_do', 'Fp1','Fpz','Fp2'],  baseline=(-0.5, -0.2))
+        eog_epochs.plot_image(combine='mean')
+        plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                epochs.sj), epochs.session, 'ica'], filename=f'raw_blinks_combined.pdf'))
+
+        eog_epochs.average().plot_joint()
+        plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                epochs.sj), epochs.session, 'ica'], filename=f'raw_blinks_topo.pdf'))
+
+
+
+
     def plot_auto_repair(self, epochs, bad_epochs, cleaned_epochs):
 
         # show bad epochs
@@ -459,6 +558,22 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         super(RawBDF, self).__init__(input_fname=input_fname, eog=eog,
                                      stim_channel=stim_channel, preload=preload, verbose=verbose)
 
+    def report_raw(self, report, events, event_id):
+        '''
+
+        '''
+
+        # report raw
+        report.add_raw(self, title='raw EEG', psd=True )
+        # and events
+        events = events[np.in1d(events[:,2], event_id)]
+        report.add_events(events, title = 'detected events', sfreq = self.info['sfreq'])
+       
+
+        return report
+
+
+
     def replaceChannel(self, sj, session, replace):
         '''
         Replace bad electrodes by electrodes that were used during recording as a replacement
@@ -544,7 +659,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
         eog.rename_channels(ch_mapping)
         eog.drop_channels([vEOG[1], hEOG[1]])
-        self.add_channels([eog])
+        #self.add_channels([eog])
 
         # drop ref chans
         self.drop_channels(to_remove)
@@ -731,6 +846,17 @@ class Epochs(mne.Epochs, FolderStructure):
         self.nr_events = len(self)
         self.drop_beh = []
         logging.info('{} epochs created'.format(len(self)))
+
+    def report_epochs(self, report, title, missing = None):
+
+        if missing is not None:
+            report.add_html('epochs and behavior are alligned', title = 'missing trials in beh')
+
+        report.add_epochs(self, title=title)
+
+        return report
+
+
 
     def align_behavior(self, events: np.array,  trigger_header: str = 'trigger', headers: list = [], bdf_remove: np.array =  None):
         """

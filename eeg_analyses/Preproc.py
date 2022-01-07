@@ -19,50 +19,62 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     # set subject specific parameters
     file = 'subject_{}_session_{}_'.format(sj, session)
     replace = sj_info[str(sj)]['replace']
-    log_file = FolderStructure.FolderTracker(extension=['preprocessing', 'group_info'], 
-                    filename='preprocessing_param.csv')
+    # log_file = FolderStructure.FolderTracker(extension=['preprocessing', 'group_info'], 
+    #                 filename='preprocessing_param.csv')
 
-    # start logging
-    logging.basicConfig(level=logging.DEBUG,
-                format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                datefmt='%m-%d %H:%M',
-                filename= FolderStructure.FolderTracker(extension=['preprocessing', 'group_info', 'sj_logs'], 
-                filename='preprocess_sj{}_ses{}.log'.format(
-                sj, session), overwrite = False),
-                filemode='w')
+    # start report 
+    report = mne.Report(title='preprocessing overview', subject = f'{sj}_{session}')
+
+    # # start logging
+    # logging.basicConfig(level=logging.DEBUG,
+    #             format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+    #             datefmt='%m-%d %H:%M',
+    #             filename= FolderStructure.FolderTracker(extension=['preprocessing', 'group_info', 'sj_logs'], 
+    #             filename='preprocess_sj{}_ses{}.log'.format(
+    #             sj, session), overwrite = False),
+    #             filemode='w')
 
     # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
     EEG = mne.concatenate_raws([RawBDF(os.path.join(project_folder, 'raw', file + '{}.bdf'.format(run)),
                                         preload=True, eog=eog) for run in eeg_runs])
+    events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
 
     #EEG.replaceChannel(sj, session, replace)
     EEG.reReference(ref_channels=ref, vEOG=eog[
-                    :2], hEOG=eog[2:], changevoltage=True, to_remove = ['EXG7','EXG8'])
+                    :2], hEOG=eog[2:], changevoltage=False, to_remove = ['EXG7','EXG8'])
     EEG.setMontage(montage='biosemi64')
 
     #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
     if preproc_param['run_ica']:
-        EEGica = EEG.copy()
-        EEGica.filter(h_freq=None, l_freq=1.5,
-                                fir_design='firwin', skip_by_annotation='edge')
+        EEG_ica = EEG.copy().filter(l_freq=1., h_freq=None)
 
     if preproc_param['high_pass']:                         
         EEG.filter(h_freq=None, l_freq=preproc_param['high_pass'], fir_design='firwin',
                 skip_by_annotation='edge')
 
+    # report raw
+    report = EEG.report_raw(report, events, event_id)
+
     # EPOCH DATA
-    events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
             tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
-
+            
     # MATCH BEHAVIOR FILE
-    bdm_remove = sj_info[str(sj)]['bdf_remove'] if 'bdf_remove' in sj_info[str(sj)].keys() else None
-    beh, missing = epochs.align_behavior(events, trigger_header = trigger_header, headers = project_param, bdf_remove = bdm_remove)
+    bdf_remove = sj_info[str(sj)]['bdf_remove'] if 'bdf_remove' in sj_info[str(sj)].keys() else None
+    beh, missing = epochs.align_behavior(events, trigger_header = trigger_header, headers = project_param, bdf_remove = bdf_remove)
+    report = epochs.report_epochs(report, 'initial epoch', missing)
+
+    # START AUTOMATIC ARTEFACT REJECTION
+    #AR = ArtefactReject(4, 5, 0.5, True)
 
     # ICA
     if preproc_param['run_ica']: 
-        epochs.applyICA(EEG, EEGica, method='picard', fit_params = dict(ortho=False, extended=True), inspect = True)
-        del EEGica
+        epochs_ica = Epochs(sj, session, EEG_ica, events, event_id=event_id,
+            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
+        ArtefactReject().run_blink_ICA(epochs_ica, EEG, method = 'picard', threshold = 0.9, report  = report)
+        embed()
+        del EEG_ica, epochs_ica
+
 
     # # AUTOMATED ARTIFACT DETECTION
     # epochs.selectBadChannels(run_ransac = True, channel_plots = False, inspect = True, RT = None)  
