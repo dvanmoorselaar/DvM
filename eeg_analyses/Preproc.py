@@ -58,14 +58,15 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     # EPOCH DATA
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
             tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
-            
+   
     # MATCH BEHAVIOR FILE
     bdf_remove = sj_info[str(sj)]['bdf_remove'] if 'bdf_remove' in sj_info[str(sj)].keys() else None
     beh, missing = epochs.align_behavior(events, trigger_header = trigger_header, headers = project_param, bdf_remove = bdf_remove)
     report = epochs.report_epochs(report, 'initial epoch', missing)
 
     # START AUTOMATIC ARTEFACT REJECTION
-    #AR = ArtefactReject(4, 5, 0.5, True)
+    #epochs.select_bad_channels(report)
+    ArtefactReject(4, 5, 0.5, True).auto_repair_noise(epochs)
 
     # ICA
     if preproc_param['run_ica']: 

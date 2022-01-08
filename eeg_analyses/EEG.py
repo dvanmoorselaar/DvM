@@ -147,7 +147,9 @@ class ArtefactReject(FolderStructure):
                 epochs.sj), epochs.session, 'ica'], filename=f'raw_blinks_topo.pdf'))
 
 
+    def plot_heat_map_auto_repair(self):
 
+        idx = np.argwhere(np.all(heat_map[..., :] == 1, axis=1))
 
     def plot_auto_repair(self, epochs, bad_epochs, cleaned_epochs):
 
@@ -162,16 +164,21 @@ class ArtefactReject(FolderStructure):
        
     def iterative_interpolation(self, epochs, elecs_z, noise_inf, z_thresh, band_pass):
         
+
         channels = np.array(epochs.info['ch_names'])
+        self.heat_map = np.zeros((len(noise_inf), channels.size))
         # track bad and cleaned epochs
         bad_epochs, cleaned_epochs = [], []
-        for event in noise_inf:
+        for i, event in enumerate(noise_inf):
             bad_epoch = epochs[event[0]]
             # search for bad channels in detected artefact periods
             z = np.concatenate([elecs_z[event[0]][:,slice_[0]] for slice_ in event[1:]], axis = 1)
             # limit interpolation to 'max_bad' noisiest channels 
             interp_chs = channels[np.argsort(z.mean(axis = 1))[-self.max_bad:]][::-1]
+
             for ch in interp_chs:
+                # update heat map
+                self.heat_map[i,  np.where(channels == ch)] = 1
                 bad_epoch.info['bads'] = [ch]
                 bad_epoch.interpolate_bads()
                 epochs._data[event[0]] = bad_epoch._data
@@ -183,11 +190,12 @@ class ArtefactReject(FolderStructure):
                     break
 
             if ch == interp_chs[-1]:
+                self.heat_map[i] += 1
                 bad_epochs.append(event[0])
             else:
                 cleaned_epochs.append(event[0])
 
-        return bad_epochs, cleaned_epochs
+        return epochs, bad_epochs, cleaned_epochs
 
     def auto_repair_noise(self, epochs: mne.Epochs, band_pass: list =[110, 140], z_thresh: float = 4.0):
 
@@ -976,7 +984,25 @@ class Epochs(mne.Epochs, FolderStructure):
         
         self, reject_log = ar.fit_transform(self, return_log=True)  
 
-    def applyRansac(self):
+    def select_bad_channels(self, report):
+
+        # step 1: run ransac
+        bad_chs = self.apply_ransac()
+
+        # step 2: create report
+        self.report_ransac(bad_chs, report)
+
+        # step 3: manual inspection
+
+
+    def report_ransac(self, bad_chs, report):
+
+        figs = []
+        for ch in bad_chs:
+            figs += self.plot_image(picks = ch)
+        report.add_figure(figs, title = 'Bad channels selected by Ransac')
+
+    def apply_ransac(self):
         '''
         Implements RAndom SAmple Consensus (RANSAC) method to detect bad channels.
 
@@ -994,7 +1020,9 @@ class Epochs(mne.Epochs, FolderStructure):
         epochs_clean = ransac.fit_transform(self)
         print('The following electrodes are selected as bad by Ransac:')
         print('\n'.join(ransac.bad_chs_))
-        self.info['bads'] = ransac.bad_chs_
+
+        return ransac.bad_chs_
+
 
     def selectBadChannels(self, run_ransac = True, channel_plots=True, inspect=True, n_epochs=10, n_channels=32, RT = None):
         '''
