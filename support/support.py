@@ -14,7 +14,7 @@ from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
 
-def logPreproc(idx, file, nr_sj = 1, nr_sessions = 1, to_update = None):
+def log_preproc(idx, file, nr_sj = 1, nr_sessions = 1, to_update = None):
 
 	# check whether file exists
 	if os.path.isfile(file):
@@ -201,11 +201,12 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict =
 			beh['eye_bins'][nan_idx[idx_eye]] = 99	
 	
 	# remove trials from beh and eeg objects
+	beh.reset_index(inplace = True)
 	to_drop = np.where(beh['eye_bins'] > eye_thresh)[0]	
+	eeg.drop(to_drop, reason='eye detection')
 	print('Dropped {} trials based on threshold criteria ({})%'.format(to_drop.size, to_drop.size/float(beh['eye_bins'].size)*100))
 	beh.drop(to_drop, inplace = True)
-	beh.reset_index(inplace = True)
-	eeg.drop(to_drop, reason='eye detection')
+	beh.reset_index(inplace = True, drop = True)
 
 	return beh, eeg
 

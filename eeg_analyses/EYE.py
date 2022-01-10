@@ -144,7 +144,7 @@ class EYE(FolderStructure):
 				if start_event in event[1]:
 
 					# adjust trial times such that start_event is at 0 ms
-					print(trial['trackertime'].size)
+					#print(trial['trackertime'].size)
 					if trial['trackertime'].size > 0:
 						tr_times = trial['trackertime'] - event[0]
 
@@ -357,6 +357,7 @@ class EYE(FolderStructure):
 			trial_nrs = np.array([]) # CHECK THIS
 			window_bins = np.array([])# CHECK THIS
 		else:	
+
 			# read eye and beh file (with removed practice trials from .asc file)
 			beh_file = self.FolderTracker(extension = ['beh','raw'], \
 										filename = 'subject-{}_session_{}.csv'.format(sj,session))
@@ -366,7 +367,7 @@ class EYE(FolderStructure):
 			x, y, times = self.getXY(eye, start = start, end = end, start_event = start_event)	
 
 			# create deviation bins for for each trial(after correction for drifts in fixation period)	
-			x, y = self.setXY(x,y, times, drift_correct)
+			x_, y_ = self.setXY(x,y, times, drift_correct)
 			bins, angles = np.array(self.createAngleBins(x,y, 0,3,0.25, 40))
 			# temp test code
 			window_bins = eog_filt( np.vstack(angles), 500, windowsize = 100, windowstep = 10, threshold = 0.5)
@@ -424,7 +425,7 @@ class EYE(FolderStructure):
 					trial_bin.append(b)
 
 			# insert max binning segment or nan (in case of a trial without data)		
-			if trial_bin != []:	
+			if trial_bin:	
 				bins.append(max(trial_bin))		
 			else:
 				bins.append(np.nan)
@@ -1050,7 +1051,7 @@ class SaccadeGlissadeDetection(object):
 				gliss_w_off = gliss_s_off = []
 
 			# if a glissade is detected, get the offset of the glissade
-			if gliss_w_off != []:
+			if gliss_w_off:
 				gliss_off = sac_off + gliss_w_off
 				gliss_off += np.where(np.diff(V[gliss_off:]) >= 0)[0][0] - 1
 	

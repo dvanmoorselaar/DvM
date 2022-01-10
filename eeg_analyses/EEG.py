@@ -38,522 +38,18 @@ from mne.preprocessing import create_eog_epochs, create_ecg_epochs
 from math import ceil, floor
 from autoreject import Ransac, AutoReject
 
-
-class ArtefactReject(FolderStructure):
-    """ Multiple (automatic artefact rejection procedures)
-    Work in progress
-    """
-
-    def __init__(self, z_thresh: float = 4.0, max_bad: int = 5, flt_pad: float = 0, filter_z: bool = True):
-        self.flt_pad = flt_pad
-        self.filter_z = filter_z
-        self.z_thresh = z_thresh
-        self.max_bad = max_bad
-
-    def run_blink_ICA(self, fit_inst, raw, method = 'picard', threshold = 0.9, report  = None):
-
-        # step 1: fit the data
-        ica = self.fit_ICA(fit_inst, method = 'picard')
-
-        # step 2: select the blink component (assumed to be component 1)
-        eog_epochs, eog_inds, eog_scores = self.automated_ica_blink_selection(ica, raw, threshold = threshold)
-        ica.exclude = [eog_inds[0]]
-
-        if report is not None:
-            report.add_ica(
-                ica=ica,
-                title='ICA blink cleaning',
-                picks=range(15), 
-                inst=eog_epochs,
-                eog_evoked=eog_epochs.average(),
-                eog_scores=eog_scores[0],
-                )
-
-    def fit_ICA(self, fit_inst, method = 'picard'):
-
-        if method == 'picard':
-            fit_params = dict(fastica_it=5)
-        elif method == 'extended_infomax':
-            fit_params = dict(extended=True)
-        elif method == 'fastica':
-            fit_params = None
-
-        #logging.info('started fitting ICA')
-        picks = mne.pick_types(fit_inst.info, eeg=True, exclude='bads')
-        ica = ICA(n_components=picks.size, method=method, fit_params = fit_params, random_state=97)
-  
-        # do actual fitting
-        ica.fit(fit_inst, picks=picks)
-
-        return ica
-
-    def automated_ica_blink_selection(self, ica, raw, threshold = 0.9):
-
-        pick_eog = mne.pick_types(raw.info, meg=False, eeg=False, ecg=False,
-                                eog=True)
-        ch_names = [raw.info['ch_names'][pick] for pick in pick_eog]
-
-        if pick_eog.any():
-            # create blink epochs
-            eog_epochs = create_eog_epochs(raw, ch_name=ch_names,
-                                        baseline=(None, -0.2),
-                                        tmin=-0.5, tmax=0.5)
-
-            eog_inds, eog_scores = ica.find_bads_eog(
-                eog_epochs, threshold=threshold)
-
-        else:
-            eog_epochs = None
-            eog_inds = list()
-            print('No EOG channel is present. Cannot automate IC detection '
-                'for EOG')
-
-        return eog_epochs, eog_inds, eog_scores
-
-    def manual_check_ica(self, ica, eog_inds):
-        
-        time.sleep(5)
-        tcflush(sys.stdin, TCIFLUSH)
-        print('You are preprocessing subject {}, session {}'.format(self.sj, self.session))
-        conf = input(
-            'Advanced detection selected component(s) {}. Do you agree (y/n)'.format(eog_inds))
-        if conf == 'n':
-            eog_inds = []
-            nr_comp = input(
-                'How many components do you want to select (<10)?')
-            for i in range(int(nr_comp)):
-                eog_inds.append(
-                    int(input('What is component nr {}?'.format(i + 1))))
-
-        ica.exclude = eog_inds
-
-        return ica
-
-
-    def apply_ICA(self, ica, picks):
-
-        # remove selected component
-        ica.apply(self, exclude=picks)
-
-    def visualize_blinks(self, raw):
-    
-        eog_epochs = create_eog_epochs(raw, ch_name = ['V_up', 'V_do', 'Fp1','Fpz','Fp2'],  baseline=(-0.5, -0.2))
-        eog_epochs.plot_image(combine='mean')
-        plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-                epochs.sj), epochs.session, 'ica'], filename=f'raw_blinks_combined.pdf'))
-
-        eog_epochs.average().plot_joint()
-        plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-                epochs.sj), epochs.session, 'ica'], filename=f'raw_blinks_topo.pdf'))
-
-
-    def plot_heat_map_auto_repair(self):
-
-        idx = np.argwhere(np.all(heat_map[..., :] == 1, axis=1))
-
-    def plot_auto_repair(self, epochs, bad_epochs, cleaned_epochs):
-
-        # show bad epochs
-        all_epochs = np.arange(len(epochs))
-        all_epochs = np.delete(all_epochs, bad_epochs)
-        for plot, title in zip([bad_epochs, cleaned_epochs, all_epochs], ['bad_epochs', 'cleaned_epochs', 'all_epochs']):
-            epochs[plot].average().plot(spatial_colors = True, gfp = True)
-            plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-                        epochs.sj), epochs.session], filename=f'{title}.pdf'))
-            plt.close()
-       
-    def iterative_interpolation(self, epochs, elecs_z, noise_inf, z_thresh, band_pass):
-        
-
-        channels = np.array(epochs.info['ch_names'])
-        self.heat_map = np.zeros((len(noise_inf), channels.size))
-        # track bad and cleaned epochs
-        bad_epochs, cleaned_epochs = [], []
-        for i, event in enumerate(noise_inf):
-            bad_epoch = epochs[event[0]]
-            # search for bad channels in detected artefact periods
-            z = np.concatenate([elecs_z[event[0]][:,slice_[0]] for slice_ in event[1:]], axis = 1)
-            # limit interpolation to 'max_bad' noisiest channels 
-            interp_chs = channels[np.argsort(z.mean(axis = 1))[-self.max_bad:]][::-1]
-
-            for ch in interp_chs:
-                # update heat map
-                self.heat_map[i,  np.where(channels == ch)] = 1
-                bad_epoch.info['bads'] = [ch]
-                bad_epoch.interpolate_bads()
-                epochs._data[event[0]] = bad_epoch._data
-                # repeat preprocesing after interpolation to check whether epoch is now 'clean'
-                Z_, _, _, _ = self.preprocess_epochs(epochs[event[0]], band_pass = band_pass)
-
-                if not np.any(abs(Z_) > z_thresh):
-                    # epoch no longer marked as bad
-                    break
-
-            if ch == interp_chs[-1]:
-                self.heat_map[i] += 1
-                bad_epochs.append(event[0])
-            else:
-                cleaned_epochs.append(event[0])
-
-        return epochs, bad_epochs, cleaned_epochs
-
-    def auto_repair_noise(self, epochs: mne.Epochs, band_pass: list =[110, 140], z_thresh: float = 4.0):
-
-        # z score data (after hilbert transform)
-        Z, elecs_z, z_thresh, times = self.preprocess_epochs(epochs, band_pass = band_pass)
-
-        # mark noise epochs
-        noise_inf = self.mark_bads(Z,z_thresh,times)
-        
-        # clean epochs
-        bad_epochs, cleaned_epochs = self.iterative_interpolation(epochs, elecs_z, noise_inf, z_thresh, band_pass)
-        self.plot_auto_repair(epochs, bad_epochs, cleaned_epochs)
-
-        return bad_epochs, cleaned_epochs
-
-        print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
-        bad_eegs = self[bad_epochs]
-        idx_bads = bad_eegs.selection
-        # display bad eegs with 50mV range
-        bad_eegs.plot(
-            n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
-        plt.show()
-        plt.close()
-        missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection],dtype = int)
-        logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
-                        missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
-        bad_epochs = np.delete(bad_epochs, missing)   
-
-        
-
-
-
-    def preprocess_epochs(self, epochs: mne.Epochs, band_pass: list =[110, 140]):       
-
-        # set params
-        flt_pad = self.flt_pad
-        times = epochs.times
-        tmin, tmax = epochs.tmin, epochs.tmax
-        sfreq = epochs.info['sfreq']
-
-        # filter data, apply hilbert (limited to 'good' EEG channels) and smooth the data (using defaults)
-        X = self.apply_hilbert(epochs, band_pass[0], band_pass[1])
-        X = self.box_smoothing(X, sfreq)
-
-        # z score data (while ignoring flt_pad samples) using default settings
-        mask = np.logical_and(tmin + self.flt_pad <= times, times <= tmax - self.flt_pad)
-        Z, elecs_z, z_thresh = self.z_score_data(X, self.z_thresh, mask, (self.filter_z, sfreq))
-
-        # control for filter padding
-        time_idx = epochs.time_as_index([tmin + flt_pad, tmax - flt_pad])
-        Z = Z[:, slice(*time_idx)]
-        elecs_z = elecs_z[:,:,slice(*time_idx)]
-        times = times[slice(*time_idx)]
-
-        return Z, elecs_z, z_thresh, times
-
-    def apply_hilbert(self, epochs: mne.Epochs, lower_band: int = 110, upper_band: int = 140) -> np.array:
-        """
-        Takes an mne epochs object as input and returns the eeg data after Hilbert transform
-
-        Args:
-            epochs (mne.Epochs): mne epochs object before muscle artefact detection
-            lower_band (int, optional): Lower limit of the bandpass filter. Defaults to 110.
-            upper_band (int, optional): Upper limit of the bandpass filter. Defaults to 140.
-
-        Returns:
-            X (np.array): eeg data after applying hilbert transform within the given frequency band
-        """
-
-        # exclude channels that are marked as overall bad
-        epochs.pick_types(eeg=True, exclude='bads')
-
-        # filter data and apply Hilbert
-        epochs.filter(lower_band, upper_band, fir_design='firwin', pad='reflect_limited')    
-        epochs.apply_hilbert(envelope=True)
-
-        # get data
-        X = epochs.get_data()
-
-        return X
-
-    def filt_pad(self, X: np.array, pad_length: int) -> np.array:
-        """
-        performs padding (using local mean method) on the data, i.e., adds samples before and after the data
-        TODO: MOVE to signal processing folder (see https://github.com/fieldtrip/fieldtrip/blob/master/preproc/ft_preproc_padding.m))
-
-        Args:
-            X (np.array):  2-dimensional array [nr_elec X nr_time]
-            pad_length (int): number of samples that will be padded
-
-        Returns:
-            X (np.array): 2-dimensional array with padded data [nr_elec X nr_time]
-        """
-
-        # set number of pad samples        
-        pre_pad = int(min([pad_length, floor(X.shape[1]) / 2.0]))
-
-        # get local mean on both sides
-        edge_left = X[:, :pre_pad].mean(axis=1)
-        edge_right = X[:, -pre_pad:].mean(axis=1)
-
-        # pad data
-        X = np.concatenate((np.tile(edge_left.reshape(X.shape[0], 1), pre_pad), X, np.tile(
-            edge_right.reshape(X.shape[0], 1), pre_pad)), axis=1)
-
-        return X
-
-    def box_smoothing(self, X: np.array, sfreq: float, boxcar: float = 0.2) -> np.array:
-        """
-        performs boxcar smoothing with specified length. Modified version of ft_preproc_smooth as
-        implemented in the FieldTrip toolbox (https://www.fieldtriptoolbox.org)
-
-        Args:
-            X (np.array): 3-dimensional array [nr_epoch X nr_elec X nr_time]
-            sfreq (float): sampling frequency
-            boxcar (float, optional): parameter that determines the length of the filter kernel. Defaults to 0.2 (optimal accrding to fieldtrip documentation).
-
-        Returns:
-            np.array: [description]
-        """
-
-        # create smoothing kernel
-        pad = int(round(boxcar * sfreq))
-        # make sure that kernel has an odd number of samples
-        if pad % 2 == 0:
-            pad += 1
-        kernel = np.ones(pad) / pad
-
-        # padding and smoothing functions expect 2-d input (nr_elec X nr_time)
-        pad_length = int(ceil(pad / 2))
-        for i, x in enumerate(X):
-            # pad the data 
-            x = self.filt_pad(x, pad_length = pad_length)
-
-            # smooth the data
-            x_smooth = sp.signal.convolve2d(
-                                    x, kernel.reshape(1, kernel.shape[0]), 'same')
-            X[i] = x_smooth[:, pad_length:(x_smooth.shape[1] - pad_length)]
- 
-        return X
-
-    def z_score_data(self, X: np.array, z_thresh: int = 4, mask: np.array = None, filter_z: tuple = (False, 512)) -> Tuple[np.array, np.array, float]:
-        """
-        Z scores input data over the second dimension (i.e., electrodes). The z threshold, which is used to mark artefact segments,
-        is then calculated using a data driven approach, where the upper limit of the 'bandwith' of obtained z scores is added 
-        to the provided default threshold. Also returns z scored data per electrode which can be used during iterative automatic cleaning
-        procedure.
-
-        Args:
-            X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
-            z_thresh (int, optional): starting z value cut off. Defaults to 4.
-            mask (np.array, optional): a boolean array that masks out time points such that they are excluded during z scoring. Note these datapoints are 
-            still returned in Z_n and elecs_z (see below).
-            filter_z (tuple, optional): prevents false-positive transient peaks by low-pass filtering
-            the resulting z-score time series at 4 Hz. Note: Should never be used without filter padding the data. 
-            Second argument in the tuple specifies the sampling frequency. Defaults to False, i.e., no filtering.
-
-        Returns:
-            Z_n (np.array):  2-dimensional array of normalized z scores across electrodes[trial repeats by time points].
-            elecs_z (np.array): 3-dimensional array of z scores data per sample [trial repeats by electrodes by time points].
-            z_thresh (float): z_score theshold used to mark segments of muscle artefacts
-        """
-
-        # set params
-        nr_epoch, nr_elec, nr_time = X.shape
-
-        # get the data and z_score over electrodes
-        X = X.swapaxes(0,1).reshape(nr_elec,-1) 
-        X_z = zscore(X, axis = 1) 
-        if mask is not None:
-            mask = np.tile(mask, nr_epoch)
-            X_z[:, mask] = zscore(X[:,mask], axis = 1) 
-
-        # reshape to get get epoched data in terms of z scores
-        elecs_z = X_z.reshape(nr_elec, nr_epoch,-1).swapaxes(0,1)
-
-        # normalize z_score
-        Z_n = X_z.sum(axis = 0)/sqrt(nr_elec) 
-        if mask is not None:
-            Z_n[mask] = X_z[:,mask].sum(axis = 0)/sqrt(nr_elec) 
-        if filter_z[0]:
-            Z_n = filter_data(Z_n, filter_z[1], None, 4, pad='reflect_limited') 
-
-        # adjust threshold (data driven) 
-        if mask is None:
-            mask = np.ones(Z_n.size, dtype = bool)  
-        z_thresh += np.median(Z_n[mask]) + abs(Z_n[mask].min() - np.median(Z_n[mask])) 
-        
-        # transform back into epochs
-        Z_n = Z_n.reshape(nr_epoch, -1) 
-
-        return Z_n, elecs_z, z_thresh
-
-    def mark_bads(self, Z: np.array, z_thresh: float, times: np.array) -> list:
-        """
-        Marks which epochs contain samples that exceed the data driven z threshold (as set by z_score_data).
-        Outputs a list with marked epochs. Per marked epoch alongside the index, a slice of the artefact, the start and end point and the duration
-        of the artefact are saved
-
-        Args:
-            Z (np.array): 2-dimensional array of normalized z scores across electrodes [trial repeats by time points]
-            z_thresh (float): z_score theshold used to mark segments of muscle artefacts
-            times (np.array): sample time points
-
-        Returns:
-            noise_events (list): indices of  marked epochs. Per epoch time information of each artefact is logged
-            [idx, (artefact slice, start_time, end_time, duration)]
-        """
-
-        # start with empty  list
-        noise_events = []
-        # loop over each epoch
-        for ep, x in enumerate(Z):
-            # mask noise samples
-            noise_mask = abs(x) > z_thresh
-            # get start and end point of continuous noise segments
-            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:]))
-            if noise_mask[0]:
-                starts = np.insert(starts, 0, 0)
-            ends = np.argwhere((noise_mask[:-1] & ~noise_mask[1:])) + 1
-            # update noise_events
-            if starts.size > 0:
-                starts = np.hstack(starts)
-                if ends.size == 0:
-                    ends = np.array([times.size-1])
-                else:
-                    ends = np.hstack(ends)
-                ep_noise = [ep] + [(slice(s, e), times[s],times[e], abs(times[e] - times[s])) for s,e in zip(starts, ends)]
-                noise_events.append(ep_noise)
-
-        return noise_events
-
-
-
-    def automatic_artifact_detection(self, z_thresh=4, band_pass=[110, 140], plot=True, inspect=True):
-        """ Detect artifacts> modification of FieldTrip's automatic artifact detection procedure 
-        (https://www.fieldtriptoolbox.org/tutorial/automatic_artifact_rejection/). 
-        Artifacts are detected in three steps:
-        1. Filtering the data within specified frequency range
-        2. Z-transforming the filtered data across channels and normalize it over channels
-        3. Threshold the accumulated z-score
-
-        Counter to fieldtrip the z_threshold is ajusted based on the noise level within the data
-        Note: all data included for filter padding is now taken into consideration to calculate z values
-
-        Afer running this function, Epochs contains information about epeochs marked as bad (self.marked_epochs)
-        
-        Arguments:
-            
-        Keyword Arguments:
-            z_thresh {float|int} -- Value that is added to difference between median 
-                    and min value of accumulated z-score to obtain z-threshold
-            band_pass {list} --  Low and High frequency cutoff for band_pass filter
-            plot {bool} -- If True save detection plots (overview of z scores across epochs, 
-                    raw signal of channel with highest z score, z distributions, 
-                    raw signal of all electrodes)
-            inspect {bool} -- If True gives the opportunity to overwrite selected components
-        """
-        
-        # select data for artifact rejection
-        sfreq = self.info['sfreq']
-        self_copy = self.copy() 
-        self_copy.pick_types(eeg=True, exclude='bads')
-
-        #filter data and apply Hilbert
-        self_copy.filter(band_pass[0], band_pass[1], fir_design='firwin', pad='reflect_limited') 
-        #self_copy.filter(band_pass[0], band_pass[1], method='iir', iir_params=dict(order=6, ftype='butter'))    
-        self_copy.apply_hilbert(envelope=True)
-
-        # get the data and apply box smoothing
-        data = self_copy.get_data()
-        nr_epochs = data.shape[0]
-        for i in range(data.shape[0]):
-            data[i] = self.boxSmoothing(data[i])
-
-        # get the data and z_score over electrodes
-        data = data.swapaxes(0,1).reshape(data.shape[1],-1) 
-        z_score = zscore(data, axis = 1) # check whether axis is correct!!!!!!!!!!!
-
-        # z score per electrode and time point (adjust number of electrodes)
-        elecs_z = z_score.reshape(nr_epochs, 64, -1)
-
-        # normalize z_score
-        z_score = z_score.sum(axis = 0)/sqrt(data.shape[0]) 
-        #z_score = filter_data(z_score, self.info['sfreq'], None, 4, pad='reflect_limited') 
-
-        # adjust threshold (data driven)    
-        z_thresh += np.median(z_score) + abs(z_score.min() - np.median(z_score)) 
-        
-        # transform back into epochs
-        z_score = z_score.reshape(nr_epochs, -1) 
-
-        # control for filter padding
-        if self.flt_pad > 0:
-            idx_ep = self.time_as_index([self.tmin + self.flt_pad, self.tmax - self.flt_pad])
-            z_score = z_score[:, slice(*idx_ep)]
-            elecs_z
-
-        # mark bad epochs
-        bad_epochs = []
-        noise_events = []
-        cnt = 0
-        for ep, X in enumerate(z_score):
-            # get start, endpoint and duration in ms per continuous artefact
-            noise_mask = X > z_thresh
-            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:]))
-            ends = np.argwhere((noise_mask[:-1] & ~noise_mask[1:])) + 1
-            ep_noise = [(slice(s[0], e[0]), self.times[s][0],self.times[e][0], abs(self.times[e][0] - self.times[s][0])) for s,e in zip(starts, ends)]
-            noise_events.append(ep_noise)
-            noise_smp = np.where(X > z_thresh)[0]
-            if noise_smp.size > 0:
-                bad_epochs.append(ep)
-
-        if inspect:
-            print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
-            bad_eegs = self[bad_epochs]
-            idx_bads = bad_eegs.selection
-            # display bad eegs with 50mV range
-            bad_eegs.plot(
-                n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
-            plt.show()
-            plt.close()
-            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection],dtype = int)
-            logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
-                            missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
-            bad_epochs = np.delete(bad_epochs, missing)
-        
-        if plot:
-            plt.figure(figsize=(10, 10))
-            with sns.axes_style('dark'):
-
-                plt.subplot(111, xlabel='samples', ylabel='z_value',
-                            xlim=(0, z_score.size), ylim=(-20, 40))
-                plt.plot(np.arange(0, z_score.size), z_score.flatten(), color='b')
-                plt.plot(np.arange(0, z_score.size),
-                         np.ma.masked_less(z_score.flatten(), z_thresh), color='r')
-                plt.axhline(z_thresh, color='r', ls='--')
-
-                plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-                    self.sj), self.session], filename='automatic_artdetect.pdf'))
-                plt.close()
-
-        # drop bad epochs and save list of dropped epochs
-        self.drop_beh = bad_epochs
-        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
-            self.sj), self.session], filename='noise_epochs.txt'), bad_epochs)
-        print('{} epochs dropped ({}%)'.format(len(bad_epochs),
-                                               100 * round(len(bad_epochs) / float(len(self)), 2)))
-        logging.info('{} epochs dropped ({}%)'.format(
-            len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2)))
-        self.drop(np.array(bad_epochs), reason='art detection ecg')
-        logging.info('{} epochs left after artifact detection'.format(len(self)))
-
-        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
-                   ['Artifact detection z threshold set to {}. \n{} epochs dropped ({}%)'.
-                    format(round(z_thresh, 1), len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2))], fmt='%.100s')
-
-        return z_thresh
+def blockPrinting(func):
+    def func_wrapper(*args, **kwargs):
+        # block all printing to the console
+        sys.stdout = open(os.devnull, 'w')
+        # call the method in question
+        value = func(*args, **kwargs)
+        # enable all printing to the console
+        sys.stdout = sys.__stdout__
+        # pass the return value of the method back
+        return value
+
+    return func_wrapper
 
 class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
     '''
@@ -649,25 +145,25 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         # select eog channels
         eog = self.copy().pick_types(eeg=False, eog=True)
         
-        # rerefence EOG data (vertical and horizontal)
-        idx_v = [eog.ch_names.index(vert) for vert in vEOG]
-        idx_h = [eog.ch_names.index(hor) for hor in hEOG]
+        # # rerefence EOG data (vertical and horizontal)
+        # idx_v = [eog.ch_names.index(vert) for vert in vEOG]
+        # idx_h = [eog.ch_names.index(hor) for hor in hEOG]
 
-        if len(idx_v) == 2:
-            eog._data[idx_v[0]] -= eog._data[idx_v[1]]
-        if len(idx_h) == 2:   
-            eog._data[idx_h[0]] -= eog._data[idx_h[1]]
+        # if len(idx_v) == 2:
+        #     eog._data[idx_v[0]] -= eog._data[idx_v[1]]
+        # if len(idx_h) == 2:   
+        #     eog._data[idx_h[0]] -= eog._data[idx_h[1]]
 
-        print(
-            'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
-        logging.info(
-            'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
+        # print(
+        #     'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
+        # logging.info(
+        #     'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
         
-        # add rereferenced vEOG and hEOG data to self
-        ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
-        eog.rename_channels(ch_mapping)
-        eog.drop_channels([vEOG[1], hEOG[1]])
-        #self.add_channels([eog])
+        # # add rereferenced vEOG and hEOG data to self
+        # ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
+        # eog.rename_channels(ch_mapping)
+        # eog.drop_channels([vEOG[1], hEOG[1]])
+        # #self.add_channels([eog])
 
         # drop ref chans
         self.drop_channels(to_remove)
@@ -831,17 +327,13 @@ class Epochs(mne.Epochs, FolderStructure):
 
     def __init__(self, sj, session, raw, events, event_id, tmin, tmax, flt_pad=True, baseline=(None, None), picks=None, preload=True,
                  reject=None, flat=None, proj=False, decim=1, reject_tmin=None, reject_tmax=None, detrend=None,
-                 on_missing='error', reject_by_annotation=False, verbose=None):
+                 on_missing='error', reject_by_annotation=False, verbose=None, z_thresh = 4):
 
         # check whether a preprocessed folder for the current subject exists,
         # if not make onen
         self.sj = sj
         self.session = str(session)
         self.flt_pad = flt_pad
-        if not os.path.isdir(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(sj), self.session])):
-            os.makedirs(self.FolderTracker(
-                extension=['preprocessing', 'subject-{}'.format(sj), self.session, 'channel_erps']))
-
         tmin, tmax = tmin - flt_pad, tmax + flt_pad
         
         super(Epochs, self).__init__(raw=raw, events=events, event_id=event_id, tmin=tmin, tmax=tmax,
@@ -858,7 +350,7 @@ class Epochs(mne.Epochs, FolderStructure):
     def report_epochs(self, report, title, missing = None):
 
         if missing is not None:
-            report.add_html('epochs and behavior are alligned', title = 'missing trials in beh')
+            report.add_html(missing, title = 'missing trials in beh')
 
         report.add_epochs(self, title=title)
 
@@ -889,6 +381,9 @@ class Epochs(mne.Epochs, FolderStructure):
             when aligning eyetracker data (where it is assumed that eyetracking data and raw behavior contain the same number of trials)
         """
 
+        print('Linking behavior to eeg data')
+        report_str = ''
+
         # read in data file
         beh_file = self.FolderTracker(extension=[
                     'beh', 'raw'], filename='subject-{}_session_{}.csv'.format(self.sj, self.session))
@@ -897,7 +392,8 @@ class Epochs(mne.Epochs, FolderStructure):
         beh = pd.read_csv(beh_file)
         beh = beh[headers]
         if 'practice' in headers:
-            logging.info('{} practice trials removed from behavior'.format(beh[beh.practice == 'yes'].shape[0]))
+            print('{} practice trials removed from behavior'.format(beh[beh.practice == 'yes'].shape[0]))
+            #logging.info('{} practice trials removed from behavior'.format(beh[beh.practice == 'yes'].shape[0]))
             beh = beh[beh.practice == 'no']
             beh = beh.drop(['practice'], axis=1)
         beh_triggers = beh[trigger_header].values 
@@ -906,27 +402,32 @@ class Epochs(mne.Epochs, FolderStructure):
         bdf_triggers = events[self.selection, 2]
         if bdf_remove is not  None:
             self.drop(bdf_remove)
-            logging.info('{} bdf triggers and epochs removed as specified by the user'.format(bdf_remove.size))
+            report_str += '{} bdf triggers removed as specified by the user \n'.format(bdf_remove.size)
+            #logging.info('{} bdf triggers and epochs removed as specified by the user'.format(bdf_remove.size))
             bdf_triggers = np.delete(bdf_triggers, bdf_remove)
 
         # log number of unique triggers
-        unique = np.unique(bdf_triggers)
-        logging.info('{} detected unique triggers (min = {}, max = {})'.
-                        format(unique.size, unique.min(), unique.max()))
+        #unique = np.unique(bdf_triggers)
+        #logging.info('{} detected unique triggers (min = {}, max = {})'.
+        #                format(unique.size, unique.min(), unique.max()))
 
         # make sure trigger info between beh and bdf data matches
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
-        logging.info(f'{nr_miss} trials will be removed from beh file')
 
+        #logging.info(f'{nr_miss} trials will be removed from beh file')
+        if nr_miss > 0:
+            report_str += f'Behavior has {nr_miss} more trials than detected events. The following trial numbers \
+                          will be removed in attempt to fix this: \n'
         # check whether trial info is present in beh file
         if nr_miss > 0 and 'nr_trials' not in beh.columns:
             raise ValueError('Behavior file does not contain a column with trial info named nr_trials. Please adjust')
         elif nr_miss < 0:
+            report_str += 'EEG events are removed in an attempt to align the data. Please inspect your data carefully! \n'
             while nr_miss < 0:
                 # continue to remove bdf triggers until data files are lined up 
                 for i, tr in enumerate(beh_triggers):
-                    if tr != bdf_triggers[i]: # remove trigger from beh_file
+                    if tr != bdf_triggers[i]: # remove trigger from eeg_file
                         bdf_triggers = np.delete(bdf_triggers, i, axis = 0)
                         nr_miss += 1
             # check file sizes
@@ -941,7 +442,8 @@ class Epochs(mne.Epochs, FolderStructure):
                 if tr != beh_triggers[i]: # remove trigger from beh_file
                     miss = beh['nr_trials'].iloc[i]
                     missing_trials.append(i)
-                    logging.info(f'Removed trial {miss} from beh file,because no matching trigger exists in bdf file')
+                    report_str += f'{miss}, '
+                    #logging.info(f'Removed trial {miss} from beh file,because no matching trigger exists in bdf file')
                     beh.drop(beh.index[i], inplace=True)
                     beh_triggers = np.delete(beh_triggers, i, axis = 0)
                     nr_miss -= 1
@@ -954,18 +456,23 @@ class Epochs(mne.Epochs, FolderStructure):
                 # drop the last items from the beh file
                 missing_trials = np.hstack((missing_trials, beh['nr_trials'].iloc[-nr_miss:].values))
                 beh.drop(beh.index[-nr_miss:], inplace=True)
-                logging.info('Removed last {} trials because no matches detected'.format(nr_miss))         
+                #logging.info('Removed last {} trials because no matches detected'.format(nr_miss))    
+                report_str += f'\n Removed final {nr_miss} trials from behavior to allign data. Please inspect your data carefully!'     
                 nr_miss = 0
       
         # keep track of missing trials to allign eye tracking data (if available)   
         missing = np.array(missing_trials)  
         beh.reset_index(inplace = True)
 
-        # log number of matches between beh and bdf    
-        logging.info('{} matches between beh and epoched data out of {}'.
-            format(sum(beh[trigger_header].values == bdf_triggers), bdf_triggers.size))   
+        # add behavior to epochs object
+        self.metadata = beh
 
-        return beh, missing
+        # log number of matches between beh and bdf    
+        #logging.info('{} matches between beh and epoched data out of {}'.
+        #    format(sum(beh[trigger_header].values == bdf_triggers), bdf_triggers.size))  
+        report_str += '\n {} matches between beh and epoched data out of {}'.format(sum(beh[trigger_header].values == bdf_triggers), bdf_triggers.size) 
+
+        return missing, report_str
 
     def autoRepair(self):
         '''
@@ -1359,6 +866,44 @@ class Epochs(mne.Epochs, FolderStructure):
  
         return data
 
+    def link_eye(self, eye_info, missing, vEOG, hEOG):
+
+        # select eog channels
+        eog = self.copy().pick_types(eeg=False, eog=True)
+
+        # # rerefence EOG data (vertical and horizontal)
+        idx_v = [eog.ch_names.index(vert) for vert in vEOG]
+        idx_h = [eog.ch_names.index(hor) for hor in hEOG]
+
+        if len(idx_v) == 2:
+            eog._data[idx_v[0]] -= eog._data[idx_v[1]]
+        if len(idx_h) == 2:   
+            eog._data[idx_h[0]] -= eog._data[idx_h[1]]
+
+        print(
+            'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
+        logging.info(
+            'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
+        
+        # # add rereferenced vEOG and hEOG data to self
+        ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
+        eog.rename_channels(ch_mapping)
+        eog.drop_channels([vEOG[1], hEOG[1]])
+        self.add_channels([eog])
+
+        # CODE FOR EYETRACKER DATA 
+
+        EO = EYE(sfreq = eye_info['sfreq'], viewing_dist = eye_info['viewing_dist'], 
+                 screen_res = eye_info['screen_res'], screen_h = eye_info['screen_h'])
+        # do binning based on eye-tracking data (if eyetracker data exists)
+        eye_bins, window_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
+                                int((self.tmin + self.flt_pad + eye_info['tracker_shift'])*1000), int((self.tmax - self.flt_pad + eye_info['tracker_shift'])*1000),
+                                drift_correct = (-200,0), start_event = eye_info['start_event'], extension = eye_info['tracker_ext'])
+        
+        if missing.size > 0:
+            eye_bins = np.delete(eye_bins, missing)
+
+        self.metadata['eye_bins'] = eye_bins
 
     def detectEye(self, missing, events, nr_events, time_window, threshold=20, windowsize=100, windowstep=10, channel='HEOG', tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500, screen_res = (1680, 1050), viewing_dist = 60, screen_h = 29):
         '''
@@ -1559,6 +1104,27 @@ class Epochs(mne.Epochs, FolderStructure):
         logging.info(
             'The following components were removed from raw eeg with ica: {}'.format(eog_inds))
 
+    def save_preprocessed(self, preproc_name, combine_sessions: bool = True):
+        
+        # save eeg
+        self.save(self.FolderTracker(extension=[
+                    'processed'], 
+                    filename=f'subject-{self.sj}_ses-{self.session}_{preproc_name}-epo.fif'), 
+                    split_size='2GB', overwrite = True)
+
+        # check whether individual sessions need to be combined
+        if combine_sessions and int(self.session) != 1:
+            all_eeg = []
+            for i in range(int(self.session)):
+                session = i + 1
+                all_eeg.append(mne.read_epochs(self.FolderTracker(extension=[
+                               'processed'], 
+                               filename=f'subject-{self.sj}_ses-{session}_{preproc_name}-epo.fif')))
+            
+            all_eeg = mne.concatenate_epochs(all_eeg)
+            all_eeg.save(self.FolderTracker(extension=[
+                         'processed'], filename=f'subject-{self.sj}_all_{preproc_name}-epo.fif'), 
+                        split_size='2GB', overwrite = True)
         
     def link_behavior(self, beh: pd.DataFrame, combine_sessions: bool = True):
         """
@@ -1638,6 +1204,590 @@ class Epochs(mne.Epochs, FolderStructure):
                         split_size='2GB', overwrite = True)
 
             logging.info('EEG sessions combined')
+
+class ArtefactReject(object):
+    """ Multiple (automatic artefact rejection procedures)
+    Work in progress
+    """
+
+    def __init__(self, z_thresh: float = 4.0, max_bad: int = 5, flt_pad: float = 0, filter_z: bool = True):
+        self.flt_pad = flt_pad
+        self.filter_z = filter_z
+        self.z_thresh = z_thresh
+        self.max_bad = max_bad
+
+    def run_blink_ICA(self, fit_inst, raw, ica_inst, sj ,session, method = 'picard', threshold = 0.9, report  = None, report_path = None):
+
+        # step 1: fit the data
+        ica = self.fit_ICA(fit_inst, method = 'picard')
+
+        # step 2: select the blink component (assumed to be component 1)
+        eog_epochs, eog_inds, eog_scores = self.automated_ica_blink_selection(ica, raw, threshold = threshold)
+        ica.exclude = [eog_inds[0]]
+
+        if report is not None:
+            report.add_ica(
+                ica=ica,
+                title='ICA blink cleaning',
+                picks=range(15), 
+                inst=eog_epochs,
+                eog_evoked=eog_epochs.average(),
+                eog_scores=eog_scores[0],
+                )
+            report.save(report_path, overwrite = True)
+
+        #step 2a: manually check selected component
+        ica = self.manual_check_ica(ica, sj, session)
+
+        # step 3: apply ica
+        ica_inst = self.apply_ICA(ica, ica_inst)
+
+        return ica_inst
+
+    def fit_ICA(self, fit_inst, method = 'picard'):
+
+        if method == 'picard':
+            fit_params = dict(fastica_it=5)
+        elif method == 'extended_infomax':
+            fit_params = dict(extended=True)
+        elif method == 'fastica':
+            fit_params = None
+
+        #logging.info('started fitting ICA')
+        picks = mne.pick_types(fit_inst.info, eeg=True, exclude='bads')
+        ica = ICA(n_components=picks.size-1, method=method, fit_params = fit_params, random_state=97)
+  
+        # do actual fitting
+        ica.fit(fit_inst, picks=picks)
+
+        return ica
+
+    def automated_ica_blink_selection(self, ica, raw, threshold = 0.9):
+
+        pick_eog = mne.pick_types(raw.info, meg=False, eeg=False, ecg=False,
+                                eog=True)
+        ch_names = [raw.info['ch_names'][pick] for pick in pick_eog]
+
+        if pick_eog.any():
+            # create blink epochs
+            eog_epochs = create_eog_epochs(raw, ch_name=ch_names,
+                                        baseline=(None, -0.2),
+                                        tmin=-0.5, tmax=0.5)
+
+            eog_inds, eog_scores = ica.find_bads_eog(
+                eog_epochs, threshold=threshold)
+
+        else:
+            eog_epochs = None
+            eog_inds = list()
+            print('No EOG channel is present. Cannot automate IC detection '
+                'for EOG')
+
+        return eog_epochs, eog_inds, eog_scores
+
+    def manual_check_ica(self, ica, sj, session):
+        
+        time.sleep(5)
+        tcflush(sys.stdin, TCIFLUSH)
+        print('You are preprocessing subject {}, session {}'.format(sj, session))
+        conf = input(
+            'Advanced detection selected component(s) {} (see report). Do you agree (y/n)?'.format(ica.exclude))
+        if conf == 'n':
+            eog_inds = []
+            nr_comp = input(
+                'How many components do you want to select (<10)?')
+            for i in range(int(nr_comp)):
+                eog_inds.append(
+                    int(input('What is component nr {}?'.format(i + 1))))
+
+            ica.exclude = eog_inds
+
+        return ica
+
+
+    def apply_ICA(self, ica, ica_inst):
+
+        # remove selected component
+        ica_inst = ica.apply(ica_inst)
+
+        return ica_inst
+
+    def visualize_blinks(self, raw):
+    
+        eog_epochs = create_eog_epochs(raw, ch_name = ['V_up', 'V_do', 'Fp1','Fpz','Fp2'],  baseline=(-0.5, -0.2))
+        eog_epochs.plot_image(combine='mean')
+        plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                epochs.sj), epochs.session, 'ica'], filename=f'raw_blinks_combined.pdf'))
+
+        eog_epochs.average().plot_joint()
+        plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                epochs.sj), epochs.session, 'ica'], filename=f'raw_blinks_topo.pdf'))
+
+
+    def update_heat_map(self, channels, ch_idx, tr_idx, upd_value):
+
+        self.heat_map[tr_idx,  ch_idx] = upd_value
+        if upd_value == -1: # bad epoch
+            for ch in channels[ch_idx]:
+                self.not_cleaned_info[ch] += 1
+
+        else: # cleaned_epoch
+            for ch in channels[ch_idx]:
+                self.cleaned_info[ch] += 1
+
+    def plot_auto_repair(self, channels):
+
+
+        figs = []
+        # plot heat_map
+        fig, ax = plt.subplots(1)
+        #sns.despine(offset = 10)
+        plt.title('Interpolated electrodes per marked epoch \n (blue is bad epochs, red is cleaned epoch)')
+        ax.imshow(self.heat_map, aspect  = 'auto', cmap = 'bwr', 
+                    interpolation = 'nearest', vmin = -1, vmax = 1)
+        ax.set(xlabel='channel', ylabel='bad epochs')
+        ax.set_xticks(np.arange(channels.size))
+        ax.set_xticklabels(channels, fontsize=6, rotation = 90)
+        
+        figs.append(fig)
+
+        # plot histogram of bad channels
+        clean_df = pd.DataFrame.from_dict(self.cleaned_info, orient = 'index', columns=['count'])
+        clean_df = clean_df.loc[(clean_df != 0).any(axis=1)]
+        if clean_df.size > 0: # marked at least one bad epoch
+            fig, ax = plt.subplots(1)
+            sns.despine(offset = 10)
+            plt.title('Electrode count per cleaned epoch')          
+            ax.barh(np.arange(clean_df.values.size), np.hstack(clean_df.values))
+            ax.set_yticks(np.arange(clean_df.values.size)) 
+            ax.set_yticklabels(clean_df.index, fontsize=5)
+            figs.append(fig)
+
+        noise_df = pd.DataFrame.from_dict(self.not_cleaned_info, orient = 'index', columns=['count'])
+        noise_df = noise_df.loc[(noise_df != 0).any(axis=1)]
+        if noise_df.size > 0: # marked at least one bad epoch
+            fig, ax = plt.subplots(1)
+            sns.despine(offset = 10)
+            plt.title('Electrode count per noise epoch (i.e., not cleaned')          
+            ax.barh(np.arange(noise_df.values.size), np.hstack(noise_df.values))
+            ax.set_yticks(np.arange(noise_df.values.size)) 
+            ax.set_yticklabels(noise_df.index, fontsize=5)
+            figs.append(fig)
+
+        return figs
+
+        # # show bad epochs
+        # all_epochs = np.arange(len(epochs))
+        # all_epochs = np.delete(all_epochs, bad_epochs)
+        # for plot, title in zip([bad_epochs, cleaned_epochs, all_epochs], ['bad_epochs', 'cleaned_epochs', 'all_epochs']):
+        #     epochs[plot].average().plot(spatial_colors = True, gfp = True)
+        #     plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+        #                 epochs.sj), epochs.session], filename=f'{title}.pdf'))
+        #     plt.close()
+
+    @blockPrinting   
+    def iterative_interpolation(self, epochs, elecs_z, noise_inf, z_thresh, band_pass):
+        
+        # keep track of channel info for plotting purposes
+        picks = mne.pick_types(epochs.info, eeg=True, exclude= 'bads')
+        channels = np.array(epochs.info['ch_names'])[picks]
+        self.heat_map = np.zeros((len(noise_inf), channels.size))
+        self.cleaned_info = dict.fromkeys(channels, 0)
+        self.not_cleaned_info = dict.fromkeys(channels, 0)
+
+        # track bad and cleaned epochs
+        bad_epochs, cleaned_epochs = [], []
+        for i, event in enumerate(noise_inf):
+            bad_epoch = epochs[event[0]]
+            # search for bad channels in detected artefact periods
+            z = np.concatenate([elecs_z[event[0]][:,slice_[0]] for slice_ in event[1:]], axis = 1)
+            # limit interpolation to 'max_bad' noisiest channels 
+            ch_idx = np.argsort(z.mean(axis = 1))[-self.max_bad:][::-1]
+            interp_chs = channels[ch_idx]
+
+            for c, ch in enumerate(interp_chs):
+                # update heat map
+                bad_epoch.info['bads'] += [ch]
+                bad_epoch.interpolate_bads(exclude = epochs.info['bads'])
+                epochs._data[event[0]] = bad_epoch._data
+                # repeat preprocesing after interpolation to check whether epoch is now 'clean'
+                Z_, _, _, _ = self.preprocess_epochs(epochs[event[0]], band_pass = band_pass)
+
+                if not np.any(abs(Z_) > z_thresh):
+                    # epoch no longer marked as bad
+                    break
+
+            if ch == interp_chs[-1]:
+                self.update_heat_map(channels, ch_idx[:c+1], i, -1)
+                bad_epochs.append(event[0])
+            else:
+                self.update_heat_map(channels, ch_idx[:c+1], i, 1)
+                cleaned_epochs.append(event[0])
+
+        return epochs, bad_epochs, cleaned_epochs
+
+    def auto_repair_noise(self, epochs: mne.Epochs, band_pass: list =[110, 140], z_thresh: float = 4.0, report: mne.Report = None):
+
+        # z score data (after hilbert transform)
+        Z, elecs_z, z_thresh, times = self.preprocess_epochs(epochs, band_pass = band_pass)
+
+        # mark noise epochs
+        noise_inf = self.mark_bads(Z,z_thresh,times)
+        
+        # clean epochs
+        epochs, bad_epochs, cleaned_epochs = self.iterative_interpolation(epochs, elecs_z, noise_inf, z_thresh, band_pass)
+        picks = mne.pick_types(epochs.info, eeg=True, exclude= 'bads')
+        
+        # drop bad epochs     
+        epochs.drop(np.array(bad_epochs), reason='Artefact reject')
+
+        if report is not None:
+            channels = np.array(epochs.info['ch_names'])[picks]
+            report.add_figure(self.plot_auto_repair(channels), title = 'Iterative z cleaning procedure')
+
+
+        return epochs, z_thresh, report
+
+        print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
+        bad_eegs = self[bad_epochs]
+        idx_bads = bad_eegs.selection
+        # display bad eegs with 50mV range
+        bad_eegs.plot(
+            n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
+        plt.show()
+        plt.close()
+        missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection],dtype = int)
+        logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
+                        missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
+        bad_epochs = np.delete(bad_epochs, missing)   
+
+    def preprocess_epochs(self, epochs: mne.Epochs, band_pass: list =[110, 140]):       
+
+        # set params
+        flt_pad = self.flt_pad
+        times = epochs.times
+        tmin, tmax = epochs.tmin, epochs.tmax
+        sfreq = epochs.info['sfreq']
+
+        # filter data, apply hilbert (limited to 'good' EEG channels) and smooth the data (using defaults)
+        X = self.apply_hilbert(epochs, band_pass[0], band_pass[1])
+        X = self.box_smoothing(X, sfreq)
+
+        # z score data (while ignoring flt_pad samples) using default settings
+        mask = np.logical_and(tmin + self.flt_pad <= times, times <= tmax - self.flt_pad)
+        Z, elecs_z, z_thresh = self.z_score_data(X, self.z_thresh, mask, (self.filter_z, sfreq))
+
+        # control for filter padding
+        time_idx = epochs.time_as_index([tmin + flt_pad, tmax - flt_pad])
+        Z = Z[:, slice(*time_idx)]
+        elecs_z = elecs_z[:,:,slice(*time_idx)]
+        times = times[slice(*time_idx)]
+
+        return Z, elecs_z, z_thresh, times
+
+    def apply_hilbert(self, epochs: mne.Epochs, lower_band: int = 110, upper_band: int = 140) -> np.array:
+        """
+        Takes an mne epochs object as input and returns the eeg data after Hilbert transform
+
+        Args:
+            epochs (mne.Epochs): mne epochs object before muscle artefact detection
+            lower_band (int, optional): Lower limit of the bandpass filter. Defaults to 110.
+            upper_band (int, optional): Upper limit of the bandpass filter. Defaults to 140.
+
+        Returns:
+            X (np.array): eeg data after applying hilbert transform within the given frequency band
+        """
+
+        # exclude channels that are marked as overall bad
+        epochs_ = epochs.copy()
+        epochs_.pick_types(eeg=True, exclude='bads')
+
+        # filter data and apply Hilbert
+        epochs_.filter(lower_band, upper_band, fir_design='firwin', pad='reflect_limited')    
+        epochs_.apply_hilbert(envelope=True)
+
+        # get data
+        X = epochs_.get_data()
+        del epochs_
+
+        return X
+
+    def filt_pad(self, X: np.array, pad_length: int) -> np.array:
+        """
+        performs padding (using local mean method) on the data, i.e., adds samples before and after the data
+        TODO: MOVE to signal processing folder (see https://github.com/fieldtrip/fieldtrip/blob/master/preproc/ft_preproc_padding.m))
+
+        Args:
+            X (np.array):  2-dimensional array [nr_elec X nr_time]
+            pad_length (int): number of samples that will be padded
+
+        Returns:
+            X (np.array): 2-dimensional array with padded data [nr_elec X nr_time]
+        """
+
+        # set number of pad samples        
+        pre_pad = int(min([pad_length, floor(X.shape[1]) / 2.0]))
+
+        # get local mean on both sides
+        edge_left = X[:, :pre_pad].mean(axis=1)
+        edge_right = X[:, -pre_pad:].mean(axis=1)
+
+        # pad data
+        X = np.concatenate((np.tile(edge_left.reshape(X.shape[0], 1), pre_pad), X, np.tile(
+            edge_right.reshape(X.shape[0], 1), pre_pad)), axis=1)
+
+        return X
+
+    def box_smoothing(self, X: np.array, sfreq: float, boxcar: float = 0.2) -> np.array:
+        """
+        performs boxcar smoothing with specified length. Modified version of ft_preproc_smooth as
+        implemented in the FieldTrip toolbox (https://www.fieldtriptoolbox.org)
+
+        Args:
+            X (np.array): 3-dimensional array [nr_epoch X nr_elec X nr_time]
+            sfreq (float): sampling frequency
+            boxcar (float, optional): parameter that determines the length of the filter kernel. Defaults to 0.2 (optimal accrding to fieldtrip documentation).
+
+        Returns:
+            np.array: [description]
+        """
+
+        # create smoothing kernel
+        pad = int(round(boxcar * sfreq))
+        # make sure that kernel has an odd number of samples
+        if pad % 2 == 0:
+            pad += 1
+        kernel = np.ones(pad) / pad
+
+        # padding and smoothing functions expect 2-d input (nr_elec X nr_time)
+        pad_length = int(ceil(pad / 2))
+        for i, x in enumerate(X):
+            # pad the data 
+            x = self.filt_pad(x, pad_length = pad_length)
+
+            # smooth the data
+            x_smooth = sp.signal.convolve2d(
+                                    x, kernel.reshape(1, kernel.shape[0]), 'same')
+            X[i] = x_smooth[:, pad_length:(x_smooth.shape[1] - pad_length)]
+ 
+        return X
+
+    def z_score_data(self, X: np.array, z_thresh: int = 4, mask: np.array = None, filter_z: tuple = (False, 512)) -> Tuple[np.array, np.array, float]:
+        """
+        Z scores input data over the second dimension (i.e., electrodes). The z threshold, which is used to mark artefact segments,
+        is then calculated using a data driven approach, where the upper limit of the 'bandwith' of obtained z scores is added 
+        to the provided default threshold. Also returns z scored data per electrode which can be used during iterative automatic cleaning
+        procedure.
+
+        Args:
+            X (np.array): 3-dimensional array of [trial repeats by electrodes by time points].
+            z_thresh (int, optional): starting z value cut off. Defaults to 4.
+            mask (np.array, optional): a boolean array that masks out time points such that they are excluded during z scoring. Note these datapoints are 
+            still returned in Z_n and elecs_z (see below).
+            filter_z (tuple, optional): prevents false-positive transient peaks by low-pass filtering
+            the resulting z-score time series at 4 Hz. Note: Should never be used without filter padding the data. 
+            Second argument in the tuple specifies the sampling frequency. Defaults to False, i.e., no filtering.
+
+        Returns:
+            Z_n (np.array):  2-dimensional array of normalized z scores across electrodes[trial repeats by time points].
+            elecs_z (np.array): 3-dimensional array of z scores data per sample [trial repeats by electrodes by time points].
+            z_thresh (float): z_score theshold used to mark segments of muscle artefacts
+        """
+
+        # set params
+        nr_epoch, nr_elec, nr_time = X.shape
+
+        # get the data and z_score over electrodes
+        X = X.swapaxes(0,1).reshape(nr_elec,-1) 
+        X_z = zscore(X, axis = 1) 
+        if mask is not None:
+            mask = np.tile(mask, nr_epoch)
+            X_z[:, mask] = zscore(X[:,mask], axis = 1) 
+
+        # reshape to get get epoched data in terms of z scores
+        elecs_z = X_z.reshape(nr_elec, nr_epoch,-1).swapaxes(0,1)
+
+        # normalize z_score
+        Z_n = X_z.sum(axis = 0)/sqrt(nr_elec) 
+        if mask is not None:
+            Z_n[mask] = X_z[:,mask].sum(axis = 0)/sqrt(nr_elec) 
+        if filter_z[0]:
+            Z_n = filter_data(Z_n, filter_z[1], None, 4, pad='reflect_limited') 
+
+        # adjust threshold (data driven) 
+        if mask is None:
+            mask = np.ones(Z_n.size, dtype = bool)  
+        z_thresh += np.median(Z_n[mask]) + abs(Z_n[mask].min() - np.median(Z_n[mask])) 
+        
+        # transform back into epochs
+        Z_n = Z_n.reshape(nr_epoch, -1) 
+
+        return Z_n, elecs_z, z_thresh
+
+    def mark_bads(self, Z: np.array, z_thresh: float, times: np.array) -> list:
+        """
+        Marks which epochs contain samples that exceed the data driven z threshold (as set by z_score_data).
+        Outputs a list with marked epochs. Per marked epoch alongside the index, a slice of the artefact, the start and end point and the duration
+        of the artefact are saved
+
+        Args:
+            Z (np.array): 2-dimensional array of normalized z scores across electrodes [trial repeats by time points]
+            z_thresh (float): z_score theshold used to mark segments of muscle artefacts
+            times (np.array): sample time points
+
+        Returns:
+            noise_events (list): indices of  marked epochs. Per epoch time information of each artefact is logged
+            [idx, (artefact slice, start_time, end_time, duration)]
+        """
+
+        # start with empty  list
+        noise_events = []
+        # loop over each epoch
+        for ep, x in enumerate(Z):
+            # mask noise samples
+            noise_mask = abs(x) > z_thresh
+            # get start and end point of continuous noise segments
+            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:]))
+            if noise_mask[0]:
+                starts = np.insert(starts, 0, 0)
+            ends = np.argwhere((noise_mask[:-1] & ~noise_mask[1:])) + 1
+            # update noise_events
+            if starts.size > 0:
+                starts = np.hstack(starts)
+                if ends.size == 0:
+                    ends = np.array([times.size-1])
+                else:
+                    ends = np.hstack(ends)
+                ep_noise = [ep] + [(slice(s, e), times[s],times[e], abs(times[e] - times[s])) for s,e in zip(starts, ends)]
+                noise_events.append(ep_noise)
+
+        return noise_events
+
+    def automatic_artifact_detection(self, z_thresh=4, band_pass=[110, 140], plot=True, inspect=True):
+        """ Detect artifacts> modification of FieldTrip's automatic artifact detection procedure 
+        (https://www.fieldtriptoolbox.org/tutorial/automatic_artifact_rejection/). 
+        Artifacts are detected in three steps:
+        1. Filtering the data within specified frequency range
+        2. Z-transforming the filtered data across channels and normalize it over channels
+        3. Threshold the accumulated z-score
+
+        Counter to fieldtrip the z_threshold is ajusted based on the noise level within the data
+        Note: all data included for filter padding is now taken into consideration to calculate z values
+
+        Afer running this function, Epochs contains information about epeochs marked as bad (self.marked_epochs)
+        
+        Arguments:
+            
+        Keyword Arguments:
+            z_thresh {float|int} -- Value that is added to difference between median 
+                    and min value of accumulated z-score to obtain z-threshold
+            band_pass {list} --  Low and High frequency cutoff for band_pass filter
+            plot {bool} -- If True save detection plots (overview of z scores across epochs, 
+                    raw signal of channel with highest z score, z distributions, 
+                    raw signal of all electrodes)
+            inspect {bool} -- If True gives the opportunity to overwrite selected components
+        """
+        
+        # select data for artifact rejection
+        sfreq = self.info['sfreq']
+        self_copy = self.copy() 
+        self_copy.pick_types(eeg=True, exclude='bads')
+
+        #filter data and apply Hilbert
+        self_copy.filter(band_pass[0], band_pass[1], fir_design='firwin', pad='reflect_limited') 
+        #self_copy.filter(band_pass[0], band_pass[1], method='iir', iir_params=dict(order=6, ftype='butter'))    
+        self_copy.apply_hilbert(envelope=True)
+
+        # get the data and apply box smoothing
+        data = self_copy.get_data()
+        nr_epochs = data.shape[0]
+        for i in range(data.shape[0]):
+            data[i] = self.boxSmoothing(data[i])
+
+        # get the data and z_score over electrodes
+        data = data.swapaxes(0,1).reshape(data.shape[1],-1) 
+        z_score = zscore(data, axis = 1) # check whether axis is correct!!!!!!!!!!!
+
+        # z score per electrode and time point (adjust number of electrodes)
+        elecs_z = z_score.reshape(nr_epochs, 64, -1)
+
+        # normalize z_score
+        z_score = z_score.sum(axis = 0)/sqrt(data.shape[0]) 
+        #z_score = filter_data(z_score, self.info['sfreq'], None, 4, pad='reflect_limited') 
+
+        # adjust threshold (data driven)    
+        z_thresh += np.median(z_score) + abs(z_score.min() - np.median(z_score)) 
+        
+        # transform back into epochs
+        z_score = z_score.reshape(nr_epochs, -1) 
+
+        # control for filter padding
+        if self.flt_pad > 0:
+            idx_ep = self.time_as_index([self.tmin + self.flt_pad, self.tmax - self.flt_pad])
+            z_score = z_score[:, slice(*idx_ep)]
+            elecs_z
+
+        # mark bad epochs
+        bad_epochs = []
+        noise_events = []
+        cnt = 0
+        for ep, X in enumerate(z_score):
+            # get start, endpoint and duration in ms per continuous artefact
+            noise_mask = X > z_thresh
+            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:]))
+            ends = np.argwhere((noise_mask[:-1] & ~noise_mask[1:])) + 1
+            ep_noise = [(slice(s[0], e[0]), self.times[s][0],self.times[e][0], abs(self.times[e][0] - self.times[s][0])) for s,e in zip(starts, ends)]
+            noise_events.append(ep_noise)
+            noise_smp = np.where(X > z_thresh)[0]
+            if noise_smp.size > 0:
+                bad_epochs.append(ep)
+
+        if inspect:
+            print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
+            bad_eegs = self[bad_epochs]
+            idx_bads = bad_eegs.selection
+            # display bad eegs with 50mV range
+            bad_eegs.plot(
+                n_epochs=5, n_channels=data.shape[1], scalings=dict(eeg = 50))
+            plt.show()
+            plt.close()
+            missing = np.array([list(idx_bads).index(idx) for idx in idx_bads if idx not in bad_eegs.selection],dtype = int)
+            logging.info('Manually ignored {} epochs out of {} automatically selected({}%)'.format(
+                            missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
+            bad_epochs = np.delete(bad_epochs, missing)
+        
+        if plot:
+            plt.figure(figsize=(10, 10))
+            with sns.axes_style('dark'):
+
+                plt.subplot(111, xlabel='samples', ylabel='z_value',
+                            xlim=(0, z_score.size), ylim=(-20, 40))
+                plt.plot(np.arange(0, z_score.size), z_score.flatten(), color='b')
+                plt.plot(np.arange(0, z_score.size),
+                         np.ma.masked_less(z_score.flatten(), z_thresh), color='r')
+                plt.axhline(z_thresh, color='r', ls='--')
+
+                plt.savefig(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+                    self.sj), self.session], filename='automatic_artdetect.pdf'))
+                plt.close()
+
+        # drop bad epochs and save list of dropped epochs
+        self.drop_beh = bad_epochs
+        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(
+            self.sj), self.session], filename='noise_epochs.txt'), bad_epochs)
+        print('{} epochs dropped ({}%)'.format(len(bad_epochs),
+                                               100 * round(len(bad_epochs) / float(len(self)), 2)))
+        logging.info('{} epochs dropped ({}%)'.format(
+            len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2)))
+        self.drop(np.array(bad_epochs), reason='art detection ecg')
+        logging.info('{} epochs left after artifact detection'.format(len(self)))
+
+        np.savetxt(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj), self.session], filename='automatic_artdetect.txt'),
+                   ['Artifact detection z threshold set to {}. \n{} epochs dropped ({}%)'.
+                    format(round(z_thresh, 1), len(bad_epochs), 100 * round(len(bad_epochs) / float(len(self)), 2))], fmt='%.100s')
+
+        return z_thresh
+
 
 if __name__ == '__main__':
     print('Please run preprocessing via a project script')
