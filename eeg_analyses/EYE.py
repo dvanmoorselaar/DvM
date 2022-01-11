@@ -368,7 +368,8 @@ class EYE(FolderStructure):
 
 			# create deviation bins for for each trial(after correction for drifts in fixation period)	
 			x_, y_ = self.setXY(x,y, times, drift_correct)
-			bins, angles = np.array(self.createAngleBins(x,y, 0,3,0.25, 40))
+			bins, angles = self.createAngleBins(x,y, 0,3,0.25, 40)
+			bins = np.array(bins)
 			# temp test code
 			window_bins = eog_filt( np.vstack(angles), 500, windowsize = 100, windowstep = 10, threshold = 0.5)
 			trial_nrs = beh['nr_trials'].values
@@ -991,7 +992,7 @@ class SaccadeGlissadeDetection(object):
 			if seg.size <= ceil(min_sac/6.0 * self.sfreq): continue
 			
 			# check whether the peak is already included in the previous saccade (is possible for glissades) 
-			if nr_sac > 0 and gliss_off != []:
+			if nr_sac > 0 and gliss_off:
 				if len(set(seg).intersection(np.hstack((saccade_idx,glissade_idx)))) > 0:
 					continue
 
@@ -1053,7 +1054,10 @@ class SaccadeGlissadeDetection(object):
 			# if a glissade is detected, get the offset of the glissade
 			if gliss_w_off:
 				gliss_off = sac_off + gliss_w_off
-				gliss_off += np.where(np.diff(V[gliss_off:]) >= 0)[0][0] - 1
+				diff = np.diff(V[gliss_off:])
+				#TODO: check whether this fix is ok
+				if sum(diff > 0) > 0:
+					gliss_off += np.where(diff >= 0)[0][0] - 1
 	
 				if np.isnan(V[sac_off:gliss_off]).any() or \
 					(gliss_off - sac_off)/ self.sfreq > 2 * min_fix:
