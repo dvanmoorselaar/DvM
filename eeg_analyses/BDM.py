@@ -859,15 +859,15 @@ class BDM(FolderStructure):
 						if not self.scale['standardize'] and tr_t == 0 and n == 0 and self.run_info == 1: # filthy hack to prevent multiple warning messages
 							warnings.warn('It is recommended to standardize the data before applying PCA correction', UserWarning)
 
-						pca = PCA(n_components=self.pca_components, svd_solver = 'full').fit(Xtr_)
+						pca = PCA(n_components=self.pca_components[0], svd_solver = 'full').fit(Xtr_)
 						Xtr_ = pca.transform(Xtr_)
 						Xte_ = pca.transform(Xte_)
 					elif self.pca_components[0] and self.pca_components[1] == 'all':
 						# pca is fitted on all data rather than training data only
 						if self.scale['standardize']:
-							scaler = StandardScaler(with_std = self.scale['scale']).fit(X)
-							X = scaler.transform(X)
-						pca = PCA(n_components=self.pca_components, svd_solver = 'full').fit(X)
+							scaler = StandardScaler(with_std = self.scale['scale']).fit(X[:,:,tr_t])
+							X[:,:,tr_t] = scaler.transform(X[:,:,tr_t])
+						pca = PCA(n_components=self.pca_components[0], svd_solver = 'full').fit(X[:,:,tr_t])
 						Xtr_ = pca.transform(Xtr_)
 						Xte_ = pca.transform(Xte_)						
 						
