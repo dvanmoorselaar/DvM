@@ -396,6 +396,7 @@ class Epochs(mne.Epochs, FolderStructure):
             #logging.info('{} practice trials removed from behavior'.format(beh[beh.practice == 'yes'].shape[0]))
             beh = beh[beh.practice == 'no']
             beh = beh.drop(['practice'], axis=1)
+            beh.reset_index(inplace = True, drop = True)
         beh_triggers = beh[trigger_header].values 
         
         # get eeg triggers in epoched order ()
@@ -454,7 +455,7 @@ class Epochs(mne.Epochs, FolderStructure):
             if beh_triggers.size > bdf_triggers.size and stop:
 
                 # drop the last items from the beh file
-                missing_trials = np.hstack((missing_trials, beh['nr_trials'].iloc[-nr_miss:].values))
+                missing_trials = np.hstack((missing_trials, beh.index[-nr_miss:].values))
                 beh.drop(beh.index[-nr_miss:], inplace=True)
                 #logging.info('Removed last {} trials because no matches detected'.format(nr_miss))    
                 report_str += f'\n Removed final {nr_miss} trials from behavior to allign data. Please inspect your data carefully!'     
@@ -901,7 +902,7 @@ class Epochs(mne.Epochs, FolderStructure):
                                 drift_correct = (-200,0), start_event = eye_info['start_event'], extension = eye_info['tracker_ext'])
         
         if missing.size > 0:
-            eye_bins = np.delete(eye_bins, missing)
+            eye_bins = np.delete(eye_bins, np.array(missing, dtype = int))
 
         self.metadata['eye_bins'] = eye_bins
 

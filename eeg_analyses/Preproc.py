@@ -21,7 +21,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     sj_info = sj_info[str(sj)] if str(sj) in sj_info.keys() else {'bad_chs': []}
     
     # initiate report
-    report_file = FS.FolderTracker(extension=['preprocessing', 'report'], 
+    report_file = FS.FolderTracker(extension=['preprocessing', 'report', preproc_name], 
                      filename=f'sj_{sj}_ses_{session}.html')
     report = mne.Report(title='preprocessing overview', subject = f'{sj}_{session}')
 

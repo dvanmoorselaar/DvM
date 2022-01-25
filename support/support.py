@@ -44,10 +44,13 @@ def trial_exclusion(beh, eeg, excl_factor):
 	for m in mask: 
 		mask[0] = np.logical_or(mask[0],m)
 	mask = mask[0]
+
 	if mask.sum() > 0:
-		beh.drop(np.where(mask)[0], inplace = True)
-		beh.reset_index(inplace = True)
-		eeg.drop(np.where(mask)[0])
+		beh.reset_index(inplace = True, drop = True)
+		to_drop = np.where(mask)[0]
+		eeg.drop(to_drop, reason='trial exclusion')
+		beh.drop(to_drop, inplace = True)
+		beh.reset_index(inplace = True, drop = True)	
 		print('Dropped {} trials after specifying excl_factor'.format(sum(mask)))
 		print('NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN')
 	else:
