@@ -217,7 +217,7 @@ class BDM(FolderStructure):
 
 		return output
 
-	def averageTrials(self, X: np.array, beh: pd.DataFrame, cnd_header: str = 'condition') -> Tuple[np.array, pd.DataFrame]:
+	def average_trials(self, X: np.array, beh: pd.DataFrame, cnd_header: str = 'condition') -> Tuple[np.array, pd.DataFrame]:
 		"""
 		Reduces shape of eeg data by averaging across trials. The number of trials used for averaging is set as a BDM parameter.
 		Averaging is done across all unique labels and conditions as specified in the behavior info. Remaining trials after grouping 
@@ -408,7 +408,7 @@ class BDM(FolderStructure):
 		# select train data and labels
 		tr_idx = np.hstack([random.sample(list(np.where(tr_labels == label)[0]),  k = min_tr) 
 									for label in labels])
-		Xtr = X[tr_idx]
+		Xtr = X[train_idx[tr_idx]]
 		Ytr = tr_labels[tr_idx]
 
 		# match test and train labels (if not already the case)
@@ -420,10 +420,10 @@ class BDM(FolderStructure):
 		min_tr = min(label_counts)	
 
 		# select test data and labels
-		test_idx = np.hstack([random.sample(list(np.where(test_labels == label)[0]),  k = min_tr) 
+		te_idx = np.hstack([random.sample(list(np.where(test_labels == label)[0]),  k = min_tr) 
 									for label in labels])
-		Xte = X[test_idx]
-		Yte = test_labels[test_idx]
+		Xte = X[np.array(test_idx)[te_idx]]
+		Yte = test_labels[te_idx]
 
 		# add new (empty) axis to data so that cross time decoding can index (arteficial) folds
 		Xtr = Xtr[np.newaxis, ...]
@@ -560,12 +560,13 @@ class BDM(FolderStructure):
 
 		# read in data and set labels
 		X, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
+
 		if self.avg_trials > 1:
 			# TODO: allow averaging across multiple factors
-			X, beh = self.averageTrials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
+			X, beh = self.average_trials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
 		y = beh[self.to_decode]
 
-		# check input variables to set decoing type
+		# check input variables to set decoding type
 		if isinstance(cnds[0], list):
 			# if cnds consists of list, decoding is done across conditions
 			self.cross = True
@@ -575,7 +576,7 @@ class BDM(FolderStructure):
 			# split train and test conditions
 			# TODO: allow for multiple test conditions
 			cnds, test_cnd = cnds
-			max_tr = []
+			max_tr = [1]
 		else:
 			self.cross = False 
 			max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)] 
@@ -588,7 +589,7 @@ class BDM(FolderStructure):
 		# set up dict to save decoding scores
 		classification = {'info': {'elec': self.elec_oi, 'times':times}}
 
-		if collapse :
+		if collapse:
 			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
 	
