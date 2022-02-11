@@ -26,6 +26,7 @@ from scipy.stats import zscore
 
 from typing import Optional, Generic, Union, Tuple, Any
 from termios import tcflush, TCIFLUSH
+from autoreject import get_rejection_threshold
 from eeg_analyses.EYE import *
 from math import sqrt
 from IPython import embed
@@ -75,8 +76,6 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
        
 
         return report
-
-
 
     def replaceChannel(self, sj, session, replace):
         '''
@@ -1211,34 +1210,79 @@ class ArtefactReject(object):
     Work in progress
     """
 
-    def __init__(self, z_thresh: float = 4.0, max_bad: int = 5, flt_pad: float = 0, filter_z: bool = True):
+    def __init__(self, 
+                z_thresh: float = 4.0, max_bad: int = 5, 
+                flt_pad: float = 0, filter_z: bool = True):
+
         self.flt_pad = flt_pad
         self.filter_z = filter_z
         self.z_thresh = z_thresh
         self.max_bad = max_bad
 
-    def run_blink_ICA(self, fit_inst, raw, ica_inst, sj ,session, method = 'picard', threshold = 0.9, report  = None, report_path = None):
+    def run_blink_ICA(self, fit_inst: Union[mne.Epochs, mne.io.Raw], 
+                    raw: mne.io.Raw, ica_inst: Union[mne.Epochs, mne.io.Raw] , 
+                    sj: int, session: int, method: str = 'picard', 
+                    threshold: float = 0.9, 
+                    report: Optional[mne.Report] = None, 
+                    report_path: Optional[str] = None) -> Any:
+        """
+        Semi-automated ICA correction procedure to remove blinks. Fitting and
+        applying of ICA can be done on independent data. After automatic 
+        component selectin, there is the possibility to manual overwrite the 
+        selected component after visual inspection of the report.
 
-        # step 1: fit the data
+        Args:
+            fit_inst ([mne.Epochs, mne.Raw]): Raw or Epochs mne object used to 
+            fit ICA
+            raw (mne.Raw): Raw object used for blink detection
+            ica_inst ([mne.Epochs, mne.Raw]): Raw or Epochs mne object to be 
+            cleaned
+            sj (int): subject number
+            session (int): session number
+            method (str, optional): ICA method. Defaults to 'picard'.
+            threshold (float, optional): threshold used for blink detection in 
+            eog. Defaults to 0.9.
+            report ([mne.Report], optional): mne report containing ica 
+            overview. Defaults to None.
+            report_path ([type], optional): file location of the report. 
+            Defaults to Optional[str]=None.
+
+        Returns:
+            [type]: [description]
+        """
+        # step 1: fit the data (after dropping noise trials) 
+        str(type(fit_inst))[-3] == 's':
+            reject = get_rejection_threshold(fit_inst, ch_types = 'eeg')
+            fit_inst.drop_bad(reject)
         ica = self.fit_ICA(fit_inst, method = 'picard')
 
         # step 2: select the blink component (assumed to be component 1)
-        eog_epochs, eog_inds, eog_scores = self.automated_ica_blink_selection(ica, raw, threshold = threshold)
+        (eog_epochs, 
+        eog_inds, 
+        eog_scores) = self.automated_ica_blink_selection(ica, raw, threshold)
         ica.exclude = [eog_inds[0]]
+        manual_correct = True
 
-        if report is not None:
-            report.add_ica(
-                ica=ica,
-                title='ICA blink cleaning',
-                picks=range(15), 
-                inst=eog_epochs,
-                eog_evoked=eog_epochs.average(),
-                eog_scores=eog_scores[0],
-                )
-            report.save(report_path, overwrite = True)
+        while True:
+            if report is not None:
+                report.add_ica(
+                    ica=ica,
+                    title='ICA blink cleaning',
+                    picks=range(15), 
+                    inst=eog_epochs,
+                    eog_evoked=eog_epochs.average(),
+                    eog_scores=eog_scores[0],
+                    )
+                report.save(report_path, overwrite = True)
 
-        #step 2a: manually check selected component
-        ica = self.manual_check_ica(ica, sj, session)
+            #step 2a: manually check selected component
+            if manual_correct:
+                ica = self.manual_check_ica(ica, sj, session)
+                if ica.exclude != [eog_inds[0]]:
+                    report.remove(title='ICA blink cleaning')
+                    manual_correct = False
+            else:
+                break
 
         # step 3: apply ica
         ica_inst = self.apply_ICA(ica, ica_inst)
