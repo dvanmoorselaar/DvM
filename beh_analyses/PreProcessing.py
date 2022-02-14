@@ -155,7 +155,7 @@ class PreProcessing(object):
 		- - - -
 
 		"""
-		
+
 		for f, filt in enumerate(to_filter):
 		
 			# filter RTs step 1

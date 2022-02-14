@@ -221,8 +221,8 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         self._data[-1, :] -= binary # Make universal
    
-        events = mne.find_events(self, stim_channel=None, consecutive=consecutive, min_duration=min_duration)    
-
+        events = mne.find_events(self, stim_channel=None, consecutive=consecutive, min_duration=min_duration)  
+ 
         # Check for consecutive 
         if not consecutive:
             spoke_idx = []
@@ -1251,7 +1251,7 @@ class ArtefactReject(object):
             [type]: [description]
         """
         # step 1: fit the data (after dropping noise trials) 
-        str(type(fit_inst))[-3] == 's':
+        if str(type(fit_inst))[-3] == 's':
             reject = get_rejection_threshold(fit_inst, ch_types = 'eeg')
             fit_inst.drop_bad(reject)
         ica = self.fit_ICA(fit_inst, method = 'picard')
@@ -1281,6 +1281,8 @@ class ArtefactReject(object):
                 if ica.exclude != [eog_inds[0]]:
                     report.remove(title='ICA blink cleaning')
                     manual_correct = False
+                else:
+                    break
             else:
                 break
 
@@ -1300,7 +1302,8 @@ class ArtefactReject(object):
 
         #logging.info('started fitting ICA')
         picks = mne.pick_types(fit_inst.info, eeg=True, exclude='bads')
-        ica = ICA(n_components=picks.size-1, method=method, fit_params = fit_params, random_state=97)
+        ica = ICA(n_components=picks.size-1, method=method, 
+                fit_params = fit_params, random_state=97)
   
         # do actual fitting
         ica.fit(fit_inst, picks=picks)
@@ -1334,9 +1337,11 @@ class ArtefactReject(object):
         
         time.sleep(5)
         tcflush(sys.stdin, TCIFLUSH)
-        print('You are preprocessing subject {}, session {}'.format(sj, session))
+        print('You are preprocessing subject {}, \
+              session {}'.format(sj, session))
         conf = input(
-            'Advanced detection selected component(s) {} (see report). Do you agree (y/n)?'.format(ica.exclude))
+            'Advanced detection selected component(s) \
+                {} (see report). Do you agree (y/n)?'.format(ica.exclude))
         if conf == 'n':
             eog_inds = []
             nr_comp = input(
@@ -1380,44 +1385,76 @@ class ArtefactReject(object):
             for ch in channels[ch_idx]:
                 self.cleaned_info[ch] += 1
 
-    def plot_auto_repair(self, channels):
 
-
-        figs = []
+    def plot_heat_map(self, channels):
+        
+        
         # plot heat_map
+        bad = sum(np.any(self.heat_map == -1, axis = 1))
+        cleaned = sum(np.any(self.heat_map == 1, axis = 1))
         fig, ax = plt.subplots(1)
-        #sns.despine(offset = 10)
-        plt.title('Interpolated electrodes per marked epoch \n (blue is bad epochs, red is cleaned epoch)')
+        sns.despine(offset = 10)
+        plt.title(f'Interpolated electrodes per marked epoch \n \
+            (blue is bad epochs (N= {bad}), red is cleaned epoch \
+            (N = {cleaned}))')
         ax.imshow(self.heat_map, aspect  = 'auto', cmap = 'bwr', 
                     interpolation = 'nearest', vmin = -1, vmax = 1)
         ax.set(xlabel='channel', ylabel='bad epochs')
         ax.set_xticks(np.arange(channels.size))
         ax.set_xticklabels(channels, fontsize=6, rotation = 90)
+
+        return fig
+
+    def plot_hist_auto_repair(self, plot_type):
+
+        if plot_type == 'cleaned':
+            info = self.cleaned_info  
+        else:
+            info = self.not_cleaned_info 
+
+        df = pd.DataFrame.from_dict(self.cleaned_info, orient = 'index', 
+                                        columns=['count'])
+        df = df.loc[(df != 0).any(axis=1)]
         
-        figs.append(fig)
-
-        # plot histogram of bad channels
-        clean_df = pd.DataFrame.from_dict(self.cleaned_info, orient = 'index', columns=['count'])
-        clean_df = clean_df.loc[(clean_df != 0).any(axis=1)]
-        if clean_df.size > 0: # marked at least one bad epoch
+        if df.size > 0: # marked at least one bad/cleaned epoch
             fig, ax = plt.subplots(1)
             sns.despine(offset = 10)
-            plt.title('Electrode count per cleaned epoch')          
-            ax.barh(np.arange(clean_df.values.size), np.hstack(clean_df.values))
-            ax.set_yticks(np.arange(clean_df.values.size)) 
-            ax.set_yticklabels(clean_df.index, fontsize=5)
-            figs.append(fig)
+            plt.title(f'Electrode count per {plot_type} epoch')          
+            ax.barh(np.arange(df.values.size), np.hstack(df.values))
+            ax.set_yticks(np.arange(df.values.size)) 
+            ax.set_yticklabels(df.index, fontsize=5)
+        else:
+            fig = False
 
-        noise_df = pd.DataFrame.from_dict(self.not_cleaned_info, orient = 'index', columns=['count'])
-        noise_df = noise_df.loc[(noise_df != 0).any(axis=1)]
-        if noise_df.size > 0: # marked at least one bad epoch
-            fig, ax = plt.subplots(1)
-            sns.despine(offset = 10)
-            plt.title('Electrode count per noise epoch (i.e., not cleaned')          
-            ax.barh(np.arange(noise_df.values.size), np.hstack(noise_df.values))
-            ax.set_yticks(np.arange(noise_df.values.size)) 
-            ax.set_yticklabels(noise_df.index, fontsize=5)
-            figs.append(fig)
+        return fig
+
+    def plot_z_score_epochs(self, z_score, z_thresh):
+
+        fig, ax = plt.subplots(1)
+        plt.ylabel('accumulated Z')
+        plt.xlabel('sample')
+        plt.plot(np.arange(0, z_score.size), z_score.flatten(), color='b')
+        plt.plot(np.arange(0, z_score.size),
+                np.ma.masked_less(z_score.flatten(), z_thresh), color='r')
+        plt.axhline(z_thresh, color='r', ls='--')
+
+        return fig        
+       
+    def plot_auto_repair(self, channels, z_score, z_thresh):
+
+        figs = []
+
+        # plot 
+        figs.append(self.plot_z_score_epochs(z_score, z_thresh))
+
+        # plot heat map
+        figs.append(self.plot_heat_map(channels))
+
+        # plot histograms
+        for plot in ['bad', 'cleaned']:
+            fig = self.plot_hist_auto_repair(plot)
+            if fig:
+                figs.append(fig)
 
         return figs
 
@@ -1471,16 +1508,26 @@ class ArtefactReject(object):
 
         return epochs, bad_epochs, cleaned_epochs
 
-    def auto_repair_noise(self, epochs: mne.Epochs, band_pass: list =[110, 140], z_thresh: float = 4.0, report: mne.Report = None):
+    def auto_repair_noise(self, epochs: mne.Epochs, 
+                         band_pass: list =[110, 140], 
+                         z_thresh: float = 4.0, report: mne.Report = None):
 
         # z score data (after hilbert transform)
-        Z, elecs_z, z_thresh, times = self.preprocess_epochs(epochs, band_pass = band_pass)
+        (Z, elecs_z, 
+        z_thresh, times) = self.preprocess_epochs(epochs, band_pass)
 
         # mark noise epochs
         noise_inf = self.mark_bads(Z,z_thresh,times)
         
         # clean epochs
-        epochs, bad_epochs, cleaned_epochs = self.iterative_interpolation(epochs, elecs_z, noise_inf, z_thresh, band_pass)
+        nr_bad = len(noise_inf)
+        prc_bad = nr_bad/len(epochs)*100
+        print(f'start iterative cleaning procedure. {nr_bad} epochs marked\
+            ({prc_bad:.1f} %)')
+        (epochs, 
+        bad_epochs, 
+        cleaned_epochs) = self.iterative_interpolation(epochs, elecs_z, 
+                          noise_inf, z_thresh, band_pass)
         picks = mne.pick_types(epochs.info, eeg=True, exclude= 'bads')
         
         # drop bad epochs     
@@ -1488,8 +1535,8 @@ class ArtefactReject(object):
 
         if report is not None:
             channels = np.array(epochs.info['ch_names'])[picks]
-            report.add_figure(self.plot_auto_repair(channels), title = 'Iterative z cleaning procedure')
-
+            report.add_figure(self.plot_auto_repair(channels, Z, z_thresh), 
+                                title = 'Iterative z cleaning procedure')
 
         return epochs, z_thresh, report
 

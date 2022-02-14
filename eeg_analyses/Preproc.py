@@ -75,7 +75,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     report.save(report_file, overwrite = True)
 
     # LINK EYE MOVEMENTS
-    epochs.link_eye(eye_info, missing, vEOG=eog[:2], hEOG=eog[2:])
+    #epochs.link_eye(eye_info, missing, vEOG=eog[:2], hEOG=eog[2:])
 
     # START AUTOMATIC ARTEFACT REJECTION 
     epochs, z_thresh, report = AR.auto_repair_noise(epochs, report = report)

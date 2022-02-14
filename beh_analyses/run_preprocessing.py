@@ -1,7 +1,7 @@
 import os
 
 from IPython import embed 
-from PreProcessing import PreProcessing
+from beh_analyses.PreProcessing import PreProcessing
 
 
 project = 'DT_sim'
@@ -36,6 +36,21 @@ def standardPreProcessing(project, part, factors, labels, to_filter):
 	PP.filter_data(to_filter = to_filter, filter_crit = ' and correct == 1', cnd_sel = False, save = True)
 	PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
 	PP.prep_JASP(agg_func = 'mean', voi = 'RT', data_filter = "RT_filter == True", save = True)
+	PP.save_data_file()
+
+def standard_preproc_beh(project, part, beh_oi, factors, labels, to_filter):
+	'''
+	Function executes standard PreProcessing steps
+	'''
+
+	# execute standard PreProcessing Pipeline
+	
+	PP = PreProcessing(project = project, part = part, factor_headers = factors, factor_labels = labels)
+	PP.create_folder_structure()
+	PP.combine_single_subject_files(save = False)
+	PP.select_data(project_parameters = beh_oi, save = False)
+	PP.filter_data(to_filter = to_filter, filter_crit = ' and correct == 1', cnd_sel = False, save = True)
+	PP.exclude_outliers(criteria = dict(RT = 'RT_filter == True', correct = ''))
 	PP.save_data_file()
 
 if __name__ == '__main__':
