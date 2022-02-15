@@ -336,10 +336,7 @@ if __name__ == '__main__':
 		# ERP ANALYSIS pipeline (flip all electrodes as if all stimuli are presented right)
 		# distractor tuned (no spatial bias)
 		# erp = ERP(eeg, beh, 'dist_loc', (-0.1,0))
-		# erp.selectERPData(time = [-0.1, 0.6], l_filter = 30, excl_factor = None)
-		# erp.topoFlip(left = ['2'], header = 'dist_loc')
-		# erp.ipsiContra(sj = sj, left = ['2'], right = ['6'], l_elec = ['PO7'], conditions = ['pred-no_bias','unpred-no_bias'], cnd_header = 'condition',
-  #                      r_elec = ['PO8'], midline = {'target_loc': [0,4]}, erp_name = 'dist', RT_split = True, permute = 1000)
+ 
 
 
 		# CONTROl ANALYSIS: EYEMOVEMENTS	

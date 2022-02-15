@@ -9,9 +9,11 @@ import mne
 import pickle
 import math
 import warnings
+import copy
 
 import numpy as np
 import pandas as pd
+from typing import Optional, Generic, Union, Tuple, Any
 
 from IPython import embed
 from scipy.fftpack import fft, ifft
@@ -21,62 +23,237 @@ from support.support import select_electrodes, trial_exclusion
 
 class ERP(FolderStructure):
 
-	def __init__(self, eeg, beh, header, baseline, flipped = False):
-		''' 
+	def __init__(self, sj, epochs, beh, header, baseline, 
+				l_filter = None, h_filter = None):
 
-		Arguments
-		- - - - - 
-
-
-		Returns
-		- - - -
-
-		'''
-
-		self.eeg = eeg
+		# if filters are specified, filter data before trial averaging  
+		if l_filter is not None or h_filter is not None:
+			epochs.filter(l_freq = l_filter, h_freq = h_filter)
+		self.sj = sj
+		self.epochs = epochs
 		self.beh = beh
 		self.header = header
 		self.baseline = baseline
-		self.flipped = flipped
 
+	def select_erp_data(self, time_oi: tuple = None, 
+						excl_factor: dict = None) -> Tuple[pd.DataFrame, 
+															mne.Epochs]:
+		"""
+		Selects the data of interest by cropping the data to the time window
+		of interest and excluding a subset of trials
 
-	def selectERPData(self, time, l_filter = None, h_filter = None, excl_factor = None):
-		''' 
+		Args:
+			time_oi (tuple, optional): If specified, epochs are cropped
+			to this time window. Defaults to None.
+			excl_factor (dict, optional): If specified, a subset of trials that 
+			matches the specified criteria is excluded from further analysis
+			(e.g., dict(target_color = ['red']) will exclude all trials 
+			where the target color is red). Defaults to None.
 
-		THIS NEEDS TO BE ADJUSTED FOR TIMINGS
+		Returns:
+			beh: pandas Dataframe
+			epochs: epochs data of interest
+		"""
 
-		Arguments
-		- - - - - 
+		beh = self.beh.copy()
+		epochs = self.epochs.copy()
 
+		# if specified remove trials matching specified criteria
+		if excl_factor is not None:
+			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
 
-		Returns
-		- - - -
+		# if specified select time window of interest
+		if time_oi is not None:
+			epochs =epochs.crop(tmin = time_oi[0],tmax = time_oi[1])    
 
-		'''
- 
-		beh = self.beh
-		EEG = self.eeg
+		return beh, epochs
 
-		# check whether trials need to be excluded
-		if type(excl_factor) == dict: # remove unwanted trials from beh
-			beh, EEG = trial_exclusion(beh, EEG, excl_factor)
+	def create_erps(self, epochs: mne.Epochs, beh: pd.DataFrame,
+				 	idx: np.array = None, erp_name: str = 'all', 
+					RT_split: bool = False):
+		"""
+		Creates evoked objects using mne functionality
 
-		# read in eeg data 
-		if l_filter != None or h_filter != None:
-			EEG.filter(l_freq = l_filter, h_freq = h_filter)
+		Args:
+			epochs (mne.Epochs): mne epochs object
+			beh (pd.DataFrame): behavioral parameters linked to behavior
+			idx (np.array, optional): indices used for trial averaging. 
+			Defaults to None(i.e, include all trials).
+			erp_name (str, optional): filename to save evoked object. 
+			Defaults to 'all'.
+			RT_split (bool, optional): If True data will also be analyzed 
+			seperately for fast and slow trials. Defaults to False.
+		"""
+
+		beh = beh.iloc[idx].copy()
+		epochs = epochs[idx]
+
+		# create evoked objects using mne functionality and save file
+		evoked = epochs.average().apply_baseline(baseline = self.baseline)
+		evoked.save(self.FolderTracker(['erp', self.header],
+										f'{erp_name}-ave.fif'))
+		# 
+		# report = mne.Report(title='Evoked example')
+		# report.add_evokeds(
+		# 	evokeds=evoked,
+		# 	titles=['evoked 1'],	
+		# 	n_time_points=21
+		# )
+		# report.save('report_evoked.html', overwrite=True)
+
+		if RT_split:
+			median_rt = np.median(beh.RT)
+			beh.loc[beh.RT < median_rt, 'RT_split'] = 'fast'
+			beh.loc[beh.RT > median_rt, 'RT_split'] = 'slow'
+			for rt in ['fast', 'slow']:
+				mask = beh['RT_split'] == rt
+				# create evoked objects using mne functionality and save file
+				evoked = eeg[mask].average().apply_baseline(baseline = 
+															self.baseline)
+				evoked.save(self.FolderTracker(['erp', self.header],
+													f'{fname}_{rt}-ave.fif'))
+
+	def flip_topography(self, epochs: mne.Epochs, beh: pd.DataFrame,
+						left: list, header: str, 
+						flip_dict: dict = None) -> mne.Epochs:
+		"""
+		Flips the topography of trials where the stimuli of interest was 
+		presented on the left (i.e. right hemifield). After running this 
+		function it is as if all stimuli are presented right 
+		(i.e. the left hemifield is contralateral relative to the stimulus of
+		interest).
+
+		By default flipping is done on the basis of a Biosemi 64 spatial layout 
+
+		Args:
+			epochs (mne.Epochs): preprocessed epochs object
+			beh (pd.DataFrame): linked behavioral parameters
+			left (list): position labels of trials where the topography will be
+			flipped to the other hemifield
+			header (str): column in behavior that contains position labels to 
+			be flipped
+			flip_dict(dict, optional): Dictionary used to flip topography.
+			Data corresponding to all key value pairs will be flipped 
+			(e.g., flip_dict = dict(FP1 = 'Fp2') will copy the data from Fp1 
+			into Fp2 and vice versa)
+
+		Returns:
+			epochs: epochs with flipped topography for specified trials
+		"""
+
+		picks = mne.pick_types(epochs.info, eeg=True, exclude='bads')   
+		# dictionary to flip topographic layout
+		if flip_dict is None:
+			flip_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8',
+						'F5':'F6','F3':'F4','F1':'F2','FT7':'FT8','FC5':'FC6',
+						'FC3':'FC4','FC1':'FC2','T7':'T8','C5':'C6','C3':'C4',
+						'C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',
+						'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4',
+						'P1':'P2','PO7':'PO8','PO3':'PO4','O1':'O2'}
+
+		idx_l = np.hstack([np.where(beh[header] == l)[0] for l in left])
+
+		# left stimuli are flipped as if presented right
+		pre_flip = np.copy(epochs._data[idx_l][:,picks])
+
+		# do actual flipping
+		print('flipping topography')
+		for l_elec, r_elec in flip_dict.items():
+			l_elec_data = pre_flip[:,epochs.ch_names.index(l_elec)]
+			r_elec_data = pre_flip[:,epochs.ch_names.index(r_elec)]
+			epochs._data[idx_l,epochs.ch_names.index(l_elec)] = r_elec_data
+			epochs._data[idx_l,epochs.ch_names.index(r_elec)] = l_elec_data
+
+		return epochs
+
+	def select_lateralization_idx(self, beh: pd.DataFrame, pos_labels: dict, 
+								  midline:dict ) -> np.array:
+		"""
+		Based on position labels selects only those trial indices where 
+		the stimuli of interest are presented left or right from the 
+		vertical midline. If specified trial selection can be limited
+		to those trials where another stimulus of interest is presented 
+		on the vertical midline. 
+
+		Function can also be used to select non-lateralized trials as the key,
+		value pair of pos_labels determins which trials are ultimately selected 
+
+		Args:
+			beh (pd.DataFrame): DataFrame with behavioral parameters per linked 
+			eepoch
+			pos_labels (dict): Dictionary key specifies the column with 
+			position labels in the beh DataFrame. Values should be a list of
+			all labels that are included in the analysis 
+			(e.g., dict(target_loc = [2,6])) 
+			midline (dict): If specified, selected trials are limited to trials
+			where another stimuli of interest is concurrently presented on the 
+			vertical midline (e.g., dict(dist_loc = [0,2])). Key again 
+			specifies the column of interest. Multiple keys can be specified
+
+		Returns:
+			idx (np.array): selected trial indices
+		"""
+
+		# select all lateralized trials	
+		(header, labels), = pos_labels.items()
+		idx = np.hstack([np.where(beh[header] == l)[0] for l in labels])
+
+		# limit to midline trials
+		if  midline is not  None:
+			idx_m = []
+			for key in midline.keys():
+				idx_m.append(np.hstack([np.where(beh[key] == m)[0] 
+										for m in midline[key]]))
+			idx_m = np.hstack(idx_m)
+			idx = np.intersect1d(idx, idx_m)
+
+		return idx
+
+	def lateralized_erp(self, pos_labels, cnds: dict = None, 
+						midline: dict = None, topo_flip: dict = None,
+						time_oi: tuple = None, excl_factor: dict = None,
+						RT_split: bool = False, name : str = ''):
+
+		# get data
+		beh, epochs = self.select_erp_data(time_oi, excl_factor)
+
+		# check whether left stimuli should be 
+		# artificially transferred to left hemifield
+		if topo_flip is not None:
+			(header, left), = topo_flip.items()
+			epochs = self.flip_topography(epochs, beh,  left,  header)
+		else:
+			print('No topography info specified. It is assumed as if all\
+				stimuli of interest are presented right\
+				(i.e., left  hemifield')
 	
-		# select time window and EEG electrodes
-		EEG = EEG.crop(tmin = time[0],tmax = time[1])    
-		ch_names = EEG.ch_names
+		# select trials of interest (i.e., lateralized stimuli)
+		idx = self.select_lateralization_idx(beh, pos_labels, midline)
 
-		self.eeg = EEG 
+		# loop over all conditions
+		if cnds is None:
+			cnds = ['all_trials']
+		else:
+			(cnd_header, cnds), = cnds.items()
 
-		# store dictionary with variables for plotting
-		plot_dict = {'ch_names': ch_names, 'times': EEG.times, 'info':EEG.info}
+		for cnd in cnds:
+			# set erp name
+			name = f'sj_{self.sj}_{cnd}_{name}'	
 
-		with open(self.FolderTracker(['erp',self.header], filename = 'plot_dict.pickle'.format(self.header)),'wb') as handle:
-			pickle.dump(plot_dict, handle)	
+			# slice condition trials
+			if cnd == 'all_trials':
+				idx_c = idx
+			else:
+				idx_c = np.where(beh[cnd_header] == cnd)[0]
+				idx_c = np.intersect1d(idx, idx_c)
 
+			if idx_c.size == 0:
+				print('no data found for {}'.format(cnd))
+				continue
+
+			self.create_erps(epochs, beh, idx_c, name, RT_split)
+
+	
 
 	@staticmethod	
 	def baselineCorrect(X, times, base_period):
@@ -141,44 +318,7 @@ class ERP(FolderStructure):
 		return max_trial
 
 
-	def topoFlip(self, left , header):
-		''' 
-		Flips the topography of trials where the stimuli of interest was presented 
-		on the left (i.e. right hemifield). After running this function it is as if 
-		all stimuli are presented right (i.e. the left hemifield)
-
-		Arguments
-		- - - - - 
-		left (list): list containing stimulus labels indicating spatial position 
-		header (string): column name used for flipping
-
-		Returns
-		- - - -
-		inst (instance of ERP): The modified instance 
-
-		'''	
-
-		picks = mne.pick_types(self.eeg.info, eeg=True, exclude='bads')   
-		# dictionary to flip topographic layout
-		flip_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8','F5':'F6','F3':'F4',\
-					'F1':'F2','FT7':'FT8','FC5':'FC6','FC3':'FC4','FC1':'FC2','T7':'T8',\
-					'C5':'C6','C3':'C4','C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',\
-					'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4','P1':'P2',\
-					'PO7':'PO8','PO3':'PO4','O1':'O2'}
-
-		idx_l = np.sort(np.hstack([np.where(self.beh[header] == l)[0] for l in left]))
-
-		# left stimuli are flipped as if presented right
-		pre_flip = np.copy(self.eeg._data[idx_l][:,picks])
-
-		# do actual flipping
-		for l_elec, r_elec in flip_dict.items():
-			l_elec_data = pre_flip[:,self.eeg.ch_names.index(l_elec)]
-			r_elec_data = pre_flip[:,self.eeg.ch_names.index(r_elec)]
-			self.eeg._data[idx_l,self.eeg.ch_names.index(l_elec)] = r_elec_data
-			self.eeg._data[idx_l,self.eeg.ch_names.index(r_elec)] = l_elec_data
-
-		self.flipped = True	
+	
 
 	def ipsiContraElectrodeSelection(self):
 		'''
@@ -287,35 +427,7 @@ class ERP(FolderStructure):
 		return d_wave, d_waves_p
 
 
-	def createERP(self, beh, eeg, idx, fname, RT_split = False):
-		"""Uses mne evoked functionality to create and save ERPs
-		
-		Arguments:
-			beh {dataFrame} -- trial specific info
-			eeg {mne object} -- Epochs object MNE
-			idx {array} -- indices of trials of interest
-			fname {str} -- fname to store evoked object
-		
-		Keyword Arguments:
-			RT_split {bool} -- If True data will also be analyzed seperately for fast and slow trials (default: {False})
-		"""
 
-		beh = beh.iloc[idx].copy()
-		eeg = eeg[idx]
-
-		# create evoked objects using mne functionality and save file
-		evoked = eeg.average().apply_baseline(baseline = self.baseline)
-		evoked.save(self.FolderTracker(['erp', self.header],'{}-ave.fif'.format(fname)))
-
-		if RT_split:
-			median_rt = np.median(beh.RT)
-			beh.loc[beh.RT < median_rt, 'RT_split'] = 'fast'
-			beh.loc[beh.RT > median_rt, 'RT_split'] = 'slow'
-			for rt in ['fast', 'slow']:
-				mask = beh['RT_split'] == rt
-				# create evoked objects using mne functionality and save file
-				evoked = eeg[mask].average().apply_baseline(baseline = self.baseline)
-				evoked.save(self.FolderTracker(['erp', self.header],'{}_{}-ave.fif'.format(fname, rt)))
 
 	def conditionERP(self, sj, conditions, cnd_header, erp_name = '', collapsed = True, RT_split = False):
 		'''
@@ -347,6 +459,19 @@ class ERP(FolderStructure):
 				
 				fname = 'sj_{}-{}-{}-{}'.format(sj, erp_name, factor, cnd)
 				self.createERP(self.beh, self.eeg, idx, fname, RT_split = RT_split)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	def ipsiContra(self, sj, left, right, l_elec = ['PO7'], r_elec = ['PO8'], conditions = 'all', cnd_header = 'condition', midline = None, erp_name = '', RT_split = False, permute = False):
 		''' 

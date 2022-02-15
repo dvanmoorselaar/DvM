@@ -49,7 +49,6 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
                 skip_by_annotation='edge')
 
     # report raw
-    
     report = EEG.report_raw(report, events, event_id)
     report.save(report_file, overwrite = True)
 
