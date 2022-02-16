@@ -35,6 +35,31 @@ class ERP(FolderStructure):
 		self.header = header
 		self.baseline = baseline
 
+	def report_erps(self, evoked: mne.Evoked, erp_name: str):
+
+		# set report and condition name
+		name_info = erp_name.split('_')
+		report_name = name_info[-1]
+		report_name = self.FolderTracker(['erp', self.header],
+										f'report_{report_name}.h5')
+		cnd_name = '_'.join(map(str, name_info[:-1]))
+
+		# check whether report exists
+		if os.path.isfile(report_name):
+			with mne.open_report(report_name) as report:
+				# if section exists delete it first
+				report.remove(title=cnd_name)
+				report.add_evokeds(evokeds=evoked,titles=cnd_name,	
+				 				  n_time_points=21)
+			report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
+						overwrite = True)
+		else:
+			report = mne.Report(title='Single subject evoked overview')
+			report.add_evokeds(evokeds=evoked,titles=cnd_name,	
+				 				n_time_points=21)
+			report.save(report_name)
+			report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
+
 	def select_erp_data(self, time_oi: tuple = None, 
 						excl_factor: dict = None) -> Tuple[pd.DataFrame, 
 															mne.Epochs]:
@@ -92,15 +117,10 @@ class ERP(FolderStructure):
 		evoked = epochs.average().apply_baseline(baseline = self.baseline)
 		evoked.save(self.FolderTracker(['erp', self.header],
 										f'{erp_name}-ave.fif'))
-		# 
-		# report = mne.Report(title='Evoked example')
-		# report.add_evokeds(
-		# 	evokeds=evoked,
-		# 	titles=['evoked 1'],	
-		# 	n_time_points=21
-		# )
-		# report.save('report_evoked.html', overwrite=True)
+		# update report
+		self.report_erps(evoked, erp_name)
 
+		# split trials in fast and slow trials based on median RT
 		if RT_split:
 			median_rt = np.median(beh.RT)
 			beh.loc[beh.RT < median_rt, 'RT_split'] = 'fast'
@@ -212,7 +232,7 @@ class ERP(FolderStructure):
 	def lateralized_erp(self, pos_labels, cnds: dict = None, 
 						midline: dict = None, topo_flip: dict = None,
 						time_oi: tuple = None, excl_factor: dict = None,
-						RT_split: bool = False, name : str = ''):
+						RT_split: bool = False, name : str = 'main'):
 
 		# get data
 		beh, epochs = self.select_erp_data(time_oi, excl_factor)
@@ -238,7 +258,7 @@ class ERP(FolderStructure):
 
 		for cnd in cnds:
 			# set erp name
-			name = f'sj_{self.sj}_{cnd}_{name}'	
+			erp_name = f'sj_{self.sj}_{cnd}_{name}'	
 
 			# slice condition trials
 			if cnd == 'all_trials':
@@ -251,9 +271,7 @@ class ERP(FolderStructure):
 				print('no data found for {}'.format(cnd))
 				continue
 
-			self.create_erps(epochs, beh, idx_c, name, RT_split)
-
-	
+			self.create_erps(epochs, beh, idx_c, erp_name, RT_split)
 
 	@staticmethod	
 	def baselineCorrect(X, times, base_period):
