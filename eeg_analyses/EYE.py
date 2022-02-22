@@ -321,6 +321,12 @@ class EYE(FolderStructure):
 		with open(fname ,'wb') as handle:
 			pickle.dump(sac_d, handle)
 
+	def linkeye_to_eeg(self, eye_file, beh_file):
+
+		# read in eye data (linked to behavior)
+		eye, beh = self.readEyeData('', eye_file, [beh_file])
+
+
 	def eyeBinEEG(self, sj, session, start, end, drift_correct = (-300,0), start_event = '', extension = 'asc'):
 		''' 
 

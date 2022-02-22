@@ -866,35 +866,51 @@ class Epochs(mne.Epochs, FolderStructure):
  
         return data
 
-    def link_eye(self, eye_info, missing, vEOG, hEOG):
+    def link_eye(self, eye_info: dict, missing: np.array, 
+                vEOG: list = None, hEOG: list = None):
 
+
+        # if specified rereference external eog electrodes via subtraction
         # select eog channels
         eog = self.copy().pick_types(eeg=False, eog=True)
 
         # # rerefence EOG data (vertical and horizontal)
-        idx_v = [eog.ch_names.index(vert) for vert in vEOG]
-        idx_h = [eog.ch_names.index(hor) for hor in hEOG]
+        ch_names = eog.ch_names
+        idx_v = [ch_names.index(v) for v in vEOG] if vEOG is not None else []
+        idx_h = [ch_names.index(h) for h in hEOG] if hEOG is not None else []
 
+        ch_mapping = {}
         if len(idx_v) == 2:
+            ch_mapping.update({vEOG[0]: 'VEOG'})
             eog._data[idx_v[0]] -= eog._data[idx_v[1]]
-        if len(idx_h) == 2:   
+        if len(idx_h) == 2: 
+            ch_mapping.update({hEOG[0]: 'HEOG'}) 
             eog._data[idx_h[0]] -= eog._data[idx_h[1]]
 
-        print(
-            'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
-        logging.info(
-            'EOG data (VEOG, HEOG) rereferenced with subtraction and renamed EOG channels')
-        
         # # add rereferenced vEOG and hEOG data to self
-        ch_mapping = {vEOG[0]: 'VEOG', hEOG[0]: 'HEOG'}
-        eog.rename_channels(ch_mapping)
-        eog.drop_channels([vEOG[1], hEOG[1]])
-        self.add_channels([eog])
+        if ch_mapping:
+            eog.rename_channels(ch_mapping)
+            eog.drop_channels([vEOG[1], hEOG[1]])
+            self.add_channels([eog])
+            print(
+            'EOG data (VEOG, HEOG) rereferenced with subtraction and \
+            renamed EOG channels')
 
-        # CODE FOR EYETRACKER DATA 
+        # if eye tracker data exists align x, y eye tracker with eeg
+        ext = eye_info['tracker_ext']
+        eye_file = self.FolderTracker(extension = ['eye','raw'], \
+					filename = f'sub_{self.sj}_session_{self.session}'
+                    f'.{ext}')
+        beh_file = self.FolderTracker(extension = ['beh','raw'], \
+					filename = f'subject-{self.sj}_session_{self.session}.csv')
+        if os.path.isfile(eye_file):
+            EO = EYE(sfreq = eye_info['sfreq'], 
+                    viewing_dist = eye_info['viewing_dist'], 
+                    screen_res = eye_info['screen_res'], 
+                    screen_h = eye_info['screen_h'])
 
-        EO = EYE(sfreq = eye_info['sfreq'], viewing_dist = eye_info['viewing_dist'], 
-                 screen_res = eye_info['screen_res'], screen_h = eye_info['screen_h'])
+            EO.linkeye_to_eeg(eye_file, beh_file)
+
         # do binning based on eye-tracking data (if eyetracker data exists)
         eye_bins, window_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
                                 int((self.tmin + self.flt_pad + eye_info['tracker_shift'])*1000), int((self.tmax - self.flt_pad + eye_info['tracker_shift'])*1000),

@@ -29,7 +29,9 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     EEG = mne.concatenate_raws([RawBDF(FS.FolderTracker(extension=['raw_eeg'], 
                      filename=f'subject_{sj}_session_{session}_{run}.bdf'),
                      preload=True, eog=eog) for run in eeg_runs])
-    EEG.info['bads'] = sj_info['bad_chs']
+            
+    EEG.info['bads'] = sj_info['bad_chs'] if type(sj_info['bad_chs']) \
+                    == list else sj_info['bad_chs'][f'session_{session}']
          
     #EEG.replaceChannel(sj, session, replace)
     EEG.reReference(ref_channels=ref, vEOG=eog[
@@ -74,7 +76,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     report.save(report_file, overwrite = True)
 
     # LINK EYE MOVEMENTS
-    #epochs.link_eye(eye_info, missing, vEOG=eog[:2], hEOG=eog[2:])
+    epochs.link_eye(eye_info, missing, vEOG=eog[:2], hEOG=eog[2:])
 
     # START AUTOMATIC ARTEFACT REJECTION 
     epochs, z_thresh, report = AR.auto_repair_noise(epochs, report = report)

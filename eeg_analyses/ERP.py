@@ -128,10 +128,10 @@ class ERP(FolderStructure):
 			for rt in ['fast', 'slow']:
 				mask = beh['RT_split'] == rt
 				# create evoked objects using mne functionality and save file
-				evoked = eeg[mask].average().apply_baseline(baseline = 
+				evoked = epochs[mask].average().apply_baseline(baseline = 
 															self.baseline)
 				evoked.save(self.FolderTracker(['erp', self.header],
-													f'{fname}_{rt}-ave.fif'))
+													f'{erp_name}_{rt}-ave.fif'))
 
 	def flip_topography(self, epochs: mne.Epochs, beh: pd.DataFrame,
 						left: list, header: str, 
