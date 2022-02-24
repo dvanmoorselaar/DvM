@@ -14,6 +14,14 @@ from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
 
+def get_time_slice(times, start_time, end_time, step = None):
+
+	# get start and end index
+	s, e = [np.argmin(abs(times - t)) for t in (start_time, end_time)]
+	time_slice = slice(s, e+1, step)
+
+	return time_slice
+
 def log_preproc(idx, file, nr_sj = 1, nr_sessions = 1, to_update = None):
 
 	# check whether file exists

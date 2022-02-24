@@ -893,14 +893,14 @@ class Epochs(mne.Epochs, FolderStructure):
             eog.drop_channels([vEOG[1], hEOG[1]])
             self.add_channels([eog])
             print(
-            'EOG data (VEOG, HEOG) rereferenced with subtraction and \
-            renamed EOG channels')
+            'EOG data (VEOG, HEOG) rereferenced with subtraction and '
+            'renamed EOG channels')
 
         # if eye tracker data exists align x, y eye tracker with eeg
         ext = eye_info['tracker_ext']
         eye_file = self.FolderTracker(extension = ['eye','raw'], \
 					filename = f'sub_{self.sj}_session_{self.session}'
-                    f'.{ext}')
+                    f'.{ext}') 
         beh_file = self.FolderTracker(extension = ['beh','raw'], \
 					filename = f'subject-{self.sj}_session_{self.session}.csv')
         if os.path.isfile(eye_file):
@@ -908,16 +908,20 @@ class Epochs(mne.Epochs, FolderStructure):
                     viewing_dist = eye_info['viewing_dist'], 
                     screen_res = eye_info['screen_res'], 
                     screen_h = eye_info['screen_h'])
+         
+            (x, 
+            y, 
+            bins, 
+            angles) =EO.link_eye_to_eeg(eye_file, beh_file, eye_info['start'], 
+                               eye_info['window_oi'], eye_info['trigger_msg'],
+                               eye_info['drift_correct'])
 
-            EO.linkeye_to_eeg(eye_file, beh_file)
-
-        # do binning based on eye-tracking data (if eyetracker data exists)
-        eye_bins, window_bins, trial_nrs = EO.eyeBinEEG(self.sj, int(self.session), 
-                                int((self.tmin + self.flt_pad + eye_info['tracker_shift'])*1000), int((self.tmax - self.flt_pad + eye_info['tracker_shift'])*1000),
-                                drift_correct = (-200,0), start_event = eye_info['start_event'], extension = eye_info['tracker_ext'])
-        
         if missing.size > 0:
-            eye_bins = np.delete(eye_bins, np.array(missing, dtype = int))
+            eye_bins = np.delete(bins, np.array(missing, dtype = int))
+            angles = np.delete(angles, np.array(missing, dtype = int),axis = 0)
+            x = np.delete(x, np.array(missing, dtype = int), axis =0)
+            y = np.delete(y, np.array(missing, dtype = int), axis = 0)
+
 
         self.metadata['eye_bins'] = eye_bins
 

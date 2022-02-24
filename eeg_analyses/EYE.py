@@ -49,7 +49,7 @@ class EYE(FolderStructure):
 		self.scr_h = screen_h
 		self.sfreq = sfreq
 
-	def readEyeData(self, sj, eye_files = 'all', beh_files = 'all', start = 'Start trial'):
+	def get_eye_data(self, sj, eye_files = 'all', beh_files = 'all', start = 'start_trial'):
 		''' 
 
 		Reads in eyetracker and behavioral file for subsequent processing 
@@ -83,9 +83,9 @@ class EYE(FolderStructure):
 						beh_files.pop(i)
 		
 		if eye_files[0][-3:] == 'tsv':			
-			eye = [read_eyetribe(file, start = start) for file in eye_files]
+			eye = [read_eyetribe(file, start = start, missing = 0) for file in eye_files]
 		elif eye_files[0][-3:] == 'asc':	
-			eye = [read_edf(file, start = start, stop='Response') for file in eye_files]
+			eye = [read_edf(file, start = start, missing = 0) for file in eye_files]
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
@@ -112,7 +112,35 @@ class EYE(FolderStructure):
 
 		return eye, beh
 
-	def getXY(self, eye, start, end, start_event = 'Onset placeholder'):
+	def interp_trial(self, trial):
+
+
+		# if no blinks detected return x, y
+		blinks = trial['events']['Eblk']
+		x = np.array(trial['x'])
+		y = np.array(trial['y'])
+		if not blinks:
+			return x, y	
+
+		#pad 200ms before and after blink
+		pad = int(self.sfreq/20) 
+		for blink in blinks:
+			idx = get_time_slice(trial['trackertime'], blink[0], blink[1])
+			idx = slice(idx.start - pad, idx.stop + pad)
+			x[idx] = None
+			y[idx] = None
+
+		# interpolate all blinks/missing data in x,y
+		no_blink_idx = (~np.isnan(x)).nonzero()[0]
+		blink_idx  = np.isnan(x).nonzero()[0]
+		x_no_blink = x[~np.isnan(x)]
+		y_no_blink = y[~np.isnan(y)] 
+		x[np.isnan(x)] = np.interp(blink_idx , no_blink_idx, x_no_blink)
+		y[np.isnan(y)] = np.interp(blink_idx , no_blink_idx, y_no_blink)
+
+		return x, y
+
+	def get_xy(self, eye, start, end, start_event,interpolate_blinks = True):
 		''' 
 		getXY takes edfreader dictionary as input and returns x, y coordinates in pixels. 
 		Returned arrays have zeros (i.e. blinks) inserted on missing data points (e.g. trials shorter than specified interval).
@@ -134,7 +162,7 @@ class EYE(FolderStructure):
 		'''	
 
 		times = np.arange(start, end,1000/self.sfreq)
-		# initiate x and y array  (INSERTS ARTIFICIAL BLINKS)
+		# initiate x and y array  
 		x = np.zeros((len(eye),times.size))
 		y = np.copy(x)
 
@@ -144,21 +172,26 @@ class EYE(FolderStructure):
 				if start_event in event[1]:
 
 					# adjust trial times such that start_event is at 0 ms
-					#print(trial['trackertime'].size)
 					if trial['trackertime'].size > 0:
 						tr_times = trial['trackertime'] - event[0]
+						idx = get_time_slice(tr_times, start, end)
 
-						# get x, y cordinates between start and end
-						s, e = [np.argmin(abs(tr_times - t)) for t in (start,end)]
-						x_ = np.array(trial['x'][s:e]) # array makes sure that any subsequent manipulations do not effect information in eye
-						y_ = np.array(trial['y'][s:e])
+						if interpolate_blinks:
+							x_, y_  = self.interp_trial(trial)
+						else:
+							x_ = np.array(trial['x'])
+							y_ = np.array(trial['y'])
 
-						x[i,:x_.size] = x_
-						y[i,:y_.size] = y_
+						# populate x,y with window of interest
+						try:
+							x[i,:] = x_[idx][:times.size]
+							y[i,:] = y_[idx][:times.size]
+						except:
+							pass
 
 		return x, y, times	
 
-	def setXY(self, x, y, times, drift_correct = None, fix_range = 125):	
+	def set_xy(self, x, y, times, drift_correct = None):	
 		''' 
 		setXY modifies x and y coordinates based on SaccadeGlissadeDetection algorhytm.
 		Noise and blink segments are set to nan.
@@ -185,7 +218,6 @@ class EYE(FolderStructure):
 		y (array): y coordinates in pixels 
 		'''	
 
-		# initiate SGD class
 		SD = SaccadeGlissadeDetection(self.sfreq)
 
 		# set blink and noise trials to nan
@@ -194,17 +226,16 @@ class EYE(FolderStructure):
 			V, A = SD.calcVelocity(x_,y_)
 			x_, y_, V, A = SD.noiseDetect(x_, y_, V, A)
 
-			if drift_correct != None:
-				s_idx, e_idx = [np.argmin(abs(times - t)) for t in drift_correct]
-
-				x_d = np.array(x_[s_idx:e_idx])
-				y_d = np.array(y_[s_idx:e_idx])
-				fix_d = np.mean(np.sqrt((self.scr_res[0]/2-x_d)**2 + 
-								(self.scr_res[1]/2-y_d)**2))
+			if drift_correct:
+				idx = get_time_slice(times, drift_correct[0], drift_correct[1])
+				x_d = np.array(x_[idx])
+				y_d = np.array(y_[idx])
+				#fix_d = np.mean(np.sqrt((self.scr_res[0]/2-x_d)**2 + 
+				#					(self.scr_res[1]/2-y_d)**2))
 
 				# only corrrect if fixation period contains no missing data,
 				# is within a specific range from fixation and has no saccades
-				if not np.isnan(x_d).any():# and fix_d < fix_range: THIS NEEDS TO FIXED 
+				if not np.isnan(x_d).any():
 					nr_sac = SD.detectEvents(x_d, y_d)
 
 					if nr_sac == 0: 
@@ -215,6 +246,24 @@ class EYE(FolderStructure):
 			y[i,:] = y_
 
 		return x, y	
+
+	def link_eye_to_eeg(self, eye_file, beh_file, start_trial, window_oi, 
+						trigger_msg, drift_correct):
+
+		# read in eye data (linked to behavior)
+		print('reading in eye tracker data')
+		eye, beh = self.get_eye_data('', [eye_file], [beh_file], start_trial)
+
+		# collect x, y data 
+		x, y, times = self.get_xy(eye, window_oi[0], window_oi[1], trigger_msg)	
+		# apply drift correction if specified
+		if drift_correct:
+			x, y = self.set_xy(x,y, times, drift_correct)
+		bins, angles = self.createAngleBins(x,y, 0,3,0.25, 40)
+
+		return x, y, bins, angles
+
+
 
 	def saccadeVector(self, sj, start = -300, end = 800):
 		''' 
@@ -321,10 +370,8 @@ class EYE(FolderStructure):
 		with open(fname ,'wb') as handle:
 			pickle.dump(sac_d, handle)
 
-	def linkeye_to_eeg(self, eye_file, beh_file):
 
-		# read in eye data (linked to behavior)
-		eye, beh = self.readEyeData('', eye_file, [beh_file])
+		
 
 
 	def eyeBinEEG(self, sj, session, start, end, drift_correct = (-300,0), start_event = '', extension = 'asc'):
