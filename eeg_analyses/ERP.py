@@ -61,7 +61,8 @@ class ERP(FolderStructure):
 			report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
 
 	def select_erp_data(self, time_oi: tuple = None, 
-						excl_factor: dict = None) -> Tuple[pd.DataFrame, 
+						excl_factor: dict = None,
+						topo_flip: dict = None) -> Tuple[pd.DataFrame, 
 															mne.Epochs]:
 		"""
 		Selects the data of interest by cropping the data to the time window
@@ -89,7 +90,17 @@ class ERP(FolderStructure):
 
 		# if specified select time window of interest
 		if time_oi is not None:
-			epochs =epochs.crop(tmin = time_oi[0],tmax = time_oi[1])    
+			epochs =epochs.crop(tmin = time_oi[0],tmax = time_oi[1])  
+
+		# check whether left stimuli should be 
+		# artificially transferred to left hemifield
+		if topo_flip is not None:
+			(header, left), = topo_flip.items()
+			epochs = self.flip_topography(epochs, beh,  left,  header)
+		else:
+			print('No topography info specified. It is assumed as if all '
+				'stimuli of interest are presented right '
+				'(i.e., left  hemifield')
 
 		return beh, epochs
 
@@ -133,7 +144,8 @@ class ERP(FolderStructure):
 				evoked.save(self.FolderTracker(['erp', self.header],
 													f'{erp_name}_{rt}-ave.fif'))
 
-	def flip_topography(self, epochs: mne.Epochs, beh: pd.DataFrame,
+	@staticmethod
+	def flip_topography(epochs: mne.Epochs, beh: pd.DataFrame,
 						left: list, header: str, 
 						flip_dict: dict = None) -> mne.Epochs:
 		"""
@@ -161,7 +173,7 @@ class ERP(FolderStructure):
 			epochs: epochs with flipped topography for specified trials
 		"""
 
-		picks = mne.pick_types(epochs.info, eeg=True, exclude='bads')   
+		picks = mne.pick_types(epochs.info, eeg=True, csd = True)   
 		# dictionary to flip topographic layout
 		if flip_dict is None:
 			flip_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8',
@@ -186,7 +198,8 @@ class ERP(FolderStructure):
 
 		return epochs
 
-	def select_lateralization_idx(self, beh: pd.DataFrame, pos_labels: dict, 
+	@staticmethod
+	def select_lateralization_idx(beh: pd.DataFrame, pos_labels: dict, 
 								  midline:dict ) -> np.array:
 		"""
 		Based on position labels selects only those trial indices where 
@@ -235,17 +248,7 @@ class ERP(FolderStructure):
 						RT_split: bool = False, name : str = 'main'):
 
 		# get data
-		beh, epochs = self.select_erp_data(time_oi, excl_factor)
-
-		# check whether left stimuli should be 
-		# artificially transferred to left hemifield
-		if topo_flip is not None:
-			(header, left), = topo_flip.items()
-			epochs = self.flip_topography(epochs, beh,  left,  header)
-		else:
-			print('No topography info specified. It is assumed as if all\
-				stimuli of interest are presented right\
-				(i.e., left  hemifield')
+		beh, epochs = self.select_erp_data(time_oi, excl_factor, topo_flip)
 	
 		# select trials of interest (i.e., lateralized stimuli)
 		idx = self.select_lateralization_idx(beh, pos_labels, midline)
