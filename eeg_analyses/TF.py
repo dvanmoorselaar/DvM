@@ -377,7 +377,8 @@ class TF(FolderStructure):
 				idx_c = np.intersect1d(idx, idx_c)
 
 			# TF decomposition 
-			raw_conv = self.tf_loop(epochs, picks)
+			raw_conv = self.tf_loop(epochs[idx_c], picks)
+
 			# get baseline power (correction is done after condition loop)
 			if type(self.baseline) is not None:
 				base[cnd] = np.mean(abs(raw_conv[...,base_idx])**2, 
