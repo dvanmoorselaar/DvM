@@ -267,7 +267,7 @@ class TF(FolderStructure):
 				tf.update(dict(norm_info = info))
 			
 			# power values can now safely be averaged
-			tf[cnd]['power'] = np.mean(tf[cnd]['power'], axis = 0)			
+			tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
 
 		return tf
 				
