@@ -222,7 +222,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
         self._data[-1, :] -= binary # Make universal
    
         events = mne.find_events(self, stim_channel=None, consecutive=consecutive, min_duration=min_duration)  
- 
+
         # Check for consecutive 
         if not consecutive:
             spoke_idx = []
@@ -354,8 +354,6 @@ class Epochs(mne.Epochs, FolderStructure):
         report.add_epochs(self, title=title)
 
         return report
-
-
 
     def align_behavior(self, events: np.array,  trigger_header: str = 'trigger', headers: list = [], bdf_remove: np.array =  None):
         """
@@ -924,6 +922,30 @@ class Epochs(mne.Epochs, FolderStructure):
 
 
         self.metadata['eye_bins'] = eye_bins
+
+        # add x, y to epochs object
+        data = np.stack((x,y)).swapaxes(0,1)
+        t_min  = eye_info['window_oi'][0]/1000
+        self.add_channel_data(data, ['x','y'], eye_info['sfreq'], 'eog', t_min)
+
+    def add_channel_data(self, data, ch_names, sfreq, ch_type, t_min):
+
+        # create temp epochs object that allows for downsampling
+        info = mne.create_info(ch_names= ch_names,sfreq = sfreq)
+        temp_epochs = mne.EpochsArray(data, info)
+        # downsample to allign to eeg
+        temp_epochs.resample(self.info['sfreq'])
+
+        # now add the channels
+        self.add_reference_channels(ch_names)
+        mapping ={ch:ch_type for ch in ch_names} 
+        self.set_channel_types(mapping)
+
+        # finally fill channels with data
+        nr_samples = temp_epochs._data.shape[-1]
+        time_idx = get_time_slice(self.times, t_min, 0)
+        s, e = time_idx.start, time_idx.start + nr_samples
+        self._data[:,-len(ch_names):,s:e] = temp_epochs._data
 
     def detectEye(self, missing, events, nr_events, time_window, threshold=20, windowsize=100, windowstep=10, channel='HEOG', tracker_shift = 0, start_event = '', extension = 'asc', eye_freq = 500, screen_res = (1680, 1050), viewing_dist = 60, screen_h = 29):
         '''
