@@ -32,7 +32,7 @@ class TF(FolderStructure):
 	def __init__(self, sj: int, beh: pd.DataFrame, epochs: mne.Epochs, 
 				min_freq: int = 4, max_freq: int = 40, num_frex: int = 25,
 				cycle_range: tuple = (3,10), freq_scaling: str = 'log',
-				baseline: tuple = None, base_method: str = 'conspec',
+				baseline: tuple = None, base_method: str = 'cnd_spec',
 				method: str = 'wavelet', downsample: int = 1, 
 				laplacian: bool = True):
 		"""
@@ -245,6 +245,9 @@ class TF(FolderStructure):
 			elec_oi (str): Necessary when baselining depends on the topographic
 			distribution of electrodes (i.e., when method is 'norm' or 'Z')
 
+		Raises:
+			ValueError: In case incorrect baselining method is specified
+
 		Returns:
 			tf (dict): normalized time frequency power
 		"""
@@ -265,6 +268,8 @@ class TF(FolderStructure):
 				 	 ' if all stimuli of interest are presented right')
 				tf['power'][cnd], info = self.normalize_power(power, elec_oi) 
 				tf.update(dict(norm_info = info))
+			else:
+				raise ValueError('Invalid method specified')
 			
 			# power values can now safely be averaged
 			tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
@@ -288,7 +293,7 @@ class TF(FolderStructure):
 		base_power = np.repeat(base_power[...,np.newaxis],nr_time,axis = 2)
 		norm_power = 10*np.log10(power/base_power)
 
-		return power
+		return norm_power
 
 	def normalize_power(self, power: np.array, elec_oi: list):
 

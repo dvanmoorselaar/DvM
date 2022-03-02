@@ -321,107 +321,136 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
 class Epochs(mne.Epochs, FolderStructure):
     '''
-    Child originating from MNE built-in Epochs, such that new methods can be added to this built in class
+    Epochs extracted from a Raw instance. Child class based on mne built-in 
+    Epochs, such that extract functionality can be added to this base class.
+    For default documentation see: 
+    https://mne.tools/stable/generated/mne.Epochs
     '''
 
-    def __init__(self, sj, session, raw, events, event_id, tmin, tmax, flt_pad=True, baseline=(None, None), picks=None, preload=True,
-                 reject=None, flat=None, proj=False, decim=1, reject_tmin=None, reject_tmax=None, detrend=None,
-                 on_missing='error', reject_by_annotation=False, verbose=None, z_thresh = 4):
+    def __init__(self, sj: int, session: int, raw: mne.io.Raw, 
+                events: np.array, event_id: Union[int, list, dict], 
+                tmin: float=-0.2, tmax: float=0.5, 
+                flt_pad: Union[float, tuple]=None, 
+                baseline: tuple=(None, None), 
+                picks: Union[str, list, slice]=None, preload: bool=True,
+                reject: dict=None, flat: dict=None, proj: bool=False, 
+                decim: int=1, reject_tmin: float=None, reject_tmax: float=None, 
+                detrend: int=None,on_missing: str='error', 
+                reject_by_annotation: bool=False,metadata: pd.DataFrame=None, 
+                event_repeated: str='error',
+                verbose: Union[bool, str, int]=None):
 
-        # check whether a preprocessed folder for the current subject exists,
-        # if not make onen
+        # set child class specific info
         self.sj = sj
         self.session = str(session)
         self.flt_pad = flt_pad
-        tmin, tmax = tmin - flt_pad, tmax + flt_pad
-        
-        super(Epochs, self).__init__(raw=raw, events=events, event_id=event_id, tmin=tmin, tmax=tmax,
-                                     baseline=baseline, picks=picks, preload=preload, reject=reject,
-                                     flat=flat, proj=proj, decim=decim, reject_tmin=reject_tmin,
-                                     reject_tmax=reject_tmax, detrend=detrend, on_missing=on_missing,
-                                     reject_by_annotation=reject_by_annotation, verbose=verbose)
+        if type(flt_pad) == tuple:
+            tmin -= flt_pad[0]
+            tmax += flt_pad[1]
+        else:
+            tmin -= flt_pad
+            tmax += flt_pad
+     
+        super(Epochs, self).__init__(raw=raw, events=events, event_id=event_id, 
+                                    tmin=tmin, tmax=tmax,baseline=baseline, 
+                                    picks=picks, preload=preload, 
+                                    reject=reject, flat=flat, proj=proj, 
+                                    decim=decim, reject_tmin=reject_tmin,
+                                    reject_tmax=reject_tmax, detrend=detrend, 
+                                    on_missing=on_missing,
+                                    reject_by_annotation=reject_by_annotation,
+                                    metadata=metadata, 
+                                    event_repeated=event_repeated,
+                                    verbose=verbose)
 
-        # save number of detected events
-        self.nr_events = len(self)
-        self.drop_beh = []
-        logging.info('{} epochs created'.format(len(self)))
-
-    def report_epochs(self, report, title, missing = None):
-
-        if missing is not None:
-            report.add_html(missing, title = 'missing trials in beh')
-
-        report.add_epochs(self, title=title)
-
-        return report
-
-    def align_behavior(self, events: np.array,  trigger_header: str = 'trigger', headers: list = [], bdf_remove: np.array =  None):
+    def align_meta_data(self, events: np.array,  trigger_header: str='trigger', 
+                        headers: list=[], idx_remove: np.array=None,
+                        del_practice: bool = True):
         """
-        Aligns bdf file with csv file with experimental variables. In case there are more behavioral trials than eeg trials
-        (e.g., because trigger was not properly sent/detected), trials are removed from the raw behavioral data such that
-        both datasets are aligned. Information about this process can be found in individual preprocessing log files. 
+        Aligns epoched data with behavioral data as stored in a .csv file. The 
+        .csv file should contains all behavioral parameters organised in 
+        columns. Requires (at least) the following columns to be present in 
+        behavioral data file:
 
+        1. a column containing the trigger values used for epoching ()
+        2. nr_trials: column with trial counts (only used when epochs and 
+        behavior do not align)
+        
+        In case of a mismatch between detected eeg events and behavioral data
+        (i.e., rows in .csv file) as a result of missing eeg events, trials
+        are removed from the behavioral metadata to align datasets (see
+        info inpreprocessing report).
+        
         Args:
             events (np.array): event info as returned by RAW.event_selection
-            trigger_header (str, optional): Column in raw behavior that contains trigger values used for epoching. Defaults to 'trigger'.
-            headers (list, optional): List of headers that should be linked to eeg data. Defaults to [].
-            bdf_remove (np.array, optional): Indices of trigger events that need to be removed. Only specify when to many trials are recorded. 
+            trigger_header (str, optional): Column in raw behavior that 
+            contains trigger values used for epoching. Defaults to 'trigger'.
+            headers (list, optional): List of headers (i.e., column names) that 
+            should be linked to epochs. Defaults to [].
+            idx_remove (np.array, optional): Indices of trigger events that 
+            need to be removed. Allows removal of spoke triggers (i.e., trigger
+            events that should not be analysed)
+            del_practice (bool, optional): If True, practice trials are removed
+            from the behavior file before epochs alignment (requires a column
+            named practice with values 'yes' or 'no' in .csv file) 
 
         Raises:
-            ValueError: In case behavior and eeg data do not align (i.e., contain different trial numbers). If there are more behavior trials than epochs,
-            raises an error in case there is no column 'nr_trials', which prevents informed alignment of eeg and behavior. Also raises an error if there are
-            too many epochs and automatic allignment fails
+            ValueError: In case behavior and eeg data do not align 
+            (i.e., contain different trial numbers). If there are more behavior 
+            trials than epochs,raises an error in case there is no column 
+            'nr_trials', which prevents informed alignment of eeg and behavior. 
+            Also raises an error if there are too many epochs and automatic 
+            allignment fails
 
         Returns:
-            beh (pd.DataFrame): Behavior data after aligning to eeg data (index is reset)
-            missing (np.array): array with trials that are removed from beh because no matching trigger was detected. Is used 
-            when aligning eyetracker data (where it is assumed that eyetracking data and raw behavior contain the same number of trials)
+            missing (np.array): array with trials that are removed from beh 
+            because no matching trigger was detected. 
         """
 
-        print('Linking behavior to eeg data')
+        print('Linking behavior to epochs')
         report_str = ''
 
-        # read in data file
+        # read in data file and select param of interest
         beh_file = self.FolderTracker(extension=[
-                    'beh', 'raw'], filename='subject-{}_session_{}.csv'.format(self.sj, self.session))
-
-        # get triggers logged in beh file
+                    'beh', 'raw'], 
+                    filename=f'subject-{self.sj}_session_{self.session}.csv')
         beh = pd.read_csv(beh_file)
         beh = beh[headers]
-        if 'practice' in headers:
-            print('{} practice trials removed from behavior'.format(beh[beh.practice == 'yes'].shape[0]))
-            #logging.info('{} practice trials removed from behavior'.format(beh[beh.practice == 'yes'].shape[0]))
+
+        # remove practice trials
+        if del_practice and 'practice' in headers:
+            nr_remove = beh[beh.practice == 'yes'].shape[0]
+            print(f'{nr_remove} practice trials removed from behavior')
             beh = beh[beh.practice == 'no']
             beh = beh.drop(['practice'], axis=1)
             beh.reset_index(inplace = True, drop = True)
         beh_triggers = beh[trigger_header].values 
         
-        # get eeg triggers in epoched order ()
+        # get eeg triggers in epoched order
         bdf_triggers = events[self.selection, 2]
-        if bdf_remove is not  None:
-            self.drop(bdf_remove)
-            report_str += '{} bdf triggers removed as specified by the user \n'.format(bdf_remove.size)
-            #logging.info('{} bdf triggers and epochs removed as specified by the user'.format(bdf_remove.size))
-            bdf_triggers = np.delete(bdf_triggers, bdf_remove)
+        if idx_remove is not  None:
+            self.drop(idx_remove)
+            nr_remove = idx_remove.size
+            report_str += (f'{nr_remove} trigger events removed'
+                           ' as specified by the user \n')
+            bdf_triggers = np.delete(bdf_triggers, idx_remove)
 
-        # log number of unique triggers
-        #unique = np.unique(bdf_triggers)
-        #logging.info('{} detected unique triggers (min = {}, max = {})'.
-        #                format(unique.size, unique.min(), unique.max()))
-
-        # make sure trigger info between beh and bdf data matches
+        # check alignment
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
-
-        #logging.info(f'{nr_miss} trials will be removed from beh file')
         if nr_miss > 0:
-            report_str += f'Behavior has {nr_miss} more trials than detected events. The following trial numbers \
-                          will be removed in attempt to fix this: \n'
-        # check whether trial info is present in beh file
-        if nr_miss > 0 and 'nr_trials' not in beh.columns:
-            raise ValueError('Behavior file does not contain a column with trial info named nr_trials. Please adjust')
+            report_str += (f'Behavior has {nr_miss} more trials than detected '
+                          'events. The following trial numbers will be '
+                          'removed in an attempt to fix this: \n')
+        
+            if 'nr_trials' not in beh.columns:
+                raise ValueError('Behavior file does not contain a column ' 
+                                'with trial info named nr_trials. Please '
+                                'adjust for automatic alignment')
         elif nr_miss < 0:
-            report_str += 'EEG events are removed in an attempt to align the data. Please inspect your data carefully! \n'
+            report_str += ('EEG events are removed in an attempt to align the ' 
+                            'data. Please inspect your data carefully! '
+                            'NOT YET IMPLEMENTED\n')
             while nr_miss < 0:
                 # continue to remove bdf triggers until data files are lined up 
                 for i, tr in enumerate(beh_triggers):
@@ -430,8 +459,10 @@ class Epochs(mne.Epochs, FolderStructure):
                         nr_miss += 1
             # check file sizes
             if sum(beh_triggers == bdf_triggers) < bdf_triggers.size:
-                raise ValueError('Behavior and eeg cannot be linked as too many eeg triggers received. Please pass indices of trials to be removed \
-                to subject_info dict with key bdf_remove')
+                raise ValueError('Behavior and eeg cannot be linked as too '
+                                'many eeg triggers received. Please pass '
+                                'indices of trials to be removed '
+                                'to subject_info dict with key bdf_remove')
 
         while nr_miss > 0:
             stop = True
@@ -441,7 +472,6 @@ class Epochs(mne.Epochs, FolderStructure):
                     miss = beh['nr_trials'].iloc[i]
                     missing_trials.append(i)
                     report_str += f'{miss}, '
-                    #logging.info(f'Removed trial {miss} from beh file,because no matching trigger exists in bdf file')
                     beh.drop(beh.index[i], inplace=True)
                     beh_triggers = np.delete(beh_triggers, i, axis = 0)
                     nr_miss -= 1
@@ -452,25 +482,41 @@ class Epochs(mne.Epochs, FolderStructure):
             if beh_triggers.size > bdf_triggers.size and stop:
 
                 # drop the last items from the beh file
-                missing_trials = np.hstack((missing_trials, beh.index[-nr_miss:].values))
-                beh.drop(beh.index[-nr_miss:], inplace=True)
-                #logging.info('Removed last {} trials because no matches detected'.format(nr_miss))    
-                report_str += f'\n Removed final {nr_miss} trials from behavior to allign data. Please inspect your data carefully!'     
+                missing_trials = np.hstack((missing_trials, 
+                                           beh.index[-nr_miss:].values))
+                beh.drop(beh.index[-nr_miss:], inplace=True)   
+                report_str += (f'\n Removed final {nr_miss} trials from '
+                              'behavior to allign data. Please inspect your '
+                              'data carefully!')     
                 nr_miss = 0
       
-        # keep track of missing trials to allign eye tracking data (if available)   
+        # keep track of missing trials to allign eye tracking data 
+        # (if available)   
         missing = np.array(missing_trials)  
         beh.reset_index(inplace = True)
 
         # add behavior to epochs object
         self.metadata = beh
 
-        # log number of matches between beh and bdf    
-        #logging.info('{} matches between beh and epoched data out of {}'.
-        #    format(sum(beh[trigger_header].values == bdf_triggers), bdf_triggers.size))  
-        report_str += '\n {} matches between beh and epoched data out of {}'.format(sum(beh[trigger_header].values == bdf_triggers), bdf_triggers.size) 
+        # log number of matches between beh and eeg
+        nr_matches = sum(beh[trigger_header].values == bdf_triggers)
+        nr_epochs = bdf_triggers.size
+        report_str += (f'\n {nr_matches} matches between beh and epoched '
+                      'data out of {nr_eepochs}') 
 
         return missing, report_str
+
+       
+    def report_epochs(self, report, title, missing = None):
+
+        if missing is not None:
+            report.add_html(missing, title = 'missing trials in beh')
+
+        report.add_epochs(self, title=title)
+
+        return report
+
+
 
     def autoRepair(self):
         '''
@@ -914,19 +960,21 @@ class Epochs(mne.Epochs, FolderStructure):
                                eye_info['window_oi'], eye_info['trigger_msg'],
                                eye_info['drift_correct'])
 
-        if missing.size > 0:
-            eye_bins = np.delete(bins, np.array(missing, dtype = int))
-            angles = np.delete(angles, np.array(missing, dtype = int),axis = 0)
-            x = np.delete(x, np.array(missing, dtype = int), axis =0)
-            y = np.delete(y, np.array(missing, dtype = int), axis = 0)
+            if missing.size > 0:
+                eye_bins = np.delete(bins, np.array(missing, dtype = int))
+                angles = np.delete(angles, np.array(missing, dtype = int),
+                                 axis = 0)
+                x = np.delete(x, np.array(missing, dtype = int), axis =0)
+                y = np.delete(y, np.array(missing, dtype = int), axis = 0)
 
 
-        self.metadata['eye_bins'] = eye_bins
+            self.metadata['eye_bins'] = eye_bins
 
-        # add x, y to epochs object
-        data = np.stack((x,y)).swapaxes(0,1)
-        t_min  = eye_info['window_oi'][0]/1000
-        self.add_channel_data(data, ['x','y'], eye_info['sfreq'], 'eog', t_min)
+            # add x, y to epochs object
+            data = np.stack((x,y)).swapaxes(0,1)
+            t_min  = eye_info['window_oi'][0]/1000
+            self.add_channel_data(data, ['x','y'], eye_info['sfreq'], 
+                                'eog', t_min)
 
     def add_channel_data(self, data, ch_names, sfreq, ch_type, t_min):
 

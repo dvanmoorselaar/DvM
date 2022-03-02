@@ -60,21 +60,20 @@ class ERP(FolderStructure):
 			report.save(report_name)
 			report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
 
-	def select_erp_data(self, time_oi: tuple = None, 
-						excl_factor: dict = None,
+	def select_erp_data(self, excl_factor: dict = None,
 						topo_flip: dict = None) -> Tuple[pd.DataFrame, 
 															mne.Epochs]:
 		"""
-		Selects the data of interest by cropping the data to the time window
-		of interest and excluding a subset of trials
+		Selects the data of interest by excluding a subset of trials
 
 		Args:
-			time_oi (tuple, optional): If specified, epochs are cropped
-			to this time window. Defaults to None.
 			excl_factor (dict, optional): If specified, a subset of trials that 
 			matches the specified criteria is excluded from further analysis
 			(e.g., dict(target_color = ['red']) will exclude all trials 
 			where the target color is red). Defaults to None.
+			topo_flip (dict, optional): If specified a subset of trials is 
+			flipped such that it is as if all stimuli of interest are 
+			presented right (see lateralized_erp). 
 
 		Returns:
 			beh: pandas Dataframe
@@ -84,13 +83,12 @@ class ERP(FolderStructure):
 		beh = self.beh.copy()
 		epochs = self.epochs.copy()
 
+		# if not already done reset index (to properly align beh and epochs)
+		beh.reset_index(inplace = True, drop = True)
+
 		# if specified remove trials matching specified criteria
 		if excl_factor is not None:
 			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
-
-		# if specified select time window of interest
-		if time_oi is not None:
-			epochs =epochs.crop(tmin = time_oi[0],tmax = time_oi[1])  
 
 		# check whether left stimuli should be 
 		# artificially transferred to left hemifield
@@ -105,8 +103,8 @@ class ERP(FolderStructure):
 		return beh, epochs
 
 	def create_erps(self, epochs: mne.Epochs, beh: pd.DataFrame,
-				 	idx: np.array = None, erp_name: str = 'all', 
-					RT_split: bool = False):
+				 	idx: np.array = None, time_oi: tuple = None,
+					erp_name: str = 'all', RT_split: bool = False):
 		"""
 		Creates evoked objects using mne functionality
 
@@ -114,7 +112,8 @@ class ERP(FolderStructure):
 			epochs (mne.Epochs): mne epochs object
 			beh (pd.DataFrame): behavioral parameters linked to behavior
 			idx (np.array, optional): indices used for trial averaging. 
-			Defaults to None(i.e, include all trials).
+			time_oi (tuple, optional): If specified, evoked objects are cropped
+			to this time window. Defaults to None.
 			erp_name (str, optional): filename to save evoked object. 
 			Defaults to 'all'.
 			RT_split (bool, optional): If True data will also be analyzed 
@@ -126,6 +125,9 @@ class ERP(FolderStructure):
 
 		# create evoked objects using mne functionality and save file
 		evoked = epochs.average().apply_baseline(baseline = self.baseline)
+		# if specified select time window of interest
+		if time_oi is not None:
+			evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1]) 
 		evoked.save(self.FolderTracker(['erp', self.header],
 										f'{erp_name}-ave.fif'))
 		# update report
@@ -141,8 +143,11 @@ class ERP(FolderStructure):
 				# create evoked objects using mne functionality and save file
 				evoked = epochs[mask].average().apply_baseline(baseline = 
 															self.baseline)
+				# if specified select time window of interest
+				if time_oi is not None:
+					evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1]) 															
 				evoked.save(self.FolderTracker(['erp', self.header],
-													f'{erp_name}_{rt}-ave.fif'))
+												f'{erp_name}_{rt}-ave.fif'))
 
 	@staticmethod
 	def flip_topography(epochs: mne.Epochs, beh: pd.DataFrame,
@@ -213,7 +218,7 @@ class ERP(FolderStructure):
 
 		Args:
 			beh (pd.DataFrame): DataFrame with behavioral parameters per linked 
-			eepoch
+			epoch
 			pos_labels (dict): Dictionary key specifies the column with 
 			position labels in the beh DataFrame. Values should be a list of
 			all labels that are included in the analysis 
@@ -248,7 +253,7 @@ class ERP(FolderStructure):
 						RT_split: bool = False, name : str = 'main'):
 
 		# get data
-		beh, epochs = self.select_erp_data(time_oi, excl_factor, topo_flip)
+		beh, epochs = self.select_erp_data(excl_factor, topo_flip)
 	
 		# select trials of interest (i.e., lateralized stimuli)
 		idx = self.select_lateralization_idx(beh, pos_labels, midline)
@@ -274,7 +279,7 @@ class ERP(FolderStructure):
 				print('no data found for {}'.format(cnd))
 				continue
 
-			self.create_erps(epochs, beh, idx_c, erp_name, RT_split)
+			self.create_erps(epochs, beh, idx_c, time_oi, erp_name, RT_split)
 
 	@staticmethod	
 	def baselineCorrect(X, times, base_period):
