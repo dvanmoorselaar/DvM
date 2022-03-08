@@ -55,7 +55,7 @@ class BDM(FolderStructure):
 		FolderStructure (object): Class that creates file paths to load raw eeg/ behavior and save decoding ouput
 	"""
 
-	def __init__(self, beh: pd.DataFrame, epochs: mne.Epochs, to_decode: str, nr_folds: int, 
+	def __init__(self, epochs: mne.Epochs, beh: pd.DataFrame, to_decode: str, nr_folds: int, 
 				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
 				avg_runs: int = 1, avg_trials: int= 1, sliding_window: tuple = (1, True, False), scale: dict = {'standardize': False, 'scale': False}, 
 				pca_components: tuple = (0, 'across'), bdm_filter: Optional[dict] = None, 

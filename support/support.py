@@ -14,11 +14,23 @@ from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
 
-def get_time_slice(times, start_time, end_time, step = None):
+def get_time_slice(times, start_time, end_time, include_final = True, step = None):
 
 	# get start and end index
-	s, e = [np.argmin(abs(times - t)) for t in (start_time, end_time)]
-	time_slice = slice(s, e+1, step)
+	idx = [np.argmin(abs(times - t)) 
+				for t in (start_time, end_time) if t is not None]
+	if len(idx) == 0:
+		idx = [0, times.size - 1]
+	elif len(idx) == 1:
+		if start_time is None:
+			idx.insert(0,0)
+		else:
+			idx.insert(1,times.size - 1)
+
+	s, e = idx
+	if include_final:
+		e += 1
+	time_slice = slice(s, e, step)
 
 	return time_slice
 
@@ -134,7 +146,7 @@ def cnd_time_shift(EEG, beh, cnd_info, cnd_header):
 	return EEG
 
 
-def select_electrodes(ch_names: Union[list, np.ndarray], subset: Union[list, str]=  'all') -> np.ndarray:
+def select_electrodes(ch_names: Union[list, np.ndarray], elec_oi: Union[list, str]=  'all') -> np.ndarray:
 	"""allows picking a subset of all electrodes 
 
 	Args:
@@ -147,9 +159,9 @@ def select_electrodes(ch_names: Union[list, np.ndarray], subset: Union[list, str
 		picks (np.ndarray): indices of selected electrodes
 	"""
 
-	if type(subset) == str:
-		if subset == 'all':
-			subset = ['Fp1', 'AF7','AF3','F1','F3','F5','F7',
+	if type(elec_oi) == str:
+		if elec_oi == 'all':
+			elec_oi = ['Fp1', 'AF7','AF3','F1','F3','F5','F7',
  					'FT7','FC5','FC3','FC1','C1','C3','C5','T7','TP7',
 					 'CP5','CP3','CP1','P1','P3','P5','P7','P9','PO7',
 					 'PO3', 'O1','Iz','Oz','POz','Pz','CPz','Fpz','Fp2',
@@ -157,21 +169,21 @@ def select_electrodes(ch_names: Union[list, np.ndarray], subset: Union[list, str
 					 'FC6','FC4','FC2','FCz','Cz','C2','C4','C6','T8',
 					 'TP8','CP6','CP4','CP2','P2','P4','P6','P8','P10',
 					 'PO8','PO4','O2']
-		elif subset == 'post':
-			subset  = ['Iz','Oz','O1','O2','PO7','PO8',
+		elif elec_oi == 'post':
+			elec_oi  = ['Iz','Oz','O1','O2','PO7','PO8',
 					'PO3','PO4','POz','Pz','P9','P10',
 					'P7','P8','P5','P6','P3','P4','P1','P2','Pz',
 					'TP7','CP5','CP3','CP1','CPz','CP2','CP4','CP6','TP8']
-		elif subset == 'frontal':
-			subset  = ['Fp1','Fpz','Fp2','AF7','AF3','AFz','AF4',
+		elif elec_oi == 'frontal':
+			elec_oi  = ['Fp1','Fpz','Fp2','AF7','AF3','AFz','AF4',
 					'AF8','F7','F5','F3','F1','Fz','F2','F4','F6','F8',
 					'FT7','FC5','FC3','FC1','FCz','FC2','FC4','FC6','FT8']
-		elif subset == 'mid':
-			subset  = ['T7','C5','C3','C1','Cz','C2','C4','C6','T8']	
-		elif subset == 'eye':
-			subset  = ['V_up','V_do','H_r', 'H_l']				
+		elif elec_oi == 'mid':
+			elec_oi  = ['T7','C5','C3','C1','Cz','C2','C4','C6','T8']	
+		elif elec_oi == 'eye':
+			elec_oi  = ['V_up','V_do','H_r', 'H_l']				
 
-	picks = mne.pick_channels(ch_names, include = subset)
+	picks = mne.pick_channels(ch_names, include = elec_oi)
 
 	return picks	
 

@@ -7,6 +7,7 @@ Copyright (c) 2016 DvM. All rights reserved.
 
 #from session import *
 import json
+from sre_constants import MAX_REPEAT
 import time
 import glob
 import os
@@ -21,6 +22,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+from typing import Optional, Generic, Union, Tuple, Any
 from eeg_analyses.BDM import *  
 from support.FolderStructure import *
 from mpl_toolkits.mplot3d import Axes3D
@@ -31,6 +33,8 @@ from scipy.signal import hilbert
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 from scipy.ndimage.measurements import label
+
+from support.support import select_electrodes, trial_exclusion, get_time_slice
 from IPython import embed 
 
 
@@ -40,9 +44,13 @@ class CTF(BDM):
 	Scipts based on Matlab scripts published on open science Framework (https://osf.io/bwzjj/) and lab visit to Chicago University (spring quarter 2016).
 	'''
 
-	def __init__(
-				self, beh, eeg, channel_folder, decoding, nr_iter, nr_blocks, 
-				nr_bins, nr_chans, delta, power='filtered'):
+	def __init__(self, sj: int, epochs: mne.Epochs, beh: pd.DataFrame, 
+				to_decode: str, nr_bins: int, nr_chans: int, nr_iter: int = 10, 
+				nr_blocks: int = 3, elec_oi: Union[str, list] = 'all', 
+				delta: bool = False, method: str = 'Foster', 
+				ctf_param: bool = True, power: str = 'band', min_freq: int = 4,
+				max_freq: int = 40, num_frex: int = 25, 
+				freq_scaling: str = 'log'):
 		''' 
 		
 		Arguments
@@ -64,12 +72,15 @@ class CTF(BDM):
 		self (object): SpatialEM object
 		'''
 
+		self.sj = sj
 		self.beh = beh
-		self.eeg = eeg
-		self.channel_folder = channel_folder
-		self.decoding = decoding
+		self.epochs = epochs
+		self.to_decode = to_decode
+		self.elec_oi = elec_oi
+		self.ctf_param = ctf_param
 
 		# specify model parameters
+		self.method = method
 		self.nr_bins = nr_bins													# nr of spatial locations 
 		self.nr_chans = nr_chans 												# underlying channel functions coding for spatial location
 		self.nr_iter = nr_iter													# nr iterations to apply forward model 		
@@ -78,39 +89,633 @@ class CTF(BDM):
 		self.power = power
 		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, delta = delta)		# hypothesized set tuning functions underlying power measured across electrodes
 
-	def selectData(self, conditions):
+	def select_ctf_data(self, elec_oi: Union[list, str]=  'all',
+						excl_factor: dict = None) -> Tuple[mne.Epochs,
+															pd.DataFrame]:
+		"""
+		Selects the data of interest by selectiong epochs and elecrodes
+		of interest
+
+		Args:
+			elec_oi ([list, str], optional): Electrodes used for ctf analysis. 
+			Defaults to 'all'.
+			excl_factor (dict, optional): exclusion dictionary that allows for
+			dropping of certai conditions. Defaults to None.
+
+		Returns:
+			epochs (mne.Epochs): EEG data used for ctf analysis
+			beh (pd.DataFrame): behavioral parameters
+		"""
+
+		# get data for current model fit
+		beh = self.beh.copy()
+		epochs = self.epochs.copy()
+
+		# if not already done reset index (to properly align beh and epochs)
+		beh.reset_index(inplace = True, drop = True)
+
+		# if specified remove trials matching specified criteria
+		if excl_factor is not None:
+			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+
+		# limit analysis to electrodes of interest
+		picks = select_electrodes(epochs.ch_names, elec_oi) 
+		epochs.pick(picks)
+
+		return epochs, beh
+
+	def select_ctf_labels(self, epochs: mne.Epochs, beh: pd.DataFrame, 
+						pos_labels: dict, cnds: dict) -> Tuple[np.array, 
+															np.array,
+															np.array, int]:
+		"""
+		Selects data of interest by selecting all specified position 
+		(in pos_labels) and conditions (in cnds). Function also ensures that
+		there are no more unique position bins then the number of bins used to 
+		calculate ctfs
+
+		Args:
+			epochs (mne.Epochs): Epochs object 
+			beh (pd.DataFrame): dataframe with behavioral parameters
+			pos_labels (dict): key, item pair where key points to the column
+			in beh that contains labels for ctf analysis, and the item contains
+			all values that will be considered in the ctf analysis
+			cnds (dict): key, item pair where key points to the column
+			in beh that contains condition labels, and the item contains
+			all unique conditions that are considered
+
+		Returns:
+			pos_bins (np.array): array with position labels
+			cnds (np.array): array with condition labels
+			epochs (mne.Epochs): eeg data of interest
+			max_tr (int): maximum number of trials to include per position 
+			label (ensures that labels are balanced across conditions)
+		"""
+
+		# extract conditions of interest
+		if cnds is None:
+			cnds = np.array(['all_trials']*beh.shape[0])
+			cnd_idx = np.arange(beh.shape[0])
+		else:
+			(cnd_header, cnds_oi), = cnds.items()
+			cnd_idx = np.where(beh[cnd_header].isin(cnds_oi))[0]
+			cnds = beh[cnd_header]
+		
+		# extract position labels of interest
+		if pos_labels != 'all':
+			(pos_header, pos_labels), = pos_labels.items()
+			pos_idx =  np.where(beh[pos_header].isin(pos_labels))[0]
+		else:
+			pos_header = self.to_decode
+			pos_idx = np.arange(beh.shape[0]) 
+		
+		# get data of interest
+		idx = np.intersect1d(cnd_idx, pos_idx)
+		pos_bins = beh[pos_header].values[idx]
+		cnds = cnds[idx]
+		epochs = epochs[idx]
+		pos_bins, cnds, epochs = self.select_bins_oi(pos_bins, cnds, epochs)
+		max_tr = self.set_max_trial(cnds, pos_bins, self.method)
+
+		return pos_bins, cnds, epochs, max_tr
+
+	def select_bins_oi(self, pos_bins: np.array, cnds: np.array, 
+					  epochs: mne.Epochs) -> Tuple[np.array, 
+					  							  np.array, np.array]:
+		"""
+		Function ensures that there are no ctf labels that exceed the number
+		of bins as specified at class initialization
+
+		Args:
+			pos_bins (np.array): array with position labels
+			cnds (np.array): array with condition labels
+			epochs (mne.Epochs): eeg data of interest
+
+		Returns:
+			pos_bins (np.array): array with position labels
+			cnds (np.array): array with condition labels
+			epochs (mne.Epochs): eeg data of interest
+		"""
+
+		mask = np.logical_and(pos_bins >= 0,pos_bins < self.nr_bins)
+		pos_bins = pos_bins[mask]
+		cnds = cnds[mask]
+		epochs = epochs[np.where(mask)[0]]
+
+		return pos_bins, cnds, epochs
+
+	def set_max_trial(self, cnds: np.array, pos_bins: np.array, 
+					 method: str) -> int:
+		"""
+		Determines the maximum number of trials that can be used in 
+		the block/fold assignment of the forward model such that the number 
+		of trials used in the IEM is equated across conditions
+
+		Args:
+			cnds (np.array): array with condition labels
+			pos_bins (np.array): array with position labels
+			method (str): method used for block assignment
+
+		Returns:
+			nr_per_bin (int): maximum number of trials per cell used to
+			create train and test data
+		"""
+
+		nr_cnds = np.unique(cnds).size
+
+		if nr_cnds == 1:
+			_, bin_count = np.unique(pos_bins, return_counts = True)
+		else:
+			bin_count = np.zeros((nr_cnds,self.nr_bins))
+			for c, cnd in enumerate(np.unique(cnds)):
+				temp_bin = pos_bins[cnds == cnd]
+				for b in range(self.nr_bins):
+					bin_count[c,b] = sum(temp_bin == b)
+
+		# select cell with lowest number of observations
+		min_count = np.min(bin_count)
+		if method == 'Foster':
+			nr_per_bin = int(np.floor(min_count/self.nr_blocks))						
+		elif method == 'k-fold':
+			nr_per_bin = int(np.floor(min_count/self.nr_iter)*self.nr_iter)
+
+		return nr_per_bin
+
+	def extract_power(self, epochs: mne.Epochs,  band: tuple, tois: slice, 
+					  downsample: int) -> Tuple[np.array, np.array]:
+		"""
+		Isolates frequency-specific activity using a 5th order 
+		butterworth filter. A Hilbert Transform is then applied to the filtered 
+		data to extract the complex analytic signal. To extract power this 
+		signal is computed by squaring the complex magnitude of the complex 
+		signal. 
+
+		Args:
+			epochs (mne.Epochs): epochs object used for TF analysis
+			band (tuple): frequency band used for TF decomposition
+			tois (slice): time windows of interest
+			downsample (int): factor to downsample the data (after filtering)
+
+		Returns:
+			E (np.array): analytic representation obtain with hilbert transform
+			(used to calculated evoked activity: ongoing activity irrespective 
+			of phase relation to stimulus onset)
+			T (np.array): squared magnitude of E. Used to calculated total 
+			power ctf	
+		"""
+
+		# initiate arrays for evoked and total power
+		_, nr_chan, nr_time = epochs._data.shape
+
+		# extract power using hilbert or wavelet convolution
+		if self.power == 'band':
+			epochs.filter(band[0], band[1], method = 'iir', 
+						 iir_params = dict(ftype = 'butterworth', order = 5))
+			epochs.apply_hilbert()
+			E = epochs._data
+			T = abs(E)**2
+		elif self.power == 'wavelet':
+			pass 
+		elif self.power == 'raw':
+			T = epochs._data
+			E = epochs._data
+	
+		# trim filtered data (after filtering to avoid artifacts)
+		E = E[:,:,tois]
+		T = T[:,:,tois]
+
+		# downsample 
+		E = E[:,:,::downsample]
+		T = T[:,:,::downsample]
+
+		return E, T
+
+	def forward_model(self, train_X: np.array, test_X: np.array, 
+					C1: np.array) -> Tuple[np.array, np.array]:
+		"""
+		Applies an inverted encoding model (IEM) to each sample. This routine 
+		proceeds in two stages (train and test).
+		1. In the training stage, training data (B1) is used to estimate 
+		weights (W) that approximate the relative contribution of each spatial 
+		channel to the observed response measured at each electrode, with:
+
+		B1 = W*C1
+
+		,where B1 is power at each electrode, C1 is the predicted response 
+		of each spatial channel, and W is weight matrix that characterizes a 
+		linear mapping from channel space to electrode space. The equation is 
+		solved via least-squares estimation.
+		
+		2. In the test phase, the model is inverted to transform the observed 
+		test data B2 into estimated channel responses. The estimated channel 
+		response are then shifted to a common center by aligning the estimate 
+		channel response to the channel tuned for the stimulus bin. 
+
+		Args:
+			train_X (np.array): train data (epochs X electrodes X timepoints)
+			test_X (np.array): test data (epochs X electrodes X timepoints)
+			C1 (np.array):basisset
+
+		Returns:
+			C2s (np.array): shifted predicted channels response
+			W (np.array): weight matrix
+		"""
+	
+		# apply forward model
+		B1 = train_X
+		B2 = test_X
+		# estimate weight matrix W (nr_chans x nr_electrodes)
+		W, resid_w, rank_w, s_w = np.linalg.lstsq(C1,B1, rcond = -1)
+		# estimate channel response C2 (nr_chans x nr test blocks)		
+		C2, resid_c, rank_c, s_c = np.linalg.lstsq(W.T,B2.T, rcond = -1)	 
+
+		# TRANSPOSE C2 so that we average across channels 
+		# rather than across position bins
+		C2 = C2.T
+		C2s = np.zeros(C2.shape)
+
+		# shift tunings to common center
+		bins = np.arange(self.nr_bins)
+		nr_2_shift = int(np.ceil(C2.shape[1]/2.0))
+		for i in range(C2.shape[0]):
+			idx_shift = abs(bins - bins[i]).argmin()
+			shift = idx_shift - nr_2_shift
+			if self.nr_bins % 2 == 0:							
+				C2s[i,:] = np.roll(C2[i,:], - shift)	
+			else:
+				C2s[i,:] = np.roll(C2[i,:], - shift - 1)			
+
+		return C2s, W 
+
+	def forward_model_loop(self, E_train: np.array,  E_test: np.array,
+							T_train: np.array,  T_test: np.array, 
+							C1: np.array) -> Tuple[np.array, np.array,
+													np.array,np.array]:
+		"""
+		Applies inverted encoding model (see forward_model) for each individual
+		time point
+
+		Args:
+			E_train (np.array): train data with evoked power
+			E_test (np.array): test data with evoked power
+			T_train (np.array): train data with total power
+			T_test (np.array): test data with total power
+			C1 (np.array): basisset
+
+		Returns:
+			C2_E (np.array): evoked power based shifted predicted channels 
+			response across samples
+			W_E (np.array): evoked power weight matrices across samples
+			C2_T (np.array):total power based shifted predicted channels 
+			response across samples
+			W_T (np.array): total power weight matrices across samples
+		"""
+
+		# initialize arrays
+		_, nr_elec, nr_samples = E_train.shape
+		C2_E = np.zeros((nr_samples, self.nr_bins, self.nr_chans))
+		W_E =  np.zeros((nr_samples, self.nr_bins, nr_elec))
+		C2_T, W_T = C2_E.copy(), W_E.copy()
+
+		# TODO: parallelize loop
+		for t in range(nr_samples):
+			# evoked power model fit
+			C2_E[t], W_E[t] = self.forward_model(E_train[:,:,t],
+												 E_test[:,:,t], C1)
+
+			# total power model fit
+			C2_T[t], W_T[t] = self.forward_model(T_train[:,:,t], 
+												T_test[:,:,t], C1)
+
+		return C2_E, W_E, C2_T, W_T
+
+	def set_frequencies(self, freqs):
+
+		if freqs == 'main_settings':
+			pass
+		elif type(freqs) == dict:
+			freqs = np.vstack([[freqs[band][0],freqs[band][1]] 
+												for band in freqs.keys()])
+			nr_freqs = freqs.shape[0]
+
+		return freqs, nr_freqs
+
+	def train_test_split(self, pos_bins: np.array,cnd_idx: np.array, 
+						max_tr: int):
+	
 		'''
-		
-		Selects the data of interest
-		
+		assignBlocks creates a random block assignment (train and test blocks)
+
 		Arguments
 		- - - - - 
-		conditions (list): list of condition names that are specified in the pickle file with key condition
+		pos_bin (array): array with position bins
+		idx_tr (array): array of trial numbers corresponding to pos_bin labels
+		nr_per_bin(int): maximum number of trials to be used per location bin
+		nr_iter (int): number of iterations used for IEM
+		Returns
+		- - - -
+		blocks(array): randomly assigned block indices
+		'''
+		
+		# get trial count and condition indices
+		cnd_bins = pos_bins[cnd_idx]
+		nr_tr = cnd_bins.size
+		trial_idx = np.arange(pos_bins.size)[cnd_idx]
+		# initiate array
+		bl_assign = np.zeros((self.nr_iter, nr_tr))
+
+		# loop over iterations
+		for i in range(self.nr_iter):
+			#  initiate new array for each block assignment
+			blocks = np.empty(nr_tr) * np.nan
+			shuf_blocks = np.empty(nr_tr) * np.nan
+
+			idx_shuf = np.random.permutation(nr_tr) 			
+			shuf_bin = cnd_bins[idx_shuf]
+
+			# take the 1st max_tr x nr_blocks trials for each position bin
+			for bin in range(self.nr_bins):
+				idx = np.where(shuf_bin == bin)[0] 	
+				idx = idx[:max_tr * self.nr_blocks] 
+				x = np.tile(np.arange(self.nr_blocks),(max_tr,1))
+				shuf_blocks.flat[idx] = x	
+
+			# unshuffle block assignment and save to CTF
+			blocks[idx_shuf] = shuf_blocks	
+			bl_assign[i] = blocks
+		tr_per_block = int(sum(blocks == 0)/self.nr_bins)
+
+		# after block assignment split into train and test set
+		train_idx = np.zeros((self.nr_iter * self.nr_blocks, self.nr_bins,
+							 self.nr_blocks - 1, tr_per_block), dtype = int)									
+		test_idx = np.zeros((self.nr_iter * self.nr_blocks, self.nr_bins, 
+						  tr_per_block), dtype = int)
+
+		idx = 0	
+		for i in range(self.nr_iter):
+			for bl in range(self.nr_blocks):
+				for bin in range(self.nr_bins):	
+					test_mask = (bl_assign[i] == bl) * (cnd_bins == bin)
+					test_idx[idx,bin] = trial_idx[test_mask]
+					train_mask = ((~np.isnan(bl_assign[i])) * 
+								 (bl_assign[i] != bl) * (cnd_bins == bin))
+					# split all train data into seperate train blocks
+					train = np.array_split(trial_idx[train_mask], 
+														self.nr_blocks - 1)
+					for j in range(self.nr_blocks - 1):
+						train_idx[idx, bin, j] = train[j]
+				idx += 1
+
+		return train_idx, test_idx
+
+	def spatial_ctf(self, pos_labels:dict ='all', cnds:dict = None, 
+					excl_factor:dict=None, window_oi:tuple=(None, None),
+					freqs=dict(alpha=[8,12]), downsample:int = 1, 
+					nr_perm:int= 0, collapse:bool=False, name:int='main'):
+		'''
+		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
+
+		Arguments
+		- - - - - 
+		sj (list): list of subject id's 
+		window (list): time interval in ms used for ctf calculation
+		conditions (list)| Default ('all'): List of conditions. Defaults to all conditions
+		freqs (dict) | Default is the alpha band: Frequency band used for bandpass filter. If key set to all, analyses will be performed in increments 
+		from 1Hz
+		downsample (int): factor to downsample the bandpass filtered data
+		method (str): method used for splitting data into training and testing sets
+		nr_perm (int): number of times model is run with permuted data
+		collapse (bool): create CTF collapsed across conditions
 
 		Returns
 		- - - -
-		pos_bins (array): array of position bins
-		condition (array): array of conditions
-		eegs (array): array with eeg data
+		self(object): dict of CTF data
+		'''	
+
+		# read in data
+		epochs, beh = self.select_ctf_data(self.elec_oi, excl_factor)
+
+		# based on conditions get position bins
+		(pos_bins, 
+		cnds, 
+		epochs, 
+		max_tr) = self.select_ctf_labels(epochs, beh, pos_labels, cnds)
+
+		# set params
+		ctf_name = f'{self.sj}_{name}'
+		nr_perm += 1
+		nr_elec = len(epochs.ch_names)
+		tois = get_time_slice(epochs.times, window_oi[0], window_oi[1])
+		nr_samples = epochs.times[tois][::downsample].size
+		ctf, info = {}, {}
+		freqs, nr_freqs = self.set_frequencies(freqs)
+		if self.method == 'k-fold':
+			print('nr_blocks is irrelevant and will be reset to 1')
+			self.nr_blocks = 1
+								
+		if collapse:
+			TODO: fix
+			conditions += ['all_trials']	
+
+		# Frequency loop (ensures that data is only filtered once)
+		for fr in range(nr_freqs):
+			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
+
+			# Time-Frequency Analysis 
+			E, T = self.extract_power(epochs, freqs[fr], tois, downsample)
+
+			# Loop over conditions
+			for c, cnd in enumerate(np.unique(cnds)):
+				print(f'Running ctf for {cnd} condition')
+
+				# preallocate arrays
+				C2_E = np.zeros((nr_perm,nr_freqs,
+								self.nr_iter * self.nr_blocks,
+								nr_samples, self.nr_bins, self.nr_chans))
+				W_E = np.zeros((nr_perm,nr_freqs,
+								self.nr_iter * self.nr_blocks,
+								nr_samples, self.nr_chans, nr_elec))							 
+				C2_T, W_T  = C2_E.copy(), W_E.copy()				 
+	
+				# partition data into training and testing sets
+				# is done once to ensure each frequency has the same sets
+				if fr == 0:
+					# update ctf dicts to keep track of output	
+					info.update({cnd:{}})
+					ctf.update({cnd:{'C2_E':C2_E,'C2_T':C2_T,
+									'W_E':W_E,'W_T':W_T}})
+					# get condition indices
+					cnd_idx = cnds == cnd
+					(train_idx, 
+					test_idx) = self.train_test_split(pos_bins,cnd_idx,max_tr)
+					info[cnd]['train_idx'] = train_idx
+					info[cnd]['test_idx'] = test_idx
+					if self.method == 'Foster':
+						C1 = np.empty((self.nr_bins* (self.nr_blocks - 1), 
+										self.nr_chans)) * np.nan
+					else:
+						C1 = self.basisset
+
+				# iteration loop
+				for itr in range(self.nr_iter * self.nr_blocks):
+
+					# TODO: insert permutation loop
+					p = 0
+					train_idx = info[cnd]['train_idx'][itr]
+
+					# initialize evoked and total power arrays
+					bin_te_E = np.zeros((self.nr_bins, nr_elec, nr_samples)) 
+					bin_te_T = bin_te_E.copy()
+					if self.method == 'k-fold':
+						pass
+						#TODO: implement 
+					elif self.method == 'Foster':
+						nr_itr_tr = self.nr_bins * (self.nr_blocks - 1)
+						bin_tr_E = np.zeros((nr_itr_tr, nr_elec, nr_samples)) 
+						bin_tr_T = bin_tr_E.copy()
+						
+					# position bin loope
+					bin_cnt = 0
+					for bin in range(self.nr_bins):
+						test_idx = info[cnd]['test_idx'][itr][bin]
+						bin_te_E[bin] = abs(np.mean(E[test_idx], axis = 0))**2
+						bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
+
+						if self.method == 'Foster':
+							for j in range(self.nr_blocks - 1):
+								evoked = abs(np.mean(E[train_idx[bin][j]], 
+													axis = 0))**2
+								bin_tr_E[bin_cnt] = evoked
+								total = np.mean(T[train_idx[bin][j]], axis = 0)
+								bin_tr_T[bin_cnt] = total
+								C1[bin_cnt] = self.basisset[bin]
+								bin_cnt += 1
+						elif self.method == 'k-fold':
+							pass
+							#TODO: implement
+					
+					(ctf[cnd]['C2_E'][p,fr,itr], 
+					ctf[cnd]['W_E'][p,fr,itr],
+					ctf[cnd]['C2_T'][p,fr,itr],
+					ctf[cnd]['W_T'][p,fr,itr]) = self.forward_model_loop(
+															bin_tr_E, 
+															bin_te_E,
+															bin_tr_T, 
+															bin_te_T, C1)
+
+		# save output
+		with open(self.FolderTracker(['ctf',self.to_decode], 
+				filename = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
+			print('saving ctfs')
+			pickle.dump(ctf, handle)
+
+		with open(self.FolderTracker(['ctf',self.to_decode], 
+				filename = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
+			pickle.dump(info, handle)	
+
+		if self.ctf_param:
+			print('get ctf tuning params')
+			ctf_param = self.ctfs_tuning_params(ctf)
+			with open(self.FolderTracker(['ctf',self.to_decode], 
+					filename=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
+				print('saving ctf params')
+				pickle.dump(ctf_param, handle)
+
+	def summarize_ctfs(self, X, nr_freqs, nr_samps):
+		'''	Captures a range of summary statistics of the channel tuning function. Slopes are calculated by 	
+		collapsing across symmetric data points in the tuning curve. The collapsed data create a linear 
+		increasing vector array from the tails to the peak of the tuning curve. A first order polynomial 
+		is then fitted to this array to estimate the slope of the tuning curve. In addition, the tuning curve is
+		fitted to a Gaussian. The amplitude, mean and sigma of this function are also computed. 
+
+		Arguments:
+			X {array} -- CTF data across frequencies and sample points (nr freqs, nr samps, nr chans) 
+			nr_freqs {int} --  number of frequencies in CTF data
+			nr_samps {int} -- number of sample points in CTF data
+		
+		Returns:
+			[type] -- [description]
 		'''
 
-		# select electrodes
-		picks = self.selectChannelId(self.eeg, self.channel_folder)
-		eegs = self.eeg._data[:,picks,:]
+		if self.nr_chans % 2 == 0:
+			steps = int(self.nr_chans / 2 + 1) 
+		else:
+			steps = int(np.ceil(self.nr_chans / 2.0))	
 
-		# select conditions from pickle file	
-		if conditions == ['all']:
-			cnd_mask = np.ones(self.beh['condition'].size, dtype = bool)
-		else:	
-			cnd_mask = np.array([cnd in conditions for cnd in self.beh['condition']])
+		slopes = np.empty((nr_freqs, nr_samps)) * np.nan
+		amps = np.copy(slopes)
+		baselines = np.copy(slopes)
+		concentrations = np.copy(slopes)
+		means = np.copy(slopes)
+		preds = np.copy(slopes)
+		rmses = np.copy(slopes)
 
-		cnds = self.beh['condition'][cnd_mask].values
-		pos_bins = np.squeeze(self.beh[self.decoding][cnd_mask].values)
+		for f in range(nr_freqs):
+			for s in range(nr_samps):
+				d = X[f,s] 
+				# collapse symmetric slope positions, 
+				# eg (0, (45,315), (90,270), (135,225), 180)
+				if self.nr_chans % 2 == 0:
+					d = np.array([d[0]] + [np.mean((d[i],d[-i]))
+											 for i in range(1,steps)])
+				else:
+					d = np.array([np.mean((d[i],d[i+(-1-2*i)])) 
+												for i in range(steps)])
+				slopes[f,s] = np.polyfit(range(1, len(d) + 1), d, 1)[0]
+				#amps[f,s], means[f,s], sigmas[f,s] = self.fitGaussian(X[f,s])
+				(amps[f,s], 
+				baselines[f,s], 
+				concentrations[f,s], 
+				means[f,s], 
+				rmses[f,s]) = self.fitCosToCTF(X[f,s])
 
-		eegs = eegs[cnd_mask,:,:]
+		return slopes, amps, baselines, concentrations, means, rmses
 
-		return pos_bins, cnds, eegs
+	def ctfs_tuning_params(self, ctf: dict):
 
+		# get ctf params
+		ctf_param = {}
+		(nr_perm, 
+		nr_freq, _, 
+		nr_samples, _, _,) =  ctf[list(ctf.keys())[0]]['C2_E'].shape
+
+		# loop over  all conditions
+		for cnd in ctf.keys():
+			ctf_param.update({cnd:{}})
+			# initiate arrays
+			(e_slopes, t_slopes,
+			e_amps, t_amps,
+			e_base, t_base,
+			e_conc, t_conc,
+			e_means, t_means) = np.zeros((10, nr_perm,nr_freq, nr_samples))
+			for p in range(nr_perm):
+				ctf_data = ctf[cnd]['C2_E'][p].mean(axis = -2)
+				(e_slopes[p,:,:], 
+				e_amps[p,:,:], 
+				e_base[p,:,:], 
+				e_conc[p,:,:], 
+				e_means[p,:,:],_) = self.summarize_ctfs(ctf_data.mean(axis=1), 
+														nr_freq, nr_samples)
+				ctf_data = ctf[cnd]['C2_T'][p].mean(axis = -2)
+				(t_slopes[p,:,:], 
+				t_amps[p,:,:], 
+				t_base[p,:,:], 
+				t_conc[p,:,:], 
+				t_means[p,:,:],_) = self.summarize_ctfs(ctf_data.mean(axis=1), 
+														nr_freq, nr_samples)
+
+			ctf_param[cnd]['T_slopes'] = t_slopes[0]
+			ctf_param[cnd]['E_slopes'] = e_slopes[0]
+			ctf_param[cnd]['T_amps'] = t_amps[0]
+			ctf_param[cnd]['E_amps'] = e_amps[0]
+			ctf_param[cnd]['T_base'] = t_base[0]
+			ctf_param[cnd]['E_base'] = e_base[0]
+			ctf_param[cnd]['T_conc'] = t_conc[0]
+			ctf_param[cnd]['E_conc'] = e_conc[0]
+			ctf_param[cnd]['T_means'] = t_means[0]
+			ctf_param[cnd]['E_means'] = e_means[0]
+
+		return ctf_param
 
 	def calculateBasisset(self, nr_bins = 8, nr_chans = 8, sin_power = 7, delta = False):
 		'''
@@ -165,57 +770,6 @@ class CTF(BDM):
 	
 		return basisset	
 
-
-	def powerAnalysis(self, data, tois, sfreq, band, downsample, power):
-		'''
-		powerAnalysis bandpass filters raw EEG signal to isolate frequency-specific activity using a 5th order butterworth filter (different then original FIR filter). 
-		A Hilbert Transform is then applied to the filtered data to extract the complex analytic signal. To extract the total power this signal is computed by squaring 
-		the complex magnitude of the complex signal (is done within SpatialCTF). 
-
-		Arguments
-		- - - - - 
-		data(array): raw eeg data (epochs x nr_electrodes x nr_samps)
-		tois(array): boolean index to remove times that are not of interest after filtering 
-		sfreq(int): sampling rate in Hz
-		band(list): lower and higher cut-off value for bandpass filter
-		downsample(int): factor to downsample data after filtering
-		power (str): determines whether analysis are performed on power or voltage
-
-		Returns
-		- - - -
-		data_evoked(array): evoked power (ongoing activity irrespective of phase relation to stimulus onset)
-		data_total(array): total power (phase-locked activity)
-		'''	
-
-		_, nr_chan, nr_time = data.shape
-		T = np.empty(data.shape, dtype= np.complex_) * np.nan
-		E = np.copy(T)
-
-		if power == 'filtered':
-			# loop over channels 
-			for ch in range(nr_chan):
-				# concatenate trials to speed up processing time
-				x = np.ravel(data[:,ch,:])
-				x_hilb = hilbert(filter_data(x, sfreq,band[0], band[1], method = 'iir', iir_params = dict(ftype = 'butterworth', order = 5)))
-				x_hilb = np.reshape(x_hilb, (data.shape[0],-1))
-				T[:,ch] = np.abs(x_hilb)**2
-				E[:,ch] = x_hilb
-		else:
-			T = data
-			E = data
-			
-		# trim filtered data to remove times that are not of interest (after filtering to avoid artifacts)
-		E = E[:,:,tois]
-		T = T[:,:,tois]
-
-		# downsample to reduced sample rate (after filtering so that downsampling doesn't affect filtering)
-		E = E[:,:,::downsample]
-		T = T[:,:,::downsample]
-		#E = mne.filter.resample(E, down = downsample, npad = 'auto')
-		#T = mne.filter.resample(T, down = downsample, npad = 'auto')
-
-		return E, T
-
 	def forwardModel(self, train_X, test_X, C1):
 		'''
 		forwardModel applies an inverted encoding model (IEM) to each time point in the analyses. This routine proceeds in two stages (train and test).
@@ -266,106 +820,6 @@ class CTF(BDM):
 		return C2, C2s, W 											# return the unshifted and the shifted channel response
 
 
-	def maxTrial(self, conditions, pos_bins, of_interest, method = 'k-fold'):
-		'''
-		maxTrial calculates the maximum number of trials that can be used in the block/fold assignment 
-		of the forward model such that the number of trials used in the IEM is equated across conditions
-
-		Arguments
-		- - - - - 
-		conditions (array): array with conditions 
-		pos_bins (array): array with position bins
-		of_interest (array | str): condition(s) that will be analyzed
-		method (str): method used for block assignment
-
-		Returns
-		- - - -
-		nr_per_bin(int): maximum number of trials 
-		'''
-
-		if type(of_interest) == list and len(of_interest) > 1:
-
-			bin_count = np.zeros((len(of_interest),self.nr_bins))
-			for i, cond in enumerate(of_interest):
-				temp_bin = pos_bins[conditions == cond]
-				for b in range(self.nr_bins):
-					bin_count[i,b] = sum(temp_bin == b) 
-
-		elif of_interest == ['all']:
-			_, bin_count = np.unique(pos_bins, return_counts = True)
-
-		else:
-			_, bin_count = np.unique(pos_bins[conditions == of_interest[0]], return_counts = True)			
-
-		min_count = np.min(bin_count)
-		if method == 'Foster':
-			nr_per_bin = int(np.floor(min_count/self.nr_blocks))						# max number of trials per bin
-		elif method == 'k-fold':
-			nr_per_bin = int(np.floor(min_count/self.nr_iter)*self.nr_iter)
-
-		return nr_per_bin
-
-
-	def assignBlocks(self, pos_bin, idx_tr, nr_per_bin,  nr_iter):
-		'''
-		assignBlocks creates a random block assignment (train and test blocks)
-
-		Arguments
-		- - - - - 
-		pos_bin (array): array with position bins
-		idx_tr (array): array of trial numbers corresponding to pos_bin labels
-		nr_per_bin(int): maximum number of trials to be used per location bin
-		nr_iter (int): number of iterations used for IEM
-		Returns
-		- - - -
-		blocks(array): randomly assigned block indices
-		'''
-		
-		nr_trials = len(pos_bin)
-		bl_assign = np.zeros((nr_iter, nr_trials))
-
-		for i in range(nr_iter):
-			#preallocate arrays
-			blocks = np.empty(nr_trials) * np.nan
-			shuf_blocks = np.empty(nr_trials) * np.nan
-
-			idx_shuf = np.random.permutation(nr_trials) 			# create shuffle index
-			shuf_bin = pos_bin[idx_shuf]							# shuffle trial order
-
-			# take the 1st nr_per_bin x nr_blocks trials for each position bin
-			for b in range(self.nr_bins):
-				idx = np.where(shuf_bin == b)[0] 					# get index of trials belonging to the current bin
-				idx = idx[:nr_per_bin * self.nr_blocks] 			# drop excess trials
-				x = np.tile(np.arange(self.nr_blocks),(nr_per_bin,1))
-				shuf_blocks.flat[idx] = x 							# assign randomly order trial to blocks
-
-			# unshuffle block assignment and save to CTF
-			blocks[idx_shuf] = shuf_blocks	
-			bl_assign[i] = blocks
-			tr_per_block = int(sum(blocks == 0)/self.nr_bins)
-
-		# split up data according to number of blocks in one test and remaining training sets
-		tr_idx = np.zeros((nr_iter * self.nr_blocks, self.nr_bins, self.nr_blocks - 1, tr_per_block), dtype = int)
-		te_idx = np.zeros((nr_iter * self.nr_blocks, self.nr_bins, tr_per_block), dtype = int)
-
-		# make sure that data is splitted such that test contains indices of test trials
-		# and train contains indices of rows for all seperate train trials
-		idx = 0
-		for itr in range(nr_iter):
-			for bl in range(self.nr_blocks):
-				for b in range(self.nr_bins): 
-					# select trials where bin is b from test block trials 
-					te_idx[idx,b] = idx_tr[np.where((bl_assign[itr] == bl) * (pos_bin == b))[0]]
-					# select trials where bin is b from no test block trials
-					train = idx_tr[np.where((~np.isnan(bl_assign[itr])) * (bl_assign[itr] != bl) * (pos_bin == b))[0]]
-					random.shuffle(train)
-					# split data in number of training blocks (i.e. nr test blocks - 1) and save data seperately
-					train = np.array_split(train, self.nr_blocks - 1)
-					for j in range(self.nr_blocks - 1):
-						tr_idx[idx, b, j] = train[j]
-				idx += 1
-
-		return tr_idx, te_idx
 
 	def equateBins(self, bins, X):
 		'''
@@ -507,7 +961,10 @@ class CTF(BDM):
 			print('saving cross training CTF dict')
 			pickle.dump(CTF, handle)
 
-	def spatialCTF(self, sj, window, conditions = 'all', freqs = dict(alpha = [8,12]), downsample = 1, method = 'Foster', nr_perm = 0, collapse = False):
+	def spatial_ctf_old(self, pos_labels: dict = 'all', cnds: dict = None, 
+					excl_factor: dict = None, window_oi: tuple = (None, None),
+					freqs = dict(alpha = [8,12]), downsample = 1, 
+					nr_perm = 0, collapse = False):
 		'''
 		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
 
@@ -528,50 +985,48 @@ class CTF(BDM):
 		self(object): dict of CTF data
 		'''	
 
-		# set number of permutations
-		nr_perm += 1
-		
+		# read in data
+		epochs, beh = self.select_ctf_data(self.elec_oi, excl_factor)
+
+		# based on conditions get position bins
+		(pos_bins, 
+		cnds, 
+		epochs, 
+		max_tr) = self.select_ctf_labels(epochs, beh, pos_labels, cnds)
+
+		# set params
+		tois = get_time_slice(epochs.times, window_oi[0], window_oi[1])
 		ctf = {}
 		ctf_info = {}
-
-		# set nr_blocks (only relevant when Foster method is used)
-		if method == 'k-fold':
+		nr_perm += 1
+		ctf_info['times'] = self.eeg.times[samples][::downsample]
+		nr_samples = ctf_info['times'].size
+		if self.method == 'k-fold':
+			print('nr_blocks is irrelevant and will be reset to 1')
 			self.nr_blocks = 1
-		
-		# set condition for loop
-		if type(conditions) == str:
-			cnd_name = 'all'
-			conditions = [conditions]
-		else:
-			cnd_name = 'cnds'												
-			
+								
 		if 'all' in freqs.keys():
 			frqs = np.vstack([[i, i + 4] for i in range(freqs['all'][0],freqs['all'][1] + 1,2)])
 		else:									
 			frqs = np.vstack([[freqs[band][0],freqs[band][1]] for band in freqs.keys()])
 		nr_freqs = frqs.shape[0]
 
-		# read in all data
-		pos_bins, cnds, eegs = self.selectData(conditions)
-		samples = np.logical_and(self.eeg.times >= window[0], self.eeg.times <= window[1])	
-		ctf_info['times'] = self.eeg.times[samples][::downsample]
-		nr_samples = ctf_info['times'].size
-		
-		# Determine the number of trials that can be used for each position bin, matched across conditions
-		nr_per_bin = self.maxTrial(cnds, pos_bins, conditions, method) # NEEDS TO BE FIXED
-
 		if collapse:
-			conditions += ['all']	
+			TODO: fix
+			conditions += ['all_trials']	
 
-		# Loop over frequency bands (such that all data is filtered only once)
+		# Frequency loop (ensures that data is only filtered once)
 		for fr in range(nr_freqs):
 			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
 
 			# Time-Frequency Analysis 
-			E, T = self.powerAnalysis(eegs, samples, self.sfreq, [frqs[fr][0],frqs[fr][1]], downsample, self.power)
+			E, T = self.extract_power(epochs, tois, downsample)
+			#E, T = self.powerAnalysis(eeg, samples, self.sfreq, [frqs[fr][0],frqs[fr][1]], downsample, self.power)
 
 			# Loop over conditions
-			for c, cnd in enumerate(conditions):
+			for c, cnd in enumerate(np.unique(cnds)):
+
+				# preallocate arrays
 
 				# update CTF dict with preallocated arrays such that condition data can be saved later 
 				if cnd not in ctf_info.keys():
@@ -911,7 +1366,7 @@ class CTF(BDM):
 			X = np.zeros((num_bins, 2))
 			X[:,0] = pred
 			X[:,1] = np.ones(num_bins)
-			betas, _, _, _ = np.linalg.lstsq(X, d)
+			betas, _, _, _ = np.linalg.lstsq(X, d, rcond=None)
 			amps[i], baseline[i] = betas
 			est = pred * betas[0] + betas[1]
 			sse[i] = sum((est - d)**2)

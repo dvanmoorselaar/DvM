@@ -210,8 +210,11 @@ class TF(FolderStructure):
 		raw_conv = np.zeros((nr_epochs, self.num_frex, picks.size, 
 							nr_time), dtype = complex)
 
-		# loop over channels					
+		# loop over channels	
+		nr_chan = picks.size				
 		for i, pick in enumerate(picks):
+			print(f'Decomposing channel {i} out of {nr_chan} channels', 
+				  end='\r')
 
 			x = epochs._data[:, pick].ravel()	
 			if self.method == 'wavelet':
@@ -266,13 +269,16 @@ class TF(FolderStructure):
 			elif method == 'norm':
 				print('For normalization procedure it is assumed that it is as'
 				 	 ' if all stimuli of interest are presented right')
-				tf['power'][cnd], info = self.normalize_power(power, elec_oi) 
+				power = np.mean(power, axis = 0)
+				tf['power'][cnd], info = self.normalize_power(power, 
+															 list(elec_oi)) 
 				tf.update(dict(norm_info = info))
 			else:
 				raise ValueError('Invalid method specified')
-			
+
 			# power values can now safely be averaged
-			tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
+			if method in ['cnd_avg', 'cnd_spec']:
+				tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
 
 		return tf
 				
@@ -298,7 +304,7 @@ class TF(FolderStructure):
 	def normalize_power(self, power: np.array, elec_oi: list):
 
 		# set params
-		_, num_frex, _, nr_time = power.shape
+		num_frex, _, nr_time = power.shape
 
 		# ipsi_contra pairs
 		contra_ipsi_pair = [('Fp1','Fp2'),('AF7','AF8'),('AF3','AF4'),
@@ -325,9 +331,9 @@ class TF(FolderStructure):
 			# get indices of electrode pair
 			contra_idx = elec_oi.index(contra)
 			ipsi_idx = elec_oi.index(ipsi)
-			subtr = power[:,:,contra_idx] - power[:,:,ipsi_idx]
-			add = power[:,:,contra_idx] + power[:,:,ipsi_idx]
-			norm[i] = np.mean(subtr/add, axis = 0)	
+			subtr = power[:,contra_idx] - power[:,ipsi_idx]
+			add = power[:,contra_idx] + power[:,ipsi_idx]
+			norm[i] = subtr/add	
 
 		return norm, norm_elec
 
@@ -352,7 +358,7 @@ class TF(FolderStructure):
 		# get baseline index
 		times = epochs.times
 		nr_time = times.size
-		if type(self.baseline) is not None:
+		if self.baseline is not None:
 			base = {}
 			s, e = self.baseline
 			base_idx = get_time_slice(times, s, e)
@@ -385,9 +391,11 @@ class TF(FolderStructure):
 			raw_conv = self.tf_loop(epochs[idx_c], picks)
 
 			# get baseline power (correction is done after condition loop)
-			if type(self.baseline) is not None:
+			if self.baseline is not None:
 				base[cnd] = np.mean(abs(raw_conv[...,base_idx])**2, 
 									axis = (0,3))
+			else:
+				base = {}
 			# populate tf
 			tf['power'][cnd] = abs(raw_conv[..., idx_2_save])**2
 
