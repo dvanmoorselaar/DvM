@@ -89,22 +89,29 @@ class EYE(FolderStructure):
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
-		# check whether each beh trial is logged within eye 
-		if eye.shape[0] < beh.shape[0]:
-			print('Trials in beh and eye do not match. Trials removed from beh')
+		# check whether each beh trial is logged within eye
+		nr_miss =  eye.shape[0] - beh.shape[0]
+		if nr_miss < 1:
+			print('Trials in beh and eye do not match. Trials removed from') 
+			print(' beh. Please inspect data carefully')
+
 			eye_trials = []
 
 			for i, trial in enumerate(eye):
 				for event in trial['events']['msg']:
-					if 'end trial' in event[1]:
+					if start in event[1]:
 						trial_nr = int(''.join(filter(str.isdigit, event[1])))
 						# control for OpenSesame trial counter
 						eye_trials.append(trial_nr + 1)
 						if trial_nr + 1 not in beh['nr_trials'].values:
 							print(trial_nr)
 
-			eye_mask = np.in1d(beh['nr_trials'].values, eye_trials)
-			beh = beh[np.array(eye_mask)]		
+			#  TODO: make linking more generic
+			if len(eye_trials) == eye.shape[0]:
+				beh.drop(beh.index[nr_miss:], inplace=True) 
+			else:
+				eye_mask = np.in1d(beh['nr_trials'].values, eye_trials)
+				beh = beh[np.array(eye_mask)]		
 
 		# remove practice trials from eye and beh data
 		eye = eye[np.array(beh['practice'] == 'no')]
@@ -262,7 +269,6 @@ class EYE(FolderStructure):
 		bins, angles = self.createAngleBins(x,y, 0,3,0.25, 40)
 
 		return x, y, bins, angles
-
 
 
 	def saccadeVector(self, sj, start = -300, end = 800):

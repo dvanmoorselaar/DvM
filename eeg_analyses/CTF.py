@@ -44,13 +44,12 @@ class CTF(BDM):
 	Scipts based on Matlab scripts published on open science Framework (https://osf.io/bwzjj/) and lab visit to Chicago University (spring quarter 2016).
 	'''
 
-	def __init__(self, sj: int, epochs: mne.Epochs, beh: pd.DataFrame, 
-				to_decode: str, nr_bins: int, nr_chans: int, nr_iter: int = 10, 
-				nr_blocks: int = 3, elec_oi: Union[str, list] = 'all', 
-				delta: bool = False, method: str = 'Foster', 
-				ctf_param: bool = True, power: str = 'band', min_freq: int = 4,
-				max_freq: int = 40, num_frex: int = 25, 
-				freq_scaling: str = 'log'):
+	def __init__(self,sj:int,epochs:mne.Epochs,beh:pd.DataFrame, 
+				to_decode:str,nr_bins:int,nr_chans:int,nr_iter:int=10, 
+				nr_blocks:int=3,elec_oi:Union[str,list]='all', 
+				delta:bool=False,method:str='Foster',avg_ch:bool=True,
+				ctf_param:bool=True,power:str='band',min_freq:int=4,
+				max_freq:int=40,num_frex:int=25,freq_scaling:str='log'):
 		''' 
 		
 		Arguments
@@ -78,6 +77,8 @@ class CTF(BDM):
 		self.to_decode = to_decode
 		self.elec_oi = elec_oi
 		self.ctf_param = ctf_param
+		self.avg_ch = avg_ch
+		self.cross = False
 
 		# specify model parameters
 		self.method = method
@@ -87,8 +88,13 @@ class CTF(BDM):
 		self.nr_blocks = nr_blocks												# nr blocks to split up training and test data with leave one out test procedure
 		self.sfreq = 512														# shift of channel position
 		self.power = power
-		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, delta = delta)		# hypothesized set tuning functions underlying power measured across electrodes
-
+		self.min_freq = min_freq
+		self.max_freq = max_freq
+		self.num_frex = num_frex
+		self.freq_scaling = freq_scaling
+		# hypothesized set tuning functions underlying power measured across electrodes
+		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, 
+											  delta = delta)		
 	def select_ctf_data(self, elec_oi: Union[list, str]=  'all',
 						excl_factor: dict = None) -> Tuple[mne.Epochs,
 															pd.DataFrame]:
@@ -124,6 +130,28 @@ class CTF(BDM):
 
 		return epochs, beh
 
+	def check_cnds_input(self, cnds:dict)-> Tuple[list, str]:
+		"""
+		checks whether ctf should be run within or across conditions
+
+		Args:
+			cnds (dict): dictionary with conditions of interest as values
+
+		Returns:
+			train_cnds (list): Conditions used train and test the model.
+			In case test_cnd is not None, these conditions will be used solely 
+			to train the model
+			test_cnd (str): condition to test the model
+		"""
+		
+		(_, cnds_oi), = cnds.items()
+		if type(cnds_oi[0]) == list:
+			train_cnds, test_cnd = cnds_oi
+		else:
+			train_cnds, test_cnd = cnds_oi, None
+
+		return train_cnds, test_cnd
+
 	def select_ctf_labels(self, epochs: mne.Epochs, beh: pd.DataFrame, 
 						pos_labels: dict, cnds: dict) -> Tuple[np.array, 
 															np.array,
@@ -158,7 +186,7 @@ class CTF(BDM):
 			cnd_idx = np.arange(beh.shape[0])
 		else:
 			(cnd_header, cnds_oi), = cnds.items()
-			cnd_idx = np.where(beh[cnd_header].isin(cnds_oi))[0]
+			cnd_idx = np.where(beh[cnd_header].isin(np.hstack(cnds_oi)))[0]
 			cnds = beh[cnd_header]
 		
 		# extract position labels of interest
@@ -391,20 +419,67 @@ class CTF(BDM):
 
 	def set_frequencies(self, freqs):
 
-		if freqs == 'main_settings':
-			pass
-		elif type(freqs) == dict:
-			freqs = np.vstack([[freqs[band][0],freqs[band][1]] 
-												for band in freqs.keys()])
-			nr_freqs = freqs.shape[0]
+		if freqs == 'main_param':
+			if self.freq_scaling == 'log':
+				frex = np.logspace(np.log10(self.min_freq), 
+								np.log10(self.max_freq), 
+							  	self.num_frex)
+			elif self.freq_scaling == 'linear':
+				frex = np.linspace(self.min_freq,self.max_freq,self.num_frex)
+			if self.power == 'band':
+				frex = [(frex[i], frex[i+1]) for i in range(self.num_frex -1)]
 
-		return freqs, nr_freqs
+			
+		elif type(freqs) == dict:
+			frex = [(freqs[band][0],freqs[band][1]) for band in freqs.keys()]
+		nr_frex = len(frex)
+
+		return frex, nr_frex
+
+	def train_test_cross(self, pos_bins: np.array,train_idx:np.array,
+						test_idx:np.array)->Tuple[np.array, np.array]:
+		"""
+		selects trail indices for the train and the test set
+
+		Args:
+			pos_bins (np.array): array with position bins
+			train_idx (np.array): array with indices for training condition
+			test_idx (np.array): array with indices for test condition
+
+		Returns:
+			train_idx (np.array): indices used to train the model (with 
+			bin labels balanced)
+			test_idx (np.array): indices used to test the model (with 
+			bin labels balanced)
+		"""
+
+		# select training data (ensure that number of bins is balanced)
+		train_bins = pos_bins[train_idx]
+		train_idx = np.arange(pos_bins.size)[train_idx]
+		bins,  counts = np.unique(train_bins, return_counts=True)
+		min_obs = min(counts)
+		train_idx = [np.random.choice(train_idx[train_bins==b],min_obs,False) 
+															for b in bins]
+		# add new axis so that trial indexing does not crash
+		train_idx = np.stack(train_idx)[None,:,None,:]
+
+		# select test data (ensure that number of bins is balanced)
+		test_bins = pos_bins[test_idx]
+		test_idx = np.arange(pos_bins.size)[test_idx]
+		bins,  counts = np.unique(test_bins, return_counts=True)
+		min_obs = min(counts)
+		test_idx = [np.random.choice(test_idx[test_bins==b],min_obs,False) 
+															for b in bins]
+		# add new axis so that trial indexing does not crash
+		test_idx = np.stack(test_idx)[None,:,None,:]
+
+		return train_idx, test_idx
 
 	def train_test_split(self, pos_bins: np.array,cnd_idx: np.array, 
-						max_tr: int):
+						max_tr: int)->Tuple[np.array, np.array]:
 	
 		'''
-		assignBlocks creates a random block assignment (train and test blocks)
+		creates a random block assignment (train and test blocks)
 
 		Arguments
 		- - - - - 
@@ -468,40 +543,54 @@ class CTF(BDM):
 
 		return train_idx, test_idx
 
-	def spatial_ctf(self, pos_labels:dict ='all', cnds:dict = None, 
-					excl_factor:dict=None, window_oi:tuple=(None, None),
-					freqs=dict(alpha=[8,12]), downsample:int = 1, 
-					nr_perm:int= 0, collapse:bool=False, name:int='main'):
-		'''
-		Calculates spatial CTFs across subjects and conditions using the filter-Hilbert method. 
+	def spatial_ctf(self, pos_labels:dict ='all',cnds:dict=None, 
+					excl_factor:dict=None, window_oi:tuple=(None,None),
+					freqs:dict='main_param',downsample:int = 1, 
+					nr_perm:int= 0,collapse:bool=False,name:int='main'):
+		"""
+		calculate spatially based channel tuning functions across conditions.
+		Training and testing cab be dobe either witin or across conditions (see
+		cnds argument)
 
-		Arguments
-		- - - - - 
-		sj (list): list of subject id's 
-		window (list): time interval in ms used for ctf calculation
-		conditions (list)| Default ('all'): List of conditions. Defaults to all conditions
-		freqs (dict) | Default is the alpha band: Frequency band used for bandpass filter. If key set to all, analyses will be performed in increments 
-		from 1Hz
-		downsample (int): factor to downsample the bandpass filtered data
-		method (str): method used for splitting data into training and testing sets
-		nr_perm (int): number of times model is run with permuted data
-		collapse (bool): create CTF collapsed across conditions
-
-		Returns
-		- - - -
-		self(object): dict of CTF data
-		'''	
-
+		Args:
+			pos_labels (dict, optional): key, item pair where key points to the 
+			column in beh that contains position labels for ctf analysis, and 
+			the item is a list that contains all values that will be considered 
+			in the ctf analysis. Defaults to all (i.e., all values as specified
+			in the class argument to_decode will be considered in the ctf 
+			analysis). 
+			cnds (dict, optional): key, item pair where key points to the 
+			column in beh that contains conditions of  interest, and 
+			the item is a list that contains conditions of interets. To run a 
+			cross decoding analysis, the first value in the cnds dict needs to 
+			be a list specifying the conditions to train the model. Currently 
+			only a single condition can be tested per run. Defaults to None 
+			(i.e., include all trials)
+			excl_factor (dict, optional): This gives the option to exclude 
+			specific conditions from analysis. For example, to only include 
+			trials where the cue was pointed to the left and not to the right 
+			specify the following: factor = dict('cue_direc': ['right']). 
+			Mutiple column headers and multiple variables per header can be 
+			specified . Defaults to None.
+			window_oi (tuple, optional): time window of interest (start to end) 
+			for ctf analysis. Time window will  be cropped after filtering. 
+			Defaults to (None,None).
+			freqs (dict, optional): key, item pair where key is the name of 
+			the frequency band of interest, and the item is a list with the 
+			lower and upper frequency. Defaults to main_param, which will use 
+			the time frequency settings as specified in the CTF class. 
+			downsample (int, optional): factor to downsample data (is applied
+			after filtering). Defaults to 1.
+			nr_perm (int, optional): _description_. Defaults to 0.
+			collapse (bool, optional): _description_. Defaults to False.
+			name (int, optional): _description_. Defaults to 'main'.
+		"""
+ 
 		# read in data
 		epochs, beh = self.select_ctf_data(self.elec_oi, excl_factor)
 
-		# based on conditions get position bins
-		(pos_bins, 
-		cnds, 
-		epochs, 
-		max_tr) = self.select_ctf_labels(epochs, beh, pos_labels, cnds)
-
 		# set params
+		nr_itr = self.nr_iter * self.nr_blocks
 		ctf_name = f'{self.sj}_{name}'
 		nr_perm += 1
 		nr_elec = len(epochs.ch_names)
@@ -511,21 +600,38 @@ class CTF(BDM):
 		freqs, nr_freqs = self.set_frequencies(freqs)
 		if self.method == 'k-fold':
 			print('nr_blocks is irrelevant and will be reset to 1')
-			self.nr_blocks = 1
-								
+			#self.nr_blocks = 1						
 		if collapse:
-			TODO: fix
-			conditions += ['all_trials']	
+			pass
+			# TODO: fix
+			#conditions += ['all_trials']
+	
+		if type(cnds) == dict:
+			train_cnds, test_cnd = self.check_cnds_input(cnds)
+			if test_cnd is not None:
+				self.cross = True
+				print('cross time decoding only requires a single fold:' 
+					' nr_blocks and nr_iter is reset to 1')
+				self.nr_blocks = 2 # in effect equal to 1 (see below)
+				nr_itr = 1
+		else:
+			train_cnds= ['all_trials']
+			
+		# based on conditions get position bins
+		(pos_bins, 
+		cnds, 
+		epochs, 
+		max_tr) = self.select_ctf_labels(epochs, beh, pos_labels, cnds)
 
 		# Frequency loop (ensures that data is only filtered once)
 		for fr in range(nr_freqs):
 			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
 
 			# Time-Frequency Analysis 
-			E, T = self.extract_power(epochs, freqs[fr], tois, downsample)
+			E, T = self.extract_power(epochs.copy(),freqs[fr],tois,downsample)
 
 			# Loop over conditions
-			for c, cnd in enumerate(np.unique(cnds)):
+			for c, cnd in enumerate(train_cnds):
 				print(f'Running ctf for {cnd} condition')
 
 				# preallocate arrays
@@ -546,8 +652,16 @@ class CTF(BDM):
 									'W_E':W_E,'W_T':W_T}})
 					# get condition indices
 					cnd_idx = cnds == cnd
-					(train_idx, 
-					test_idx) = self.train_test_split(pos_bins,cnd_idx,max_tr)
+					if self.cross:
+						test_idx = cnds == test_cnd
+						(train_idx, 
+						test_idx) = self.train_test_cross(pos_bins,cnd_idx,
+														 test_idx)
+					else:
+						(train_idx, 
+						test_idx) = self.train_test_split(pos_bins,
+														cnd_idx,max_tr)
+
 					info[cnd]['train_idx'] = train_idx
 					info[cnd]['test_idx'] = test_idx
 					if self.method == 'Foster':
@@ -557,7 +671,7 @@ class CTF(BDM):
 						C1 = self.basisset
 
 				# iteration loop
-				for itr in range(self.nr_iter * self.nr_blocks):
+				for itr in range(nr_itr):
 
 					# TODO: insert permutation loop
 					p = 0
@@ -577,7 +691,7 @@ class CTF(BDM):
 					# position bin loope
 					bin_cnt = 0
 					for bin in range(self.nr_bins):
-						test_idx = info[cnd]['test_idx'][itr][bin]
+						test_idx = np.squeeze(info[cnd]['test_idx'][itr][bin])
 						bin_te_E[bin] = abs(np.mean(E[test_idx], axis = 0))**2
 						bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
 
@@ -602,6 +716,10 @@ class CTF(BDM):
 															bin_te_E,
 															bin_tr_T, 
 															bin_te_T, C1)
+		# take the average across model iterations
+		for cnd in train_cnds:
+			for key in ['C2_E','C2_T','W_E','W_T']:
+				ctf[cnd][key] = ctf[cnd][key].mean(axis = 2)
 
 		# save output
 		with open(self.FolderTracker(['ctf',self.to_decode], 
@@ -673,47 +791,67 @@ class CTF(BDM):
 
 	def ctfs_tuning_params(self, ctf: dict):
 
+
+		params = ['T_slopes','E_slopes',
+				'T_amps','E_amps',
+				'T_base','E_base',
+				'T_conc','E_conc',
+				'T_means','E_means']
+	
 		# get ctf params
 		ctf_param = {}
 		(nr_perm, 
-		nr_freq, _, 
+		nr_freq, 
 		nr_samples, _, _,) =  ctf[list(ctf.keys())[0]]['C2_E'].shape
+		output = np.zeros((nr_perm,nr_freq, nr_samples))
+		if not self.avg_ch:
+			output = np.zeros((nr_perm,nr_freq, nr_samples, self.nr_chans))
 
 		# loop over  all conditions
 		for cnd in ctf.keys():
 			ctf_param.update({cnd:{}})
-			# initiate arrays
-			(e_slopes, t_slopes,
-			e_amps, t_amps,
-			e_base, t_base,
-			e_conc, t_conc,
-			e_means, t_means) = np.zeros((10, nr_perm,nr_freq, nr_samples))
-			for p in range(nr_perm):
-				ctf_data = ctf[cnd]['C2_E'][p].mean(axis = -2)
-				(e_slopes[p,:,:], 
-				e_amps[p,:,:], 
-				e_base[p,:,:], 
-				e_conc[p,:,:], 
-				e_means[p,:,:],_) = self.summarize_ctfs(ctf_data.mean(axis=1), 
-														nr_freq, nr_samples)
-				ctf_data = ctf[cnd]['C2_T'][p].mean(axis = -2)
-				(t_slopes[p,:,:], 
-				t_amps[p,:,:], 
-				t_base[p,:,:], 
-				t_conc[p,:,:], 
-				t_means[p,:,:],_) = self.summarize_ctfs(ctf_data.mean(axis=1), 
-														nr_freq, nr_samples)
+			# initiate output data
+			for param in params:
+				ctf_param[cnd].update({param:output.copy()})
 
-			ctf_param[cnd]['T_slopes'] = t_slopes[0]
-			ctf_param[cnd]['E_slopes'] = e_slopes[0]
-			ctf_param[cnd]['T_amps'] = t_amps[0]
-			ctf_param[cnd]['E_amps'] = e_amps[0]
-			ctf_param[cnd]['T_base'] = t_base[0]
-			ctf_param[cnd]['E_base'] = e_base[0]
-			ctf_param[cnd]['T_conc'] = t_conc[0]
-			ctf_param[cnd]['E_conc'] = e_conc[0]
-			ctf_param[cnd]['T_means'] = t_means[0]
-			ctf_param[cnd]['E_means'] = e_means[0]
+			# get tuning params (seperate for evoked and total power)
+			for p in range(nr_perm):
+				if self.avg_ch:
+					ctf_evoked = ctf[cnd]['C2_E'][p].mean(axis = -2)
+					ctf_total = ctf[cnd]['C2_T'][p].mean(axis = -2)
+
+					(ctf_param[cnd]['E_slopes'][p],
+					ctf_param[cnd]['E_amps'][p],
+					ctf_param[cnd]['E_base'][p],
+					ctf_param[cnd]['E_conc'][p],
+					ctf_param[cnd]['E_means'][p],_
+					) = self.summarize_ctfs(ctf_evoked,nr_freq,nr_samples)
+
+					(ctf_param[cnd]['T_slopes'][p],
+					ctf_param[cnd]['T_amps'][p],
+					ctf_param[cnd]['T_base'][p],
+					ctf_param[cnd]['T_conc'][p],
+					ctf_param[cnd]['T_means'][p],_
+					) = self.summarize_ctfs(ctf_total,nr_freq,nr_samples)
+				else:
+					ctf_evoked = ctf[cnd]['C2_E'][p]
+					ctf_total = ctf[cnd]['C2_T'][p]
+					for ch in range(self.nr_chans):
+						(ctf_param[cnd]['E_slopes'][p,:,:,ch],
+						ctf_param[cnd]['E_amps'][p,:,:,ch],
+						ctf_param[cnd]['E_base'][p,:,:,ch],
+						ctf_param[cnd]['E_conc'][p,:,:,ch],
+						ctf_param[cnd]['E_means'][p,:,:,ch],_
+						)= self.summarize_ctfs(ctf_evoked[:,:,ch],
+												nr_freq,nr_samples)
+
+						(ctf_param[cnd]['T_slopes'][p,:,:,ch],
+						ctf_param[cnd]['T_amps'][p,:,:,ch],
+						ctf_param[cnd]['T_base'][p,:,:,ch],
+						ctf_param[cnd]['T_conc'][p,:,:,ch],
+						ctf_param[cnd]['T_means'][p,:,:,ch],_
+						) = self.summarize_ctfs(ctf_total[:,:,ch],
+											nr_freq,nr_samples)
 
 		return ctf_param
 

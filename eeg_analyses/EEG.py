@@ -335,7 +335,7 @@ class Epochs(mne.Epochs, FolderStructure):
                 picks: Union[str, list, slice]=None, preload: bool=True,
                 reject: dict=None, flat: dict=None, proj: bool=False, 
                 decim: int=1, reject_tmin: float=None, reject_tmax: float=None, 
-                detrend: int=None,on_missing: str='error', 
+                detrend: int=None,on_missing: str='raise', 
                 reject_by_annotation: bool=False,metadata: pd.DataFrame=None, 
                 event_repeated: str='error',
                 verbose: Union[bool, str, int]=None):
@@ -482,8 +482,8 @@ class Epochs(mne.Epochs, FolderStructure):
             if beh_triggers.size > bdf_triggers.size and stop:
 
                 # drop the last items from the beh file
-                missing_trials = np.hstack((missing_trials, 
-                                           beh.index[-nr_miss:].values))
+                # missing_trials = np.hstack((missing_trials, 
+                #                            beh.index[-nr_miss:].values))
                 beh.drop(beh.index[-nr_miss:], inplace=True)   
                 report_str += (f'\n Removed final {nr_miss} trials from '
                               'behavior to allign data. Please inspect your '
@@ -913,7 +913,6 @@ class Epochs(mne.Epochs, FolderStructure):
     def link_eye(self, eye_info: dict, missing: np.array, 
                 vEOG: list = None, hEOG: list = None):
 
-
         # if specified rereference external eog electrodes via subtraction
         # select eog channels
         eog = self.copy().pick_types(eeg=False, eog=True)
@@ -961,14 +960,13 @@ class Epochs(mne.Epochs, FolderStructure):
                                eye_info['drift_correct'])
 
             if missing.size > 0:
-                eye_bins = np.delete(bins, np.array(missing, dtype = int))
+                bins = np.delete(bins, np.array(missing, dtype = int))
                 angles = np.delete(angles, np.array(missing, dtype = int),
                                  axis = 0)
                 x = np.delete(x, np.array(missing, dtype = int), axis =0)
                 y = np.delete(y, np.array(missing, dtype = int), axis = 0)
 
-
-            self.metadata['eye_bins'] = eye_bins
+            self.metadata['eye_bins'] = bins
 
             # add x, y to epochs object
             data = np.stack((x,y)).swapaxes(0,1)

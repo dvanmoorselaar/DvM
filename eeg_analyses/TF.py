@@ -32,7 +32,7 @@ class TF(FolderStructure):
 	def __init__(self, sj: int, beh: pd.DataFrame, epochs: mne.Epochs, 
 				min_freq: int = 4, max_freq: int = 40, num_frex: int = 25,
 				cycle_range: tuple = (3,10), freq_scaling: str = 'log',
-				baseline: tuple = None, base_method: str = 'cnd_spec',
+				baseline: tuple = None, base_method: str = None,
 				method: str = 'wavelet', downsample: int = 1, 
 				laplacian: bool = True):
 		"""
@@ -273,11 +273,13 @@ class TF(FolderStructure):
 				tf['power'][cnd], info = self.normalize_power(power, 
 															 list(elec_oi)) 
 				tf.update(dict(norm_info = info))
+			elif method is None:
+				pass
 			else:
 				raise ValueError('Invalid method specified')
 
 			# power values can now safely be averaged
-			if method in ['cnd_avg', 'cnd_spec']:
+			if method != 'norm':
 				tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
 
 		return tf
@@ -376,7 +378,9 @@ class TF(FolderStructure):
 		else:
 			(cnd_header, cnds), = cnds.items()
 
-		for cnd in cnds:
+		for c, cnd in enumerate(cnds):
+			counter = c + 1 
+			print(f'Decomposing condition {counter}')
 			# set tf name
 			tf_name = f'sj_{self.sj}_{name}'
 

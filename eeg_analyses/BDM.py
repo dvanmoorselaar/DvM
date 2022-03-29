@@ -55,7 +55,7 @@ class BDM(FolderStructure):
 		FolderStructure (object): Class that creates file paths to load raw eeg/ behavior and save decoding ouput
 	"""
 
-	def __init__(self, epochs: mne.Epochs, beh: pd.DataFrame, to_decode: str, nr_folds: int, 
+	def __init__(self, sj: int, epochs: mne.Epochs, beh: pd.DataFrame, to_decode: str, nr_folds: int, 
 				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
 				avg_runs: int = 1, avg_trials: int= 1, sliding_window: tuple = (1, True, False), scale: dict = {'standardize': False, 'scale': False}, 
 				pca_components: tuple = (0, 'across'), bdm_filter: Optional[dict] = None, 
@@ -63,6 +63,7 @@ class BDM(FolderStructure):
 		"""set decoding parameters that will be used in BDM class
 
 		Args:
+			sj (int): Subject number
 			beh (pd.DataFrame): Dataframe with behavioral parameters per epoch (see eeg)
 			eeg (mne.Epochs): epoched eeg data (linked to beh)
 			to_decode (str): column in beh that contains classes used for decoding
@@ -93,7 +94,7 @@ class BDM(FolderStructure):
 			In case of False, no seed is applied before cross validation. In case avg_runs > 1, seed will 
 			be increased by 1 for each run. Defaults to 42213 (A1Z26 cipher of DvM)
 		"""	
-							
+		self.sj = sj					
 		self.beh = beh
 		if bdm_filter != None:
 			self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
@@ -533,7 +534,7 @@ class BDM(FolderStructure):
 
 		return 	eegs, beh, times
 
-	def classify(self,sj: int, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True):
+	def classify(self, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True, bdm_name = 'main'):
 		''' 
 		Arguments
 		- - - - - 
@@ -592,8 +593,8 @@ class BDM(FolderStructure):
 		if collapse:
 			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
-	
-		# loop over conditions
+		# set bdm name
+		bdm_name = f'sj_{self.sj}_{bdm_name}'
 		for cnd in cnds:
 
 			# reset selected trials
@@ -633,7 +634,8 @@ class BDM(FolderStructure):
 							Xtr, Xte, Ytr, Yte = self.train_test_cross(X, y, cnd_idx, test_idx)
 						else:
 							train_tr, test_tr, bdm_info = self.train_test_split(cnd_idx, cnd_labels, n, bdm_info) 
-							Xtr, Xte, Ytr, Yte = self.train_test_select(X, y, train_tr, test_tr)	
+							Xtr, Xte, Ytr, Yte = self.train_test_select(X, y, train_tr, test_tr)
+
 						class_acc[run, p], label_info[run,p] = self.cross_time_decoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix, X)
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
@@ -650,7 +652,7 @@ class BDM(FolderStructure):
 		# store classification dict	
 		if save: 
 			extension = self.set_folder_path()
-			with open(self.FolderTracker(extension, filename = 'class_{}.pickle'.format(sj)) ,'wb') as handle:
+			with open(self.FolderTracker(extension, filename = f'{bdm_name}.pickle') ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	

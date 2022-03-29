@@ -32,11 +32,12 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
             
     EEG.info['bads'] = sj_info['bad_chs'] if type(sj_info['bad_chs']) \
                     == list else sj_info['bad_chs'][f'session_{session}']
-         
+
     #EEG.replaceChannel(sj, session, replace)
     EEG.reReference(ref_channels=ref, vEOG=eog[
                     :2], hEOG=eog[2:], changevoltage=False, 
                     to_remove = ['EXG7','EXG8'])
+
     EEG.setMontage(montage='biosemi64')
 
     # get epoch triggers
@@ -56,7 +57,8 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
 
     # EPOCH DATA 
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
-            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
+            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, 
+            reject_by_annotation = False) 
 
     # ICA
     AR = ArtefactReject(z_thresh = 4, max_bad = 5, flt_pad = epochs.flt_pad, filter_z = True)
@@ -69,8 +71,8 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
         del EEG_ica, epochs_ica
 
     # MATCH BEHAVIOR FILE
-    bdf_remove = sj_info[str(sj)]['bdf_remove'] if 'bdf_remove' in sj_info.keys() else None
-    missing, report_str = epochs.align_behavior(events, trigger_header = trigger_header, headers = beh_oi, bdf_remove = bdf_remove)
+    idx_remove = sj_info[str(sj)]['bdf_remove'] if 'bdf_remove' in sj_info.keys() else None
+    missing, report_str = epochs.align_meta_data(events, trigger_header = trigger_header, headers = beh_oi, idx_remove = idx_remove)
     report.add_html(report_str, title = 'Linking events to behavior')
     report.add_epochs(epochs, title='initial epoch')
     report.save(report_file, overwrite = True)
