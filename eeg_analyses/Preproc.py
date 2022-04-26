@@ -21,12 +21,12 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     sj_info = sj_info[str(sj)] if str(sj) in sj_info.keys() else {'bad_chs': []}
     
     # initiate report
-    report_file = FS.FolderTracker(extension=['preprocessing', 'report', preproc_name], 
+    report_file = FS.folder_tracker(extension=['preprocessing', 'report', preproc_name], 
                      filename=f'sj_{sj}_ses_{session}.html')
     report = mne.Report(title='preprocessing overview', subject = f'{sj}_{session}')
 
     # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME 
-    EEG = mne.concatenate_raws([RawBDF(FS.FolderTracker(extension=['raw_eeg'], 
+    EEG = mne.concatenate_raws([RawBDF(FS.folder_tracker(extension=['raw_eeg'], 
                      filename=f'subject_{sj}_session_{session}_{run}.bdf'),
                      preload=True, eog=eog) for run in eeg_runs])
             
@@ -99,7 +99,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
 
     # save
     epochs.save_preprocessed(preproc_name)
-    log_file = FS.FolderTracker(extension=['preprocessing', 'group_info'], 
+    log_file = FS.folder_tracker(extension=['preprocessing', 'group_info'], 
                      filename=f'preproc_param_{preproc_name}.csv')
     log_preproc((sj, session), log_file, nr_sj = nr_sjs, nr_sessions = nr_sessions, 
                 to_update = dict(nr_clean = len(epochs), z_thresh = z_thresh, nr_bads = len(bads), bad_el = bads))

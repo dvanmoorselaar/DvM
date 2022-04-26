@@ -1,6 +1,7 @@
 import os
 import mne
 import pickle
+import glob
 
 import pandas as pd
 from support.support import *
@@ -15,9 +16,9 @@ class FolderStructure(object):
 		pass 	
 
 	@staticmethod
-	def FolderTracker(extension = [], filename = '', overwrite = True):
+	def folder_tracker(extension = [], filename = '', overwrite = True):
 		'''
-		FolderTracker creates folder address. At the same time it 
+		Creates a folder address. At the same time it 
 		checks whether the specific folder already exists (if not it is created)
 
 		Arguments
@@ -51,7 +52,7 @@ class FolderStructure(object):
 		return folder	
 
 
-	def loadData(self, sj, name = 'all', eyefilter = False, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
+	def load_data(self, sj, name = 'all', eyefilter = False, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
 		'''
 		loads EEG and behavior data
 
@@ -74,14 +75,14 @@ class FolderStructure(object):
 		'''
 
 		# read in processed EEG data
-		eeg = mne.read_epochs(self.FolderTracker(extension = ['processed'], 
+		eeg = mne.read_epochs(self.folder_tracker(extension = ['processed'], 
 							filename = 'subject-{}_{}-epo.fif'.format(sj, name)))
 		if eeg.metadata is not None:
 			beh = eeg.metadata
 		else:
 			# read in processed behavior from pickle file
 			if beh_file:
-				beh = pickle.load(open(self.FolderTracker(extension = ['beh','processed'], 
+				beh = pickle.load(open(self.folder_tracker(extension = ['beh','processed'], 
 									filename = 'subject-{}_{}.pickle'.format(sj, name)),'rb'), encoding='latin1')
 				beh = pd.DataFrame.from_dict(beh)
 			else:
@@ -91,5 +92,46 @@ class FolderStructure(object):
 			beh, eeg = filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh, eye_dict, use_tracker)
 
 		return beh, eeg
+
+	def read_erps(self, erp_folder:str,erp_name:str, 
+				cnds:list=None,sjs:list='all')->dict:
+		"""
+		Read in evoked files of a specific analysis. Evoked data is returned
+		in dictionary 
+
+		Args:
+			erp_folder (str): name of folder within erp folder that contains 
+			data of interest
+			erp_name (str): name assigned to erp analysis
+			cnds (list, optional): conditions of interest. Defaults to None 
+			(i.e., no conditions).
+			sjs (list, optional): List of subjects. Defaults to 'all'.
+
+		Returns:
+			erps (dict): Dictionary with evoked data (with conditions as keeys)
+		"""
+
+		# initiate condtion dict
+		erps = dict.fromkeys(cnds, 0)
+
+		# loop over conditions
+		for cnd in cnds:
+			if sjs == 'all':
+				files = sorted(glob.glob(self.folder_tracker(
+								extension = ['erp',erp_folder],
+								filename = f'sj_*_{cnd}_{erp_name}-ave.fif')))
+			else:
+				files = [self.folder_tracker(
+								extension = ['erp',erp_folder],
+								filename = f'sj_{sj}_{cnd}_{erp_name}-ave.fif') 
+											for sj in sjs]
+
+			# read in actual data
+			erps[cnd] = [mne.read_evokeds(file)[0] for file in files]
+
+		return erps
+
+
+
 
 

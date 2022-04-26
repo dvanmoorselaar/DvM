@@ -2,6 +2,7 @@ import os
 import mne
 import scipy.sparse as sparse
 import warnings
+import itertools
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,29 @@ from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
+
+def create_cnd_loop(cnds):
+	
+	filters = []
+	keys, values = zip(*cnds.items())
+	for var_combo in [dict(zip(keys, v)) for v in itertools.product(*values)]:
+		name = []
+		for i, (k, v) in enumerate(var_combo.items()):
+			name += [str(v)]
+			if i == 0:
+				if isinstance(v,str):
+					df_filt = f'{k} == \'{v}\'' 
+				else:
+					df_filt = f'{k} == {v}'
+			else:
+				if isinstance(v,str):
+					df_filt += f' and {k} == \'{v}\''
+				else:
+					df_filt += f' and {k} == {v}'
+		
+		filters.append((df_filt,'_'.join(name)))
+	
+	return filters
 
 def get_time_slice(times, start_time, end_time, include_final = True, step = None):
 

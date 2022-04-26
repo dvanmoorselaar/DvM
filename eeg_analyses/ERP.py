@@ -19,7 +19,7 @@ from IPython import embed
 from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
 from support.FolderStructure import *
-from support.support import select_electrodes, trial_exclusion
+from support.support import select_electrodes, trial_exclusion, create_cnd_loop
 
 class ERP(FolderStructure):
 
@@ -40,7 +40,7 @@ class ERP(FolderStructure):
 		# set report and condition name
 		name_info = erp_name.split('_')
 		report_name = name_info[-1]
-		report_name = self.FolderTracker(['erp', self.header],
+		report_name = self.folder_tracker(['erp', self.header],
 										f'report_{report_name}.h5')
 		cnd_name = '_'.join(map(str, name_info[:-1]))
 
@@ -96,9 +96,9 @@ class ERP(FolderStructure):
 			(header, left), = topo_flip.items()
 			epochs = self.flip_topography(epochs, beh,  left,  header)
 		else:
-			print('No topography info specified. It is assumed as if all '
-				'stimuli of interest are presented right '
-				'(i.e., left  hemifield')
+			print('No topography info specified. In case of a lateralized '
+				'design. It is assumed as if all stimuli of interest are '
+				'presented right (i.e., left  hemifield')
 
 		return beh, epochs
 
@@ -128,7 +128,7 @@ class ERP(FolderStructure):
 		# if specified select time window of interest
 		if time_oi is not None:
 			evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1]) 
-		evoked.save(self.FolderTracker(['erp', self.header],
+		evoked.save(self.folder_tracker(['erp', self.header],
 										f'{erp_name}-ave.fif'))
 		# update report
 		self.report_erps(evoked, erp_name)
@@ -146,7 +146,7 @@ class ERP(FolderStructure):
 				# if specified select time window of interest
 				if time_oi is not None:
 					evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1]) 															
-				evoked.save(self.FolderTracker(['erp', self.header],
+				evoked.save(self.folder_tracker(['erp', self.header],
 												f'{erp_name}_{rt}-ave.fif'))
 
 	@staticmethod
@@ -247,10 +247,43 @@ class ERP(FolderStructure):
 
 		return idx
 
-	def lateralized_erp(self, pos_labels, cnds: dict = None, 
-						midline: dict = None, topo_flip: dict = None,
-						time_oi: tuple = None, excl_factor: dict = None,
-						RT_split: bool = False, name : str = 'main'):
+	def condition_erp(self, cnds:dict=None,time_oi:tuple=None,
+					excl_factor:dict=None,RT_split:bool=False, 
+					name:str='main'):
+
+		# get data
+		beh, epochs = self.select_erp_data(excl_factor)
+		beh.reset_index(inplace = True, drop = True)
+
+		# loop over all conditions
+		if cnds is None:
+			cnds = ['all_trials']
+		else:
+			cnds = create_cnd_loop(cnds)
+
+		for cnd in cnds:
+			# set erp name
+			if type(cnd) == str:
+				erp_name = f'sj_{self.sj}_{cnd}_{name}'	
+			else:
+				erp_name = f'sj_{self.sj}_{cnd[1]}_{name}'
+
+			# slice condition trials
+			if cnd == 'all_trials':
+				idx_c = np.arange(beh.shape[0])
+			else:
+				idx_c = beh.query(cnd[0]).index.values
+
+			if idx_c.size == 0:
+				print('no data found for {}'.format(cnd))
+				continue
+
+			self.create_erps(epochs, beh, idx_c, time_oi, erp_name, RT_split)
+
+	def lateralized_erp(self,pos_labels:np.array,cnds:dict=None,
+						midline:dict=None, topo_flip:dict=None,
+						time_oi:tuple=None, excl_factor:dict=None,
+						RT_split:bool=False, name:str='main'):
 
 		# get data
 		beh, epochs = self.select_erp_data(excl_factor, topo_flip)
@@ -280,6 +313,127 @@ class ERP(FolderStructure):
 				continue
 
 			self.create_erps(epochs, beh, idx_c, time_oi, erp_name, RT_split)
+
+	@staticmethod
+	def lateralized_erp_idx(erp:list,elec_oi_c:list,
+							elec_oi_i:list)->Tuple[np.array, np.array]:
+		"""
+		get indices of contralateral and ipsilateral electrodes
+
+		Args:
+			erps (list): list with evoked items (mne)
+			elec_oi_c (list): contralateral electrodes
+			elec_oi_i (list): ipsilateral electrodes
+
+		Returns:
+			contra_idx (array): indices corresponding to contralateral 
+			electrodes
+			ipsi_idx (array): indices corresponding to ipsilateral 
+			electrodes
+		"""
+		
+		# extract channels from erps
+		channels = erp[0].ch_names
+
+		# get indices
+		contra_idx = np.array([channels.index(ch) for ch in elec_oi_c])
+		ipsi_idx = np.array([channels.index(ch) for ch in elec_oi_i])
+
+		return contra_idx, ipsi_idx
+
+	@staticmethod
+	def group_erp(erp:list,elec_oi:str,
+				 set_mean:bool=False)->Tuple[np.array,mne.Evoked]:
+		"""
+		Combines all individual data at the group level
+
+		Args:
+			erp (list): list with evoked items (mne)
+			elec_oi (str): electrodes of interest
+			set_mean (bool, optional): If True, returns array with averaged 
+			data. Otherwise data from individual datasets is stacked in the
+			first dimension. Defaults to False.
+
+		Returns:
+			Tuple[np.array,mne.Evoked]: _description_
+		"""
+
+		# get mean and individual data
+		evoked = mne.combine_evoked(erp, weights = 'equal')
+		channels = evoked.ch_names
+		elec_oi_idx = np.array([channels.index(elec) for elec in elec_oi])
+		evoked_X = np.stack([e._data[elec_oi_idx] for e in erp])
+
+		evoked_X = evoked_X.mean(axis = 1)
+
+		if set_mean:
+			evoked_X = np.mean(evoked_X, axis = 0)
+		
+
+		return evoked_X, evoked
+
+	@staticmethod
+	def group_lateralized_erp(erp:list,elec_oi_c:list,
+							elec_oi_i:list,set_mean:bool=False,
+							montage:str='biosemi64')->Tuple[np.array,
+													mne.Evoked]:
+		"""
+		Combines all individual data at the group level by creating a 
+		difference waveform (contralateral - ipsilateral). Also returns a 
+		topographic lateralized evoked object by subtracting the 
+		lateralized counterpart from each electrode 
+		(e.g., data at PO7 reflects PO7 - PO8).
+
+		Args:
+			erp (list): list with evoked items (mne)
+			elec_oi_c (list): Contralateral electrodes of interest
+			elec_oi_i (list): Ipsilateral electrodes of interest
+			set_mean (bool, optional): If True, returns array with averaged 
+			data. Otherwise data from individual datasets is stacked in the
+			first dimension. Defaults to False.
+
+		Returns:
+			diff(np.array): Difference waveform (n X nr_timepoints)
+			evoked(mne.Evoked):
+		"""
+
+		# get mean and individual data
+		evoked_X = np.stack([evoked._data for evoked in erp])
+		evoked = mne.combine_evoked(erp, weights = 'equal')
+		
+		# calculate difference waveform
+		(contra_idx, 
+		ipsi_idx) = ERP.lateralized_erp_idx(erp, elec_oi_c, elec_oi_i)
+		diff = evoked_X[:,contra_idx] - evoked_X[:,ipsi_idx]
+		# average over electrodes
+		diff = diff.mean(axis = 1)
+
+		# set lateralized topography
+		channels = evoked.ch_names
+
+		if montage == 'biosemi64':
+			lat_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8',
+							'F5':'F6','F3':'F4','F1':'F2','FT7':'FT8','FC5':'FC6',
+							'FC3':'FC4','FC1':'FC2','T7':'T8','C5':'C6','C3':'C4',
+							'C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',
+							'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4',
+							'P1':'P2','PO7':'PO8','PO3':'PO4','O1':'O2',
+							'Fpz':'Fpz','AFz':'AFz','Fz':'Fz','FCz':'FCz',
+							'Cz':'Cz','CPz':'CPz','Pz':'Pz','POz':'POz','Oz':'Oz',
+							'Iz':'Iz'
+							}
+		else:
+			print(f'The {montage} montage is not yet supported')
+			return diff
+
+		pre_flip = np.copy(evoked._data)
+		for elec_1, elec_2 in lat_dict.items():
+			elec_1_data = pre_flip[channels.index(elec_1)]
+			elec_2_data = pre_flip[channels.index(elec_2)]
+			evoked._data[channels.index(elec_1)] = elec_1_data - elec_2_data
+			evoked._data[channels.index(elec_2)] = elec_2_data - elec_1_data
+
+		return diff, evoked
 
 	@staticmethod	
 	def baselineCorrect(X, times, base_period):

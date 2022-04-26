@@ -411,7 +411,7 @@ class Epochs(mne.Epochs, FolderStructure):
         report_str = ''
 
         # read in data file and select param of interest
-        beh_file = self.FolderTracker(extension=[
+        beh_file = self.folder_tracker(extension=[
                     'beh', 'raw'], 
                     filename=f'subject-{self.sj}_session_{self.session}.csv')
         beh = pd.read_csv(beh_file)
@@ -941,10 +941,10 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # if eye tracker data exists align x, y eye tracker with eeg
         ext = eye_info['tracker_ext']
-        eye_file = self.FolderTracker(extension = ['eye','raw'], \
+        eye_file = self.folder_tracker(extension = ['eye','raw'], \
 					filename = f'sub_{self.sj}_session_{self.session}'
                     f'.{ext}') 
-        beh_file = self.FolderTracker(extension = ['beh','raw'], \
+        beh_file = self.folder_tracker(extension = ['beh','raw'], \
 					filename = f'subject-{self.sj}_session_{self.session}.csv')
         if os.path.isfile(eye_file):
             EO = EYE(sfreq = eye_info['sfreq'], 
@@ -1195,7 +1195,7 @@ class Epochs(mne.Epochs, FolderStructure):
     def save_preprocessed(self, preproc_name, combine_sessions: bool = True):
         
         # save eeg
-        self.save(self.FolderTracker(extension=[
+        self.save(self.folder_tracker(extension=[
                     'processed'], 
                     filename=f'subject-{self.sj}_ses-{self.session}_{preproc_name}-epo.fif'), 
                     split_size='2GB', overwrite = True)
@@ -1205,12 +1205,12 @@ class Epochs(mne.Epochs, FolderStructure):
             all_eeg = []
             for i in range(int(self.session)):
                 session = i + 1
-                all_eeg.append(mne.read_epochs(self.FolderTracker(extension=[
+                all_eeg.append(mne.read_epochs(self.folder_tracker(extension=[
                                'processed'], 
                                filename=f'subject-{self.sj}_ses-{session}_{preproc_name}-epo.fif')))
             
             all_eeg = mne.concatenate_epochs(all_eeg)
-            all_eeg.save(self.FolderTracker(extension=[
+            all_eeg.save(self.folder_tracker(extension=[
                          'processed'], filename=f'subject-{self.sj}_all_{preproc_name}-epo.fif'), 
                         split_size='2GB', overwrite = True)
         
@@ -1230,7 +1230,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # also include eye binned data
         if hasattr(self, 'eye_bins'):
-            eye_bins = np.loadtxt(self.FolderTracker(extension=[
+            eye_bins = np.loadtxt(self.folder_tracker(extension=[
                                 'preprocessing', 'subject-{}'.format(self.sj), self.session], 
                                 filename='eye_bins.txt'))
         else:
@@ -1239,12 +1239,12 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # save behavior as pickle
         beh_dict = beh.to_dict(orient = 'list')
-        with open(self.FolderTracker(extension=['beh', 'processed'],
+        with open(self.folder_tracker(extension=['beh', 'processed'],
             filename='subject-{}_ses-{}.pickle'.format(self.sj, self.session)), 'wb') as handle:
             pickle.dump(beh_dict, handle)
 
         # save eeg
-        self.save(self.FolderTracker(extension=[
+        self.save(self.folder_tracker(extension=[
                     'processed'], filename='subject-{}_ses-{}-epo.fif'.format(self.sj, self.session)), 
                     split_size='2GB', overwrite = True)
 
@@ -1270,11 +1270,11 @@ class Epochs(mne.Epochs, FolderStructure):
             all_eeg = []
             nr_events = []
             for i in range(int(self.session)):
-                with open(self.FolderTracker(extension=['beh', 'processed'],
+                with open(self.folder_tracker(extension=['beh', 'processed'],
                 	        filename='subject-{}_ses-{}.pickle'.format(self.sj, i + 1)), 'rb') as handle:
                     all_beh.append(pickle.load(handle))
                     
-                all_eeg.append(mne.read_epochs(self.FolderTracker(extension=[
+                all_eeg.append(mne.read_epochs(self.folder_tracker(extension=[
                                'processed'], filename='subject-{}_ses-{}-epo.fif'.format(self.sj, i + 1))))
 
             # do actual combining 
@@ -1282,12 +1282,12 @@ class Epochs(mne.Epochs, FolderStructure):
                 beh_dict.update(
                     {key: np.hstack([beh[key] for beh in all_beh])})
 
-            with open(self.FolderTracker(extension=['beh', 'processed'],
+            with open(self.folder_tracker(extension=['beh', 'processed'],
             	filename='subject-{}_all.pickle'.format(self.sj)), 'wb') as handle:
                 pickle.dump(beh_dict, handle)
 
             all_eeg = mne.concatenate_epochs(all_eeg)
-            all_eeg.save(self.FolderTracker(extension=[
+            all_eeg.save(self.folder_tracker(extension=[
                          'processed'], filename='subject-{}_all-epo.fif'.format(self.sj)), 
                         split_size='2GB', overwrite = True)
 
@@ -1349,7 +1349,9 @@ class ArtefactReject(object):
         eog_inds, 
         eog_scores) = self.automated_ica_blink_selection(ica, raw, threshold)
         ica.exclude = [eog_inds[0]]
+        exclude_prev = [eog_inds[0]]
         manual_correct = True
+        cnt = 0
 
         while True:
             if report is not None:
@@ -1363,16 +1365,28 @@ class ArtefactReject(object):
                     )
                 report.save(report_path, overwrite = True)
 
+            if cnt > 0:
+                time.sleep(5)
+                tcflush(sys.stdin, TCIFLUSH)
+                print('Please inspect the updated ICA report')
+                conf = input(
+                'Are you satisfied with the selected components? (y/n)')
+                if conf == 'y':
+                    manual_correct = False
+
             #step 2a: manually check selected component
             if manual_correct:
                 ica = self.manual_check_ica(ica, sj, session)
-                if ica.exclude != [eog_inds[0]]:
+                if ica.exclude != exclude_prev:
                     report.remove(title='ICA blink cleaning')
-                    manual_correct = False
                 else:
                     break
             else:
                 break
+
+            # track report updates
+            exclude_prev = ica.exclude
+            cnt += 1
 
         # step 3: apply ica
         ica_inst = self.apply_ICA(ica, ica_inst)
