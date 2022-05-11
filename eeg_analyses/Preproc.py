@@ -34,9 +34,11 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
                     == list else sj_info['bad_chs'][f'session_{session}']
 
     #EEG.replaceChannel(sj, session, replace)
+    to_remove = sj_info['ch_remove'] if 'ch_remove' \
+                in sj_info.keys() else ['EXG7','EXG8']
     EEG.reReference(ref_channels=ref, vEOG=eog[
                     :2], hEOG=eog[2:], changevoltage=False, 
-                    to_remove = ['EXG7','EXG8'])
+                    to_remove = to_remove)
 
     EEG.setMontage(montage='biosemi64')
 

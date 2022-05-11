@@ -629,7 +629,7 @@ class BDM(FolderStructure):
 						bdm_info.update({'run_' +str(self.run_info): {}})
 						if self.cross:
 							# TODO1: make sure that multiple test conditions can be classified
-							# TODO2: make sure that bdm_info is saved conditions can be classified
+							# TODO2: make sure that bdm_info is saved 
 							test_idx = np.where(beh[cnd_header] == test_cnd)[0]
 							Xtr, Xte, Ytr, Yte = self.train_test_cross(X, y, cnd_idx, test_idx)
 						else:
