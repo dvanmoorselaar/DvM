@@ -534,7 +534,7 @@ class BDM(FolderStructure):
 
 		return 	eegs, beh, times
 
-	def classify(self, cnds, cnd_header, time, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True, bdm_name = 'main'):
+	def classify(self, cnds:dict=None, time:tuple= None, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True, bdm_name = 'main'):
 		''' 
 		Arguments
 		- - - - - 
@@ -559,13 +559,12 @@ class BDM(FolderStructure):
 		- - - -
 		'''	
 
-		# read in data and set labels
-		X, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
-
-		if self.avg_trials > 1:
-			# TODO: allow averaging across multiple factors
-			X, beh = self.average_trials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
-		y = beh[self.to_decode]
+		# set condition data
+		if cnds is None:
+			# TODO: Make sure that trial averaging also works without condition info
+			cnds = ['all_trials']
+		else:
+			(cnd_header, cnds), = cnds.items()
 
 		# check input variables to set decoding type
 		if isinstance(cnds[0], list):
@@ -583,6 +582,16 @@ class BDM(FolderStructure):
 			max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)] 
 			if downscale:
 				max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
+
+		# read in data and set labels
+		X, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
+
+		if self.avg_trials > 1:
+			# TODO: allow averaging across multiple factors
+			X, beh = self.average_trials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
+		y = beh[self.to_decode]
+
+
 
 		# first round of classification is always done on non-permuted labels
 		nr_perm += 1
