@@ -19,7 +19,8 @@ from IPython import embed
 from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
 from support.FolderStructure import *
-from support.support import select_electrodes, trial_exclusion, create_cnd_loop
+from support.support import select_electrodes,trial_exclusion,create_cnd_loop,\
+							get_time_slice
 
 class ERP(FolderStructure):
 
@@ -369,7 +370,6 @@ class ERP(FolderStructure):
 		if set_mean:
 			evoked_X = np.mean(evoked_X, axis = 0)
 		
-
 		return evoked_X, evoked
 
 	@staticmethod
@@ -434,6 +434,47 @@ class ERP(FolderStructure):
 			evoked._data[channels.index(elec_2)] = elec_2_data - elec_1_data
 
 		return diff, evoked
+
+	@staticmethod
+	def erp_to_csv(erp:dict,window_oi:tuple,elec_oi:list,cnds:list=None,
+				  name:str='main'):
+		"TODO: ADD DOCSTRING: EXPLAIN LATERALIZATION"
+
+		# initialize output list and set parameters
+		X, headers = [], []
+		if cnds is None:
+			cnds = list(erp.keys())
+		
+		times = erp[cnds[0]][0].times 
+		idx = get_time_slice(times, window_oi[0], window_oi[1])
+
+		# extract condition specific data
+		for cnd in cnds:
+			# check whether output needs to be lateralized
+			if isinstance(elec_oi[0], str):
+				evoked_X, _ = ERP.group_erp(erp[cnd],elec_oi)
+				X.append(evoked_X[:,idx].mean(axis = 1))
+				headers.append(cnd)
+			else:
+				for h, hemi in enumerate(['contra','ipsi']):
+					evoked_X, _ = ERP.group_erp(erp[cnd],elec_oi[h])
+					X.append(evoked_X[:,idx].mean(axis = 1))
+					headers.append(f'{cnd}_{hemi}')
+
+				# add contra vs hemi difference
+				X.append(X[-2] - X[-1])
+				headers.append(f'{cnd}_diff')
+
+		# save data
+		np.savetxt(ERP.folder_tracker(['erp','stats'], 
+               filename = f'{name}.csv'),np.stack(X).T, 
+			   delimiter = ",",header = ",".join(headers),comments='')
+
+
+
+
+
+
 
 	@staticmethod	
 	def baselineCorrect(X, times, base_period):

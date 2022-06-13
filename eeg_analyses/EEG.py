@@ -482,8 +482,8 @@ class Epochs(mne.Epochs, FolderStructure):
             if beh_triggers.size > bdf_triggers.size and stop:
 
                 # drop the last items from the beh file
-                # missing_trials = np.hstack((missing_trials, 
-                #                            beh.index[-nr_miss:].values))
+                missing_trials = np.hstack((missing_trials, 
+                                           beh.index[-nr_miss:].values))
                 beh.drop(beh.index[-nr_miss:], inplace=True)   
                 report_str += (f'\n Removed final {nr_miss} trials from '
                               'behavior to allign data. Please inspect your '
@@ -502,7 +502,7 @@ class Epochs(mne.Epochs, FolderStructure):
         nr_matches = sum(beh[trigger_header].values == bdf_triggers)
         nr_epochs = bdf_triggers.size
         report_str += (f'\n {nr_matches} matches between beh and epoched '
-                      'data out of {nr_eepochs}') 
+                      'data out of {nr_epochs}') 
 
         return missing, report_str
 

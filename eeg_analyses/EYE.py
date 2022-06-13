@@ -81,7 +81,7 @@ class EYE(FolderStructure):
 				for i, ses in enumerate(beh_sessions):
 					if ses not in eye_sessions:
 						beh_files.pop(i)
-		
+
 		if eye_files[0][-3:] == 'tsv':			
 			eye = [read_eyetribe(file, start = start, missing = 0) for file in eye_files]
 		elif eye_files[0][-3:] == 'asc':	
