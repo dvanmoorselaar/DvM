@@ -108,7 +108,7 @@ class FolderStructure(object):
 			sjs (list, optional): List of subjects. Defaults to 'all'.
 
 		Returns:
-			erps (dict): Dictionary with evoked data (with conditions as keeys)
+			erps (dict): Dictionary with evoked data (with conditions as keys)
 		"""
 
 		# initiate condtion dict
@@ -131,7 +131,36 @@ class FolderStructure(object):
 
 		return erps
 
+	def read_bdm(self,bdm_folder_path:list,bdm_name:str,sjs:list='all')->dict:
+		"""
+		Read in classification data as created by BDM class.
+		Decoding scores are returned within a dictionary.
 
+		Args:
+			bdm_folder_path (list): List of folders (as created by BDM) within
+			bdm folder pointing towards files of interest (e.g., 
+			['target_loc', 'all_elecs', 'cross'])
+			bdm_name (str): name assigned to bdm analysis
+			sjs (list, optional): List of subjects. Defaults to 'all'.
+
+		Returns:
+			erps (dict): Dictionary with evoked data (with conditions as keeys)
+		"""
+
+		# set extension
+		extension = ['bdm'] + bdm_folder_path
+
+		if sjs == 'all':
+			files = sorted(glob.glob(self.folder_tracker(
+							extension = extension, 
+                            filename = f'sj_*_{bdm_name}.pickle')))
+		else:
+			files = [self.folder_tracker(extension = extension,
+					filename = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
+
+		bdm = [pickle.load(open(file, "rb")) for file in files]
+
+		return bdm
 
 
 

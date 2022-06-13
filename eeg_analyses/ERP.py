@@ -258,7 +258,7 @@ class ERP(FolderStructure):
 
 		# loop over all conditions
 		if cnds is None:
-			cnds = ['all_trials']
+			cnds = ['all_data']
 		else:
 			cnds = create_cnd_loop(cnds)
 
@@ -270,7 +270,7 @@ class ERP(FolderStructure):
 				erp_name = f'sj_{self.sj}_{cnd[1]}_{name}'
 
 			# slice condition trials
-			if cnd == 'all_trials':
+			if cnd == 'all_data':
 				idx_c = np.arange(beh.shape[0])
 			else:
 				idx_c = beh.query(cnd[0]).index.values
@@ -294,7 +294,7 @@ class ERP(FolderStructure):
 
 		# loop over all conditions
 		if cnds is None:
-			cnds = ['all_trials']
+			cnds = ['all_data']
 		else:
 			(cnd_header, cnds), = cnds.items()
 
@@ -303,7 +303,7 @@ class ERP(FolderStructure):
 			erp_name = f'sj_{self.sj}_{cnd}_{name}'	
 
 			# slice condition trials
-			if cnd == 'all_trials':
+			if cnd == 'all_data':
 				idx_c = idx
 			else:
 				idx_c = np.where(beh[cnd_header] == cnd)[0]
@@ -438,7 +438,7 @@ class ERP(FolderStructure):
 	@staticmethod
 	def erp_to_csv(erp:dict,window_oi:tuple,elec_oi:list,cnds:list=None,
 				  name:str='main'):
-		"TODO: ADD DOCSTRING: EXPLAIN LATERALIZATION"
+		"#TODO: ADD DOCSTRING: EXPLAIN LATERALIZATION"
 
 		# initialize output list and set parameters
 		X, headers = [], []

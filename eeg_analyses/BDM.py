@@ -490,6 +490,9 @@ class BDM(FolderStructure):
 		if type(excl_factor) == dict: # remove unwanted trials from beh
 			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
 
+		# if not already done reset index (to properly align beh and epochs)
+		beh.reset_index(inplace = True, drop = True)
+
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
 			print('eeg data is filtered before downsampling and slicing the time window of interest')
@@ -534,7 +537,10 @@ class BDM(FolderStructure):
 
 		return 	eegs, beh, times
 
-	def classify(self, cnds:dict=None, time:tuple= None, collapse = False, bdm_labels = 'all', excl_factor = None, nr_perm = 0, gat_matrix = False, downscale = False, save = True, bdm_name = 'main'):
+	def classify(self,cnds:dict=None,window_oi:tuple=None,
+				labels_oi:Union[str,list]= 'all',collapse:bool=False,
+				excl_factor:dict=None,nr_perm:int=0,GAT:bool=False, 
+				downscale:bool=False,save:bool=True,bdm_name:str='main'):
 		''' 
 		Arguments
 		- - - - - 
@@ -562,9 +568,21 @@ class BDM(FolderStructure):
 		# set condition data
 		if cnds is None:
 			# TODO: Make sure that trial averaging also works without condition info
-			cnds = ['all_trials']
+			cnds = ['all_data']
 		else:
 			(cnd_header, cnds), = cnds.items()
+
+		# read in data and set labels
+		(X, 
+		beh, 
+		times) = self.selectBDMData(self.epochs,self.beh,window_oi,excl_factor)	
+
+		if self.avg_trials > 1:
+			# TODO: allow averaging across multiple factors
+			(X, 
+			beh) = self.average_trials(X,beh[[self.to_decode,cnd_header]], 
+									  cnd_header=cnd_header) 
+		y = beh[self.to_decode]
 
 		# check input variables to set decoding type
 		if isinstance(cnds[0], list):
@@ -579,29 +597,21 @@ class BDM(FolderStructure):
 			max_tr = [1]
 		else:
 			self.cross = False 
-			max_tr = [self.selectMaxTrials(beh, cnds, bdm_labels,cnd_header)] 
+			max_tr = [self.selectMaxTrials(beh, cnds, labels_oi,cnd_header)] 
 			if downscale:
-				max_tr = [(i+1)*self.nr_folds for i in range(max_tr[0]/self.nr_folds)][::-1]
-
-		# read in data and set labels
-		X, beh, times = self.selectBDMData(self.epochs, self.beh, time, excl_factor)	
-
-		if self.avg_trials > 1:
-			# TODO: allow averaging across multiple factors
-			X, beh = self.average_trials(X, beh[[self.to_decode, cnd_header]], cnd_header = cnd_header) 
-		y = beh[self.to_decode]
-
-
+				max_tr = [(i+1)*self.nr_folds 
+							for i in range(max_tr[0]/self.nr_folds)][::-1]
 
 		# first round of classification is always done on non-permuted labels
 		nr_perm += 1
 
 		# set up dict to save decoding scores
-		classification = {'info': {'elec': self.elec_oi, 'times':times}}
+		classification = {'info': {'elec':self.elec_oi,'times':times}}
 
 		if collapse:
 			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
+
 		# set bdm name
 		bdm_name = f'sj_{self.sj}_{bdm_name}'
 		for cnd in cnds:
@@ -610,16 +620,22 @@ class BDM(FolderStructure):
 			bdm_info = {}
 
 			# get condition indices and labels
-			beh, cnd_idx, cnd_labels, labels, max_tr = self.get_condition_labels(beh, cnd_header, 
-														cnd, max_tr, bdm_labels, collapse)
+			(beh, cnd_idx, 
+			cnd_labels, labels,
+			max_tr) = self.get_condition_labels(beh, cnd_header, cnd,max_tr, 
+												labels_oi, collapse)
 
 			# initiate decoding arrays
-			if gat_matrix:
-				class_acc = np.empty((self.avg_runs, nr_perm, X.shape[2], X.shape[2])) * np.nan
-				label_info = np.empty((self.avg_runs, nr_perm, X.shape[2], X.shape[2], labels.size)) * np.nan
+			if GAT:
+				class_acc = np.empty((self.avg_runs, nr_perm,
+								X.shape[2], X.shape[2])) * np.nan
+				label_info = np.empty((self.avg_runs, nr_perm, 
+								X.shape[2], X.shape[2], labels.size)) * np.nan
 			else:	
-				class_acc = np.empty((self.avg_runs, nr_perm, X.shape[2])) * np.nan	
-				label_info = np.empty((self.avg_runs,nr_perm, X.shape[2], labels.size)) * np.nan
+				class_acc = np.empty((self.avg_runs,nr_perm,
+								X.shape[2])) * np.nan	
+				label_info = np.empty((self.avg_runs,nr_perm, 
+								X.shape[2],labels.size)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -640,20 +656,33 @@ class BDM(FolderStructure):
 							# TODO1: make sure that multiple test conditions can be classified
 							# TODO2: make sure that bdm_info is saved 
 							test_idx = np.where(beh[cnd_header] == test_cnd)[0]
-							Xtr, Xte, Ytr, Yte = self.train_test_cross(X, y, cnd_idx, test_idx)
+							(Xtr, Xte, 
+							Ytr, Yte) = self.train_test_cross(X, y, 
+															cnd_idx, test_idx)
 						else:
-							train_tr, test_tr, bdm_info = self.train_test_split(cnd_idx, cnd_labels, n, bdm_info) 
-							Xtr, Xte, Ytr, Yte = self.train_test_select(X, y, train_tr, test_tr)
+							(train_tr, test_tr, 
+							bdm_info) = self.train_test_split(cnd_idx, 
+													cnd_labels, n, bdm_info) 
+							(Xtr, Xte, 
+							Ytr, Yte) = self.train_test_select(X, y,
+															 train_tr, test_tr)
 
-						class_acc[run, p], label_info[run,p] = self.cross_time_decoding(Xtr, Xte, Ytr, Yte, labels, gat_matrix, X)
+						(class_acc[run, p], 
+						label_info[run,p]) = self.cross_time_decoding(Xtr, Xte, 
+																	Ytr, Yte, 
+																	labels, 
+																	GAT, X)
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
 					class_acc = class_acc.mean(axis = 0)	
 					if i == 0:
-						classification.update({cnd:{'standard': copy.copy(class_acc[0])}, 'bdm_info': bdm_info})
+						classification.update({cnd:{'standard': 
+											copy.copy(class_acc[0])}, 
+											'bdm_info': bdm_info})
 					else:
-						classification[cnd]['{}-nrlabels'.format(n)] = copy.copy(class_acc[0])
+						classification[cnd]['{}-nrlabels'.format(n)] = \
+										copy.copy(class_acc[0])
 								
 			if nr_perm > 1:
 				classification[cnd].update({'perm': class_acc[1:]})
@@ -661,7 +690,8 @@ class BDM(FolderStructure):
 		# store classification dict	
 		if save: 
 			extension = self.set_folder_path()
-			with open(self.FolderTracker(extension, filename = f'{bdm_name}.pickle') ,'wb') as handle:
+			with open(self.folder_tracker(extension, filename = 
+					f'{bdm_name}.pickle') ,'wb') as handle:
 				pickle.dump(classification, handle)
 		else:
 			return classification	
