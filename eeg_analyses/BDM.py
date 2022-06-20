@@ -55,11 +55,15 @@ class BDM(FolderStructure):
 		FolderStructure (object): Class that creates file paths to load raw eeg/ behavior and save decoding ouput
 	"""
 
-	def __init__(self, sj: int, epochs: mne.Epochs, beh: pd.DataFrame, to_decode: str, nr_folds: int, 
-				classifier: str = 'LDA', method: str = 'auc', elec_oi: Union[str, list] = 'all', downsample: int = 128, 
-				avg_runs: int = 1, avg_trials: int= 1, sliding_window: tuple = (1, True, False), scale: dict = {'standardize': False, 'scale': False}, 
-				pca_components: tuple = (0, 'across'), bdm_filter: Optional[dict] = None, 
-				baseline: Optional[tuple] = None, seed: Union[int, bool] = 42213):
+	def __init__(self, sj:int,epochs:mne.Epochs,beh:pd.DataFrame,to_decode:str, 
+				nr_folds: int,classifier:str='LDA',method:str='auc',
+				elec_oi:Union[str,list]='all',downsample:int=128,
+				avg_runs:int=1,avg_trials:int=1,
+				sliding_window:tuple=(1,True,False),
+				scale:dict={'standardize':False,'scale':False}, 
+				pca_components:tuple=(0,'across'),montage:str='biosemi64',
+				bdm_filter: Optional[dict]=None,baseline:Optional[tuple]=None, 
+				seed:Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
 
 		Args:
@@ -88,6 +92,7 @@ class BDM(FolderStructure):
             if N < 1 it indicates the % of explained variance (and the number of components is inferred). The secnd argument specifies whether transfrmation is estimated
 			on both training and test data ('all') or estimated on training data only and applied to the test data in each cross validation step.		
 			Defaults to (0, 'across') (i.e., no PCA reduction)
+			montage (Optional[str]): Montage used during recording. Is used to plot weigts in the bdm report.
 			bdm_filter (Optional[dict], optional): [description]. Defaults to None.
 			baseline (Optional[tuple], optional): [description]. Defaults to None.
 			seed (Optional[int]): Sets a random seed such that cross-validation procedure can be repeated. 
@@ -110,6 +115,7 @@ class BDM(FolderStructure):
 		self.downsample = downsample
 		self.window_size = sliding_window
 		self.scale = scale
+		self.montage = montage
 		self.pca_components = pca_components
 		self.bdm_filter = bdm_filter
 		self.method = method
@@ -117,6 +123,70 @@ class BDM(FolderStructure):
 		self.avg_trials = avg_trials
 		self.seed = seed
 
+	def plot_bdm(self,bdm_scores:dict,cnds:list):
+
+		times = bdm_scores['info']['times']
+		fig, ax = plt.subplots(1)
+		plt.ylabel(self.method)
+		plt.xlabel('Time (ms')
+		# loop over all specified conditins
+		for cnd in cnds:
+			X = bdm_scores[cnd]['dec_scores']
+			plt.plot(times, X, label = cnd)
+		plt.legend(loc='best')
+
+		return fig   
+
+	def report_bdm(self,bdm_scores:dict,cnds:list,bdm_name:str):
+
+		# set report and condition name
+		name_info = bdm_name.split('_')
+		report_name = name_info[-1]
+		report_path = self.set_folder_path()
+		report_name = self.folder_tracker(report_path,
+										f'report_{report_name}.h5')
+
+		# create fake info object (so that weights can be plotted in report)
+		montage = mne.channels.make_standard_montage(self.montage)
+		n_elec = len(montage.ch_names)
+		info = mne.create_info(ch_names=montage.ch_names,sfreq=self.downsample,
+                               ch_types='eeg')
+		t_min = bdm_scores['info']['times'][0]
+
+		# loop over all specified conditins
+		for cnd in cnds:
+
+			# set condition name
+			cnd_name = '_'.join(map(str, name_info[:-1] + [cnd]))
+	
+			# create fake ekoked array
+			W = bdm_scores[cnd]['W']
+			W_evoked = mne.EvokedArray(W.T, info, tmin = t_min)
+			W_evoked.set_montage(montage)
+
+			# check whether report exists
+			if os.path.isfile(report_name):
+				with mne.open_report(report_name) as report:
+					# if section exists delete it first
+					report.remove(title=cnd_name)
+					report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
+				 				  n_time_points=30)
+				report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
+						overwrite = True)
+			else:
+				report = mne.Report(title='Single subject evoked overview')
+				report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
+				 				n_time_points=30)
+				report.save(report_name)
+				report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
+
+		# name = '_'.join(map(str, name_info[:-1]))
+
+		# report.add_figure(self.plot_bdm(bdm_scores, cnds), 
+        #                         title = name, section = 'bdm_scores')
+		# report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
+		# 				overwrite = True)
+			
 	def set_folder_path(self) -> list:
 
 		base = ['bdm']
@@ -472,6 +542,16 @@ class BDM(FolderStructure):
 
 		return Xtr, Xte, Ytr, Yte	
 
+	def set_bdm_weights(self, W, Xtr, nr_elec, nr_time):
+		#TODO: add docstring
+		#TODO: make it work with GAT
+		# stack all training data
+		Xtr = Xtr.reshape(-1,nr_elec, nr_time)
+		W = np.stack([np.matmul(np.cov(Xtr[...,i].T),W[i]) 
+					for i in range(nr_time)])
+
+		return W
+
 	def selectBDMData(self, epochs, beh, time, excl_factor = None):
 		''' 
 		Arguments
@@ -583,6 +663,7 @@ class BDM(FolderStructure):
 			beh) = self.average_trials(X,beh[[self.to_decode,cnd_header]], 
 									  cnd_header=cnd_header) 
 		y = beh[self.to_decode]
+		nr_epochs, nr_elec, nr_time = X.shape
 
 		# check input variables to set decoding type
 		if isinstance(cnds[0], list):
@@ -600,13 +681,13 @@ class BDM(FolderStructure):
 			max_tr = [self.selectMaxTrials(beh, cnds, labels_oi,cnd_header)] 
 			if downscale:
 				max_tr = [(i+1)*self.nr_folds 
-							for i in range(max_tr[0]/self.nr_folds)][::-1]
+							for i in range(int(max_tr[0]/self.nr_folds))][::-1]
 
 		# first round of classification is always done on non-permuted labels
 		nr_perm += 1
 
 		# set up dict to save decoding scores
-		classification = {'info': {'elec':self.elec_oi,'times':times}}
+		bdm_scores = {'info': {'elec':self.elec_oi,'times':times}}
 
 		if collapse:
 			beh['collapsed'] = 'no'
@@ -628,14 +709,18 @@ class BDM(FolderStructure):
 			# initiate decoding arrays
 			if GAT:
 				class_acc = np.empty((self.avg_runs, nr_perm,
-								X.shape[2], X.shape[2])) * np.nan
+								nr_time, nr_time)) * np.nan
 				label_info = np.empty((self.avg_runs, nr_perm, 
-								X.shape[2], X.shape[2], labels.size)) * np.nan
+								nr_time, nr_time, labels.size)) * np.nan
+				weights = np.empty((self.avg_runs, nr_perm,
+									nr_time, nr_time, nr_elec))
 			else:	
 				class_acc = np.empty((self.avg_runs,nr_perm,
-								X.shape[2])) * np.nan	
+								nr_time)) * np.nan	
 				label_info = np.empty((self.avg_runs,nr_perm, 
-								X.shape[2],labels.size)) * np.nan
+								nr_time,labels.size)) * np.nan
+				weights = np.empty((self.avg_runs, nr_perm,
+									nr_time, nr_elec))
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -668,33 +753,42 @@ class BDM(FolderStructure):
 															 train_tr, test_tr)
 
 						(class_acc[run, p], 
-						label_info[run,p]) = self.cross_time_decoding(Xtr, Xte, 
+						label_info[run,p],
+						weights[run, p]) = self.cross_time_decoding(Xtr, Xte, 
 																	Ytr, Yte, 
 																	labels, 
 																	GAT, X)
+
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
-					class_acc = class_acc.mean(axis = 0)	
+					mean_class = class_acc.mean(axis = 0)	
 					if i == 0:
-						classification.update({cnd:{'standard': 
-											copy.copy(class_acc[0])}, 
+						# get non-permuted weights
+						W = weights.mean(axis = 0)[0]
+						W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
+						bdm_scores.update({cnd:{'dec_scores': 
+											copy.copy(mean_class[0]),
+											'W':W}, 
 											'bdm_info': bdm_info})
 					else:
-						classification[cnd]['{}-nrlabels'.format(n)] = \
-										copy.copy(class_acc[0])
-								
+						bdm_scores[cnd]['{}-nrlabels'.format(n)] = \
+										copy.copy(mean_class[0])
+
 			if nr_perm > 1:
-				classification[cnd].update({'perm': class_acc[1:]})
+				bdm_scores[cnd].update({'perm_scores': mean_class[1:]})
 	
+		# create report (specific to unpermuted data)
+		self.report_bdm(bdm_scores, cnds, bdm_name)
+
 		# store classification dict	
 		if save: 
 			extension = self.set_folder_path()
 			with open(self.folder_tracker(extension, filename = 
 					f'{bdm_name}.pickle') ,'wb') as handle:
-				pickle.dump(classification, handle)
+				pickle.dump(bdm_scores, handle)
 		else:
-			return classification	
+			return bdm_scores	
 
 	def localizerClassify(self, sj, loc_beh, loc_eeg, cnds, cnd_header, time, tr_header, te_header, collapse = False, loc_excl = None, test_excl = None, gat_matrix = False, save = True):
 		"""Training and testing is done on seperate/independent data files
@@ -876,6 +970,7 @@ class BDM(FolderStructure):
 		# initiate decoding arrays
 		class_acc = np.zeros((N,nr_time, nr_test_time))
 		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
+		weights = np.zeros((N,nr_time, nr_test_time, nr_elec))
 
 		for n in range(N):
 			print('\r Fold {} out of {} folds in average run {}'.format(n + 1,N, self.run_info),end='')
@@ -915,6 +1010,7 @@ class BDM(FolderStructure):
 						
 					# train model and predict
 					clf.fit(Xtr_,Ytr_)
+
 					scores = clf.predict_proba(Xte_) # get posteriar probability estimates
 					predict = clf.predict(Xte_)
 					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) # 
@@ -923,15 +1019,18 @@ class BDM(FolderStructure):
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
 						label_info[n, tr_t, :] = [sum(predict == l) for l in labels]
 						class_acc[n,tr_t,:] = class_perf # 
+						weights[n,tr_t,:] = clf.coef_[0]
 					else:
 						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
 						label_info[n, tr_t, te_t] = [sum(predict == l) for l in labels]	
 						class_acc[n,tr_t, te_t] = class_perf
+						weights[n,tr_t,te_t] = clf.coef_[0]
 
+		weights = np.squeeze(np.mean(weights, axis = 0))
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
 		label_info = np.squeeze(np.mean(label_info, axis = 0))
 
-		return class_acc, label_info
+		return class_acc, label_info, weights
 
 	def computeClassPerf(self, scores, true_labels, label_order, predict):
 		'''
