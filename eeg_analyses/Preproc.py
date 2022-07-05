@@ -83,8 +83,11 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     epochs.link_eye(eye_info, missing, vEOG=eog[:2], hEOG=eog[2:])
 
     # START AUTOMATIC ARTEFACT REJECTION 
-    epochs, z_thresh, report = AR.auto_repair_noise(epochs, report = report)
-    report.save(report_file, overwrite = True)
+    if preproc_param['run_autoreject']:
+        epochs, z_thresh, report = AR.auto_repair_noise(epochs, report = report)
+        report.save(report_file, overwrite = True)
+    else:
+        z_thresh = 0
 
     # INTERPOLATE BADS
     bads = epochs.info['bads']   

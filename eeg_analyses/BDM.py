@@ -373,7 +373,10 @@ class BDM(FolderStructure):
 		"""
 
 		# get condition indices
-		if condition != 'collapsed':
+
+		if condition == 'all_data':
+			cnd_idx = np.arange(beh.shape[0])
+		elif condition != 'collapsed':
 			cnd_idx = np.where(beh[cnd_header] == condition)[0]
 			if collapse:
 				beh.loc[cnd_idx,'collapsed'] = 'yes'
@@ -649,6 +652,7 @@ class BDM(FolderStructure):
 		if cnds is None:
 			# TODO: Make sure that trial averaging also works without condition info
 			cnds = ['all_data']
+			cnd_header = None
 		else:
 			(cnd_header, cnds), = cnds.items()
 
@@ -1141,7 +1145,7 @@ class BDM(FolderStructure):
 		cnd_min = []
 
 		# trials for decoding
-		if cnds != 'all':
+		if cnds != ['all_data']:
 			for cnd in cnds:
 		
 				# select condition trials and get their decoding labels
@@ -1156,7 +1160,7 @@ class BDM(FolderStructure):
 				cnd_min.append(min_tr)
 
 			max_trials = min(cnd_min)
-		elif cnds == 'all':
+		elif cnds == ['all_data']:
 			labels = [l for l in beh[self.to_decode] if l in bdm_labels]
 			min_tr = np.unique(labels, return_counts = True)[1]
 			max_trials = int(np.floor(min(min_tr)/N)*N)	
