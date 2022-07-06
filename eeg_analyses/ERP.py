@@ -436,28 +436,58 @@ class ERP(FolderStructure):
 		return diff, evoked
 
 	@staticmethod
-	def erp_to_csv(erp:dict,window_oi:tuple,elec_oi:list,cnds:list=None,
-				  name:str='main'):
-		"#TODO: ADD DOCSTRING: EXPLAIN LATERALIZATION"
+	def erp_to_csv(erps:Union[dict,list],window_oi:Union[tuple,dict],
+				  elec_oi:list,cnds:list=None,name:str='main'):
+		## TODO: add different methods (peak, onset latency)
+		"""
+		Outputs ERP metrics (e.g., mean activity) to a csv file. The csv file
+		is stored in the subfolder erp/stats in the main project folder.
+
+		Note that this function also allows one to output lateralized 
+		difference waveforms (see elec_oi)
+
+		Args:
+			erps ([dict,list]): Either a list with evoked items (mne) or a 
+			dictionary where key, value pairs are condition names and a list
+			with conditin specific evoked data, respectively
+			window_oi ([tuple,dict]): time window used to calculate the 
+			dependent measure of interest (see methods)
+			elec_oi (list): electrodes of interest. In case, the data of 
+			interest is a difference waveform (i.e., contra - ipsi), specify a 
+			list of lists, where the first list contains contralateral 
+			electrodes and the second list ipsilateral electrodes. 
+			cnds (list, optional): If specified allows to limit export
+			to a subset of conditions as specified in the erps dictionary. 
+			Defaults to None.
+			name (str, optional): Name ofoutput file. Defaults to 'main'.
+		"""
 
 		# initialize output list and set parameters
 		X, headers = [], []
-		if cnds is None:
-			cnds = list(erp.keys())
+		if cnds is None and type(erps) == dict:
+			cnds = list(erps.keys())
+		if type(erps) == list:
+			erps = {'data':erps}
+			cnds = ['data']
 		
-		times = erp[cnds[0]][0].times 
-		idx = get_time_slice(times, window_oi[0], window_oi[1])
+		channels, times = ERP.get_erp_params(erps)
+
+		if type(window_oi) == tuple:
+			idx = get_time_slice(times, window_oi[0], window_oi[1])
 
 		# extract condition specific data
 		for cnd in cnds:
+			if type(window_oi) == dict:
+				idx = get_time_slice(times,window_oi[cnd][0],window_oi[cnd][1])
+
 			# check whether output needs to be lateralized
 			if isinstance(elec_oi[0], str):
-				evoked_X, _ = ERP.group_erp(erp[cnd],elec_oi)
+				evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi)
 				X.append(evoked_X[:,idx].mean(axis = 1))
 				headers.append(cnd)
 			else:
 				for h, hemi in enumerate(['contra','ipsi']):
-					evoked_X, _ = ERP.group_erp(erp[cnd],elec_oi[h])
+					evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi[h])
 					X.append(evoked_X[:,idx].mean(axis = 1))
 					headers.append(f'{cnd}_{hemi}')
 
@@ -469,6 +499,138 @@ class ERP(FolderStructure):
 		np.savetxt(ERP.folder_tracker(['erp','stats'], 
                filename = f'{name}.csv'),np.stack(X).T, 
 			   delimiter = ",",header = ",".join(headers),comments='')
+
+	@staticmethod
+	def get_erp_params(erps:Union[dict,list])->Tuple[list,np.array]:
+		"""
+		Extracts relevant parameters (i.e., times and channels)
+		out of condition dict with evoked data or list with evoked data
+
+		Args:
+			erps (Union[dict,list]): _description_
+
+		Returns:
+			channels (list): eeg channel names
+			times (np.array): sample times in evoked data
+		"""
+
+		# set params
+		if type(erps) == dict:
+			channels = list(erps.items())[0][1][0].ch_names
+			times = list(erps.items())[0][1][0].times
+		else:
+			channels= erps[0].ch_names
+			times = erps[0].ch_names.times
+
+		return channels, times
+
+	@staticmethod
+	def find_erp_window(erps:Union[dict,list],elec_oi:list,
+						method:str='cnd_avg',window_oi:tuple=None,
+						polarity:str='pos',window_size:int=0.05) \
+						-> Union[tuple, dict]:
+		"""
+		Uses peak detection to determine an ERP window, based either on grand 
+		averaged data or conditionspecific data.
+
+		Args:
+			erps ([dict,list]): Either a list with evoked items (mne) or a 
+			dictionary where key, value pairs are condition names and a list
+			with conditin specific evoked data, respectively
+			elec_oi (list): electrodes of interest. In case, the data of 
+			interest is a difference waveform (i.e., contra - ipsi), specify a 
+			list of lists, where the first list contains contralateral 
+			electrodes and the second list ipsilateral electrodes. 
+			method (str, optional): Is the window based on the grand averaged 
+			('cnd_avg') or condition specific data ('cnd_spc'). 
+			Defaults to 'cnd_avg'.
+			window_oi (tuple, optional): If specified peak detection is 
+			restricted to this time window. Defaults to None.
+			polarity (str, optional): Is the peak positive ('pos') 
+			or negative ('neg'). Defaults to 'pos'.
+			window_size (int, optional): Size in seconds of the erp window, 
+			which is centered on the detected peak. Defaults to 0.05.
+
+		Returns:
+			erp_window([tuple,dict]): Tuple with selected window or, in case of 
+			condition specific windows, a dict where key value pairs are 
+			condition names and condition specific windows, respectively
+		"""
+
+		# set params
+		channels, times = ERP.get_erp_params(erps)
+
+		if isinstance(elec_oi[0], str):
+			elec_oi_idx = np.array([channels.index(elec) 
+											for elec in elec_oi])
+		else:
+			contra_idx = np.array([channels.index(elec) 
+											for elec in elec_oi[0]])
+			ipsi_idx = np.array([channels.index(elec) 
+											for elec in elec_oi[1]])
+
+		# get window of interest
+		if window_oi is None:
+			window_oi = (times[0], times[-1])
+		window_idx = get_time_slice(times, window_oi[0], window_oi[1])
+
+		if method == 'cnd_avg':
+			# find peak in grand average waveform
+			# step 1: create condition averaged waveform
+			grand_mean = mne.combine_evoked(
+						[mne.combine_evoked(v,weights='equal') 
+										for (k,v) in erps.items()]
+								,weights = 'equal')
+			channels = grand_mean.ch_names
+
+			# step 2: limit data to electrodes of interest
+			if isinstance(elec_oi[0], str):
+				X = grand_mean._data[elec_oi_idx]
+			else:
+				X = grand_mean._data[contra_idx] - grand_mean._data[ipsi_idx]
+
+			# step 3: get time window based on peak detection
+			if polarity == 'pos':
+				idx_peak = np.argmax(X[window_idx])
+			elif polarity == 'neg':
+				idx_peak = np.argmin(X[window_idx])
+			
+			erp_window = (times[window_idx][idx_peak] - window_size/2, 
+						 times[window_idx][idx_peak] + window_size/2)
+		
+		elif method == 'cnd_spc':
+			erp_window = {}
+			# loop over conditins
+			for cnd in list(erps.keys()):
+				cnd_mean = mne.combine_evoked(erps[cnd], weights = 'equal')
+
+				if isinstance(elec_oi[0], str):
+					X = cnd_mean._data[elec_oi_idx]
+				else:
+					X = cnd_mean._data[contra_idx] - cnd_mean._data[ipsi_idx]
+
+				if polarity == 'pos':
+					idx_peak = np.argmax(X[window_idx])
+				elif polarity == 'neg':
+					idx_peak = np.argmin(X[window_idx])
+				
+				erp_window[cnd] = (times[window_idx][idx_peak] - window_size/2, 
+						 		  times[window_idx][idx_peak] + window_size/2)
+
+		return erp_window
+
+
+
+				
+
+			
+
+		
+		
+		
+		# get mean and individual data
+		evoked_X = np.stack([evoked._data for evoked in erp])
+		evoked = mne.combine_evoked(erp, weights = 'equal')
 
 
 

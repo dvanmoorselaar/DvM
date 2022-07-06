@@ -231,8 +231,8 @@ def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict =
 		eeg {epochs object} -- preprocessed eeg data with eye movements removed
 		"""
 
-	if not use_tracker:
-		beh['eye_bins'][:] = np.nan
+	if not use_tracker or 'eye_bins' not in beh:
+		beh['eye_bins'] = np.nan
 	nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
 	print('Trials without reliable eyetracking data {} out of {} clean trials ({}%)'.format(nan_idx.size, beh['eye_bins'].size, nan_idx.size/float(beh['eye_bins'].size)*100))
 

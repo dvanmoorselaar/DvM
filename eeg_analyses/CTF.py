@@ -5,7 +5,6 @@ Created by Dirk van Moorselaar on 30-03-2016.
 Copyright (c) 2016 DvM. All rights reserved.
 """
 
-#from session import *
 import json
 from sre_constants import MAX_REPEAT
 import time
@@ -40,8 +39,11 @@ from IPython import embed
 
 class CTF(BDM):
 	'''
-	Spatial encoding scripts modeled after: "The topography of alpha-band activity tracks the content of spatial working memory" by Foster et al. (2015).
-	Scipts based on Matlab scripts published on open science Framework (https://osf.io/bwzjj/) and lab visit to Chicago University (spring quarter 2016).
+	Spatial encoding scripts modeled after: "The topography of alpha-band 
+	activity tracks the content of spatial working memory" by Foster et al. 
+	(2015). Scipts based on Matlab scripts published on open science Framework 
+	(https://osf.io/bwzjj/) and lab visit to Chicago University 
+	(spring quarter 2016).
 	'''
 
 	def __init__(self,sj:int,epochs:mne.Epochs,beh:pd.DataFrame, 
@@ -94,7 +96,8 @@ class CTF(BDM):
 		self.freq_scaling = freq_scaling
 		# hypothesized set tuning functions underlying power measured across electrodes
 		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, 
-											  delta = delta)		
+											  delta = delta)
+
 	def select_ctf_data(self, elec_oi: Union[list, str]=  'all',
 						excl_factor: dict = None) -> Tuple[mne.Epochs,
 															pd.DataFrame]:
@@ -303,6 +306,7 @@ class CTF(BDM):
 			E = epochs._data
 			T = abs(E)**2
 		elif self.power == 'wavelet':
+			print('Method not yet implemented')
 			pass 
 		elif self.power == 'raw':
 			T = epochs._data
@@ -418,6 +422,7 @@ class CTF(BDM):
 		return C2_E, W_E, C2_T, W_T
 
 	def set_frequencies(self, freqs):
+		# DOUBLE CHECK THIS: self.power=='band'???
 
 		if freqs == 'main_param':
 			if self.freq_scaling == 'log':
@@ -439,7 +444,7 @@ class CTF(BDM):
 	def train_test_cross(self, pos_bins: np.array,train_idx:np.array,
 						test_idx:np.array)->Tuple[np.array, np.array]:
 		"""
-		selects trail indices for the train and the test set
+		selects trial indices for the train and the test set
 
 		Args:
 			pos_bins (np.array): array with position bins
@@ -549,8 +554,8 @@ class CTF(BDM):
 					nr_perm:int= 0,collapse:bool=False,name:int='main'):
 		"""
 		calculate spatially based channel tuning functions across conditions.
-		Training and testing cab be dobe either witin or across conditions (see
-		cnds argument)
+		Training and testing cab be donne either witin or across conditions 
+		(see cnds argument)
 
 		Args:
 			pos_labels (dict, optional): key, item pair where key points to the 
@@ -599,6 +604,8 @@ class CTF(BDM):
 		ctf, info = {}, {}
 		freqs, nr_freqs = self.set_frequencies(freqs)
 		if self.method == 'k-fold':
+			# TODO: fix
+			print('Method not yet  implemented')
 			print('nr_blocks is irrelevant and will be reset to 1')
 			#self.nr_blocks = 1						
 		if collapse:
@@ -615,7 +622,7 @@ class CTF(BDM):
 				self.nr_blocks = 2 # in effect equal to 1 (see below)
 				nr_itr = 1
 		else:
-			train_cnds= ['all_trials']
+			train_cnds = ['all_trials']
 			
 		# based on conditions get position bins
 		(pos_bins, 
@@ -688,7 +695,7 @@ class CTF(BDM):
 						bin_tr_E = np.zeros((nr_itr_tr, nr_elec, nr_samples)) 
 						bin_tr_T = bin_tr_E.copy()
 						
-					# position bin loope
+					# position bin loop
 					bin_cnt = 0
 					for bin in range(self.nr_bins):
 						test_idx = np.squeeze(info[cnd]['test_idx'][itr][bin])
