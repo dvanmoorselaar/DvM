@@ -629,7 +629,7 @@ class CTF(BDM):
 		cnds, 
 		epochs, 
 		max_tr) = self.select_ctf_labels(epochs, beh, pos_labels, cnds)
-
+  
 		# Frequency loop (ensures that data is only filtered once)
 		for fr in range(nr_freqs):
 			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
@@ -642,11 +642,9 @@ class CTF(BDM):
 				print(f'Running ctf for {cnd} condition')
 
 				# preallocate arrays
-				C2_E = np.zeros((nr_perm,nr_freqs,
-								self.nr_iter * self.nr_blocks,
+				C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
 								nr_samples, self.nr_bins, self.nr_chans))
-				W_E = np.zeros((nr_perm,nr_freqs,
-								self.nr_iter * self.nr_blocks,
+				W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
 								nr_samples, self.nr_chans, nr_elec))							 
 				C2_T, W_T  = C2_E.copy(), W_E.copy()				 
 	

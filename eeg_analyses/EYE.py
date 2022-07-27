@@ -258,7 +258,7 @@ class EYE(FolderStructure):
 	def link_eye_to_eeg(self, eye_file, beh_file, start_trial, window_oi, 
 						trigger_msg, drift_correct):
 
-		# read in eye data (linked to behavior)
+		# read in eye data (linked to behavior)ed
 		print('reading in eye tracker data')
 		eye, beh = self.get_eye_data('', [eye_file], [beh_file], start_trial)
 
