@@ -551,9 +551,9 @@ class BDM(FolderStructure):
 		# stack all training data
 		if  W.ndim > 2:
 			W =  False
-
-		Xtr = Xtr.reshape(-1,nr_elec, nr_time)
-		W = np.stack([np.matmul(np.cov(Xtr[...,i].T),W[i]) 
+		else:
+			Xtr = Xtr.reshape(-1,nr_elec, nr_time)
+			W = np.stack([np.matmul(np.cov(Xtr[...,i].T),W[i]) 
 					for i in range(nr_time)])
 
 		return W
@@ -772,7 +772,6 @@ class BDM(FolderStructure):
 					mean_class = class_acc.mean(axis = 0)	
 					if i == 0:
 						# get non-permuted weights
-
 						W = weights.mean(axis = 0)[0]
 						W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
 						bdm_scores.update({cnd:{'dec_scores': 
