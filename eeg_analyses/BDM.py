@@ -549,6 +549,9 @@ class BDM(FolderStructure):
 		#TODO: add docstring
 		#TODO: make it work with GAT
 		# stack all training data
+		if  W.ndim > 2:
+			W =  False
+
 		Xtr = Xtr.reshape(-1,nr_elec, nr_time)
 		W = np.stack([np.matmul(np.cov(Xtr[...,i].T),W[i]) 
 					for i in range(nr_time)])
@@ -769,6 +772,7 @@ class BDM(FolderStructure):
 					mean_class = class_acc.mean(axis = 0)	
 					if i == 0:
 						# get non-permuted weights
+
 						W = weights.mean(axis = 0)[0]
 						W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
 						bdm_scores.update({cnd:{'dec_scores': 
@@ -783,7 +787,8 @@ class BDM(FolderStructure):
 				bdm_scores[cnd].update({'perm_scores': mean_class[1:]})
 	
 		# create report (specific to unpermuted data)
-		self.report_bdm(bdm_scores, cnds, bdm_name)
+		if not GAT:
+			self.report_bdm(bdm_scores, cnds, bdm_name)
 
 		# store classification dict	
 		if save: 
