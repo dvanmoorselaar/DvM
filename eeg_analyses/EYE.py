@@ -87,6 +87,7 @@ class EYE(FolderStructure):
 		elif eye_files[0][-3:] == 'asc':	
 			eye = [read_edf(file, start = start, missing = 0) for file in eye_files]
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
+		beh = self.read_raw_beh(files = beh_files)
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
 		# check whether each beh trial is logged within eye
@@ -260,7 +261,7 @@ class EYE(FolderStructure):
 
 		# read in eye data (linked to behavior)ed
 		print('reading in eye tracker data')
-		eye, beh = self.get_eye_data('', [eye_file], [beh_file], start_trial)
+		eye, beh = self.get_eye_data('', eye_file, beh_file, start_trial)
 
 		# collect x, y data 
 		x, y, times = self.get_xy(eye, window_oi[0], window_oi[1], trigger_msg)	
