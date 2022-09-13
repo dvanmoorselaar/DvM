@@ -63,8 +63,8 @@ class ERP(FolderStructure):
             report.save(report_name)
             report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
 
-    def select_erp_data(self, excl_factor: dict = None,
-                        topo_flip: dict = None) -> Tuple[pd.DataFrame, 
+    def select_erp_data(self,excl_factor:dict=None,
+                        topo_flip:dict=None)->Tuple[pd.DataFrame, 
                                                             mne.Epochs]:
         """
         Selects the data of interest by excluding a subset of trials
@@ -153,30 +153,35 @@ class ERP(FolderStructure):
                                                 f'{erp_name}_{rt}-ave.fif'))
 
     @staticmethod
-    def flip_topography(epochs: mne.Epochs, beh: pd.DataFrame,
-                        left: list, header: str, 
-                        flip_dict: dict = None) -> mne.Epochs:
+    def flip_topography(epochs:mne.Epochs,beh: pd.DataFrame,left:list, 
+                        header:str,flip_dict:dict=None,
+                        heog:str='HEOG') -> mne.Epochs:
         """
         Flips the topography of trials where the stimuli of interest was 
         presented on the left (i.e. right hemifield). After running this 
         function it is as if all stimuli are presented right 
-        (i.e. the left hemifield is contralateral relative to the stimulus of
-        interest).
+        (i.e. the left hemifield is contralateral relative to the 
+        stimulus of interest).
 
-        By default flipping is done on the basis of a Biosemi 64 spatial layout 
+        By default flipping is done on the basis of a Biosemi 
+        64 spatial layout 
 
         Args:
             epochs (mne.Epochs): preprocessed epochs object
             beh (pd.DataFrame): linked behavioral parameters
-            left (list): position labels of trials where the topography will be
-            flipped to the other hemifield
-            header (str): column in behavior that contains position labels to 
-            be flipped
-            flip_dict(dict, optional): Dictionary used to flip topography.
-            Data corresponding to all key value pairs will be flipped 
-            (e.g., flip_dict = dict(FP1 = 'Fp2') will copy the data from Fp1 
-            into Fp2 and vice versa)
-
+            left (list): position labels of trials where the 
+            topography will be flipped to the other hemifield
+            header (str): column in behavior that contains position 
+            labels to be flipped
+            flip_dict(dict, optional): Dictionary used to flip 
+            topography. Data corresponding to all key value pairs will 
+            be flipped (e.g., flip_dict = dict(FP1 = 'Fp2') will copy 
+            the data from Fp1 into Fp2 and vice versa)
+            heog (str, optional): Channel should represent the 
+            diff score between right and left heog. if this channel name 
+            is present in epochs object, sign of all left trials will be 
+            flipped
+            
         Returns:
             epochs: epochs with flipped topography for specified trials
         """
@@ -204,11 +209,14 @@ class ERP(FolderStructure):
             epochs._data[idx_l,epochs.ch_names.index(l_elec)] = r_elec_data
             epochs._data[idx_l,epochs.ch_names.index(r_elec)] = l_elec_data
 
+        if heog in epochs.ch_names:
+            epochs._data[idx_l,epochs.ch_names.index(heog)] *= -1
+
         return epochs
 
     @staticmethod
-    def select_lateralization_idx(beh: pd.DataFrame, pos_labels: dict, 
-                                  midline:dict ) -> np.array:
+    def select_lateralization_idx(beh:pd.DataFrame,pos_labels:dict, 
+                                  midline:dict)->np.array:
         """
         Based on position labels selects only those trial indices where 
         the stimuli of interest are presented left or right from the 
@@ -216,20 +224,22 @@ class ERP(FolderStructure):
         to those trials where another stimulus of interest is presented 
         on the vertical midline. 
 
-        Function can also be used to select non-lateralized trials as the key,
-        value pair of pos_labels determins which trials are ultimately selected 
+        Function can also be used to select non-lateralized trials as 
+        the key,value pair of pos_labels determins which trials 
+        are ultimately selected 
 
         Args:
-            beh (pd.DataFrame): DataFrame with behavioral parameters per linked 
-            epoch
+            beh (pd.DataFrame): DataFrame with behavioral parameters 
+            per linked epoch
             pos_labels (dict): Dictionary key specifies the column with 
-            position labels in the beh DataFrame. Values should be a list of
-            all labels that are included in the analysis 
+            position labels in the beh DataFrame. Values should be a 
+            list of all labels that are included in the analysis 
             (e.g., dict(target_loc = [2,6])) 
-            midline (dict): If specified, selected trials are limited to trials
-            where another stimuli of interest is concurrently presented on the 
-            vertical midline (e.g., dict(dist_loc = [0,2])). Key again 
-            specifies the column of interest. Multiple keys can be specified
+            midline (dict): If specified, selected trials are limited to 
+            trials where another stimuli of interest is concurrently 
+            presented on the vertical midline 
+            (e.g., dict(dist_loc = [0,2])). Key again specifies the 
+            column of interest. Multiple keys can be specified
 
         Returns:
             idx (np.array): selected trial indices
@@ -283,16 +293,61 @@ class ERP(FolderStructure):
 
             self.create_erps(epochs, beh, idx_c, time_oi, erp_name, RT_split)
 
-    def lateralized_erp(self,pos_labels:np.array,cnds:dict=None,
-                        midline:dict=None, topo_flip:dict=None,
-                        time_oi:tuple=None, excl_factor:dict=None,
-                        RT_split:bool=False, name:str='main'):
+    def residual_eye(pos_info:dict,ch_oi:list=['HEOG'],cnds:dict=None,
+                    midline:dict=None,time_oi:tuple=None,excl_factor:dict=None,
+                    RT_split:bool=False,name:str='eye'):
 
         # get data
-        beh, epochs = self.select_erp_data(excl_factor, topo_flip)
+        beh, epochs = self.select_erp_data(excl_factor)
+
+        # split left and right trials
+        (header, labels), = pos_info.items()
+        idx_l = select_lateralization_idx(beh, {header:labels[0]}, midline)
+        if len(labels) > 1:
+            idx_r = select_lateralization_idx(beh, {header:labels[1]}, midline)
+
+       # loop over all conditions
+        if cnds is None:
+            cnds = ['all_data']
+        else:
+            (cnd_header, cnds), = cnds.items()
+
+        for cnd in cnds:
+            # set erp name
+            erp_name = f'sj_{self.sj}_{cnd}_{name}'	
+
+            # slice condition trials
+            if cnd == 'all_data':
+                idx_c_l = idx_l
+                idx_c_r = idx_r
+            else:
+                idx_c = np.where(beh[cnd_header] == cnd)[0]
+                idx_c_l = np.intersect1d(idx_l, idx_c)
+                idx_c_r = np.intersect1d(idx_r, idx_c)
+
+            self.create_diff_wave()
+
+    def create_diff_wave(self,epochs:mne.Epochs,idx:np.array,
+                        contra_elec:list,ipsi_elec:list)->np.array:
+
+        # get contra and ipsi indices
+        idx_ipsi = [epochs.ch_names.index(ipsi) for ipsi in ipsi_elec]
+        idx_contra = [epochs.ch_names.index(contra) for contra in contra_elec]
+
+        # get waveforms
+        ipsi = epochs._data[idx, idx_ipsi].mean(axis = (0,1))
+        contra = epochs._data[idx, idx_contra].mean(axis = (0,1))
+
+    def lateralized_erp(self,pos_labels:np.array,cnds:dict=None,
+                        midline:dict=None,topo_flip:dict=None,
+                        time_oi:tuple=None,excl_factor:dict=None,
+                        RT_split:bool=False,name:str='main'):
+
+        # get data
+        beh, epochs = self.select_erp_data(excl_factor,topo_flip)
     
         # select trials of interest (i.e., lateralized stimuli)
-        idx = self.select_lateralization_idx(beh, pos_labels, midline)
+        idx = self.select_lateralization_idx(beh,pos_labels,midline)
 
         # loop over all conditions
         if cnds is None:
@@ -499,7 +554,7 @@ class ERP(FolderStructure):
 
         # save data
         np.savetxt(ERP.folder_tracker(['erp','stats'], 
-               filename = f'{name}.csv'),np.stack(X).T, 
+               fname = f'{name}.csv'),np.stack(X).T, 
                delimiter = ",",header = ",".join(headers),comments='')
 
     @staticmethod

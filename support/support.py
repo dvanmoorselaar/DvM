@@ -7,12 +7,255 @@ import itertools
 import numpy as np
 import pandas as pd
 
-from typing import Union
+from typing import Optional, Generic, Union, Tuple, Any
 from IPython import embed 
 from math import sqrt
 from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
+
+def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
+				eye_dict:dict,preproc_name:str,
+				preproc_file:str=None)->Tuple[pd.DataFrame,mne.Epochs]:
+	"""
+	Filters out eye movements based on either a step algorhytm or 
+	deviation from fixation as measured with the eyetracker. In the 
+	latter case it is required that eye tracker data is linked to the 
+	epochs object during preprocessing (see EEG.link_eye)
+
+	Args:
+		sj (int): subject identifier
+		beh (pd.DataFrame): behavioral data
+		epochs (mne.Epochs): epoched data
+		eye_dict (dict): parameters used to mark eye movement artefacts.
+		Supports the following keys:
+			eye_window (tuple): window used to search for eye movements.
+			Defaults to entire window
+            eye_ch (str): channel to search for eye movements. Defaults
+			to 'HEOG'
+            angle_thresh (float): threshold in degrees of visual angles
+            step_param (dict): tuple, containing window size, window 
+			step and thershold used to detect artefacts using sliding 
+			window approach. Defaults to (200, 10, 20) 
+			use_tracker (bool): should eye tracker data be used to 
+            search eye movements. If not exclusion will be based on 
+            step algorhytm applied to eog channel as specified in eye_ch
+		preproc_name (str): name specified for specific 
+            preprocessing pipeline. Used to update the preprocessing 
+			document
+	Returns:
+        beh (pd.DataFrame): behavioral data alligned to eeg data
+        epochs (mne.Epochs): preprocessed eeg data
+	"""
+
+	# initialize some parameters
+	if 'eye_window' not in eye_dict:
+		eye_dict['eye_window'] = (epochs.tmin, epochs.tmax)
+	if 'eye_ch' not in eye_dict:
+		print('Eye channel is not specified in eyedict, using HEOG as default')
+		eye_dict['eye_ch'] = 'HEOG'
+	s, e = eye_dict['eye_window']
+	window_idx = get_time_slice(epochs.times,s,e)
+
+	# check whether selection should be based on eyetracker data
+	if 'use_tracker' not in eye_dict or not eye_dict['use_tracker']:
+		tracker_bins = np.full(beh.shape[0], np.nan)
+		perc_tracker = 'no tracker'
+	else:
+		angles = epochs._data[:,epochs.ch_names.index('dev'),window_idx]
+		min_samples = 40 * epochs.info['sfreq']/1000 # 40 ms
+		tracker_bins = bin_tracker_angles(angles, eye_dict['angle_thresh'],
+						min_samples)
+		perc_tracker = np.round(sum(tracker_bins == 1)/ 
+					   sum(tracker_bins < 2)*100,1)
+
+	# apply step algorhytm to trials with missing data
+	nan_idx = np.where(np.isnan(tracker_bins) > 0)[0]
+	if nan_idx.size > 0:
+		eye_ch = eye_dict['eye_ch']
+		eog = epochs._data[nan_idx,epochs.ch_names.index(eye_ch),window_idx]
+		if 'step_param' not in eye_dict:
+			size, step, thresh = (200, 10, 20)
+		else:
+			size, step, thresh = eye_dict['step_param']
+		idx_art = eog_filt(eog,sfreq = epochs.info['sfreq'], windowsize = size, 
+								windowstep = step, thresh = thresh)
+		tracker_bins[nan_idx[idx_art]] = 2
+		perc_eog = np.round(sum(tracker_bins == 2)/ nan_idx.size*100,1)
+	else:
+		perc_eog = 'eog not used for exclusion'
+
+	# if it exists update preprocessing information
+	if os.path.isfile(preproc_file):
+		print('Eye exclusion info saved in preprocessing file (at session 1')
+		idx = (sj, 1)
+		df = pd.read_csv(preproc_file, index_col=[0,1])
+		df.loc[idx,'% tracker'] = str(perc_tracker)
+		df.loc[idx,'% eog'] = str(perc_eog)
+
+		# save datafile
+		df.to_csv(preproc_file)
+
+	# remove trials from behavior and eeg
+	beh.reset_index(inplace = True)
+	to_drop = np.where(tracker_bins == 1)[0]	
+	epochs.drop(to_drop, reason='eye detection')
+	beh.drop(to_drop, inplace = True)
+	beh.reset_index(inplace = True, drop = True)
+
+	return beh, epochs
+
+def bin_tracker_angles(angles:np.array,thresh:float,min_samp:float)->np.array:
+	"""
+	Summarizes eye tracker data per trial with a single value that 
+	indicates whether that trial had a segment of data that did exceed 
+	the specified threshold in visual angle (1) or not (0). 
+
+	Args:
+		angles (np.array): deviation from fixation in visual angle
+		thresh (float): max deviation threshold to mark for exclusion
+		min_samp (float): minumum number of consecutive samples where 
+		the threshold should be exceeded (controls for eyetracker noise)
+
+	Returns:
+		tracker_bins (np.array): array that indicates per trial whether 
+		or not that trial should be excluded. Trials with missing eye 
+		tracker data are indicated via nan
+	"""
+
+	#TODO: how to deal with trials without data
+	tracker_bins = []
+
+	for i, angle in enumerate(angles):
+		# get data where deviation from fix is larger than thresh
+		binned = np.where(angle > thresh)[0]
+		segments = np.split(binned, np.where(np.diff(binned) != 1)[0]+1)
+
+		# check whether a segment exceeds min duration
+		if np.where(np.array([s.size for s in segments])>min_samp)[0].size > 0:
+			tracker_bins.append(1)
+		elif not np.any(angle):
+			tracker_bins.append(np.nan)
+		else:
+			tracker_bins.append(0)
+
+	return np.array(tracker_bins)
+
+def eog_filt(eog:np.array,sfreq:float,windowsize:int=200,
+			windowstep:int=10,thresh:int=30)->np.array:
+	"""
+	Split-half sliding window approach. This function slides a window 
+	in prespecified steps over specified data. If the change in voltage 
+	from the first half to the second half of the window is greater 
+	than the specified threshold, this trial is marked for rejection
+
+	Args:
+		eog (np.array): nr epochs X times. Data used for trial rejection
+		sfreq (float): digitizing frequency
+		windowsize (int, optional): size of the sliding window (in ms). 
+		Defaults to 200.
+		windowstep (int, optional): step size to slide window over the 
+		trial. Defaults to 10.
+		thresh (int, optional): threshold in microvolt. Defaults to 30.
+
+	Returns:
+		eye_trials (np.array): indices of marked epochs
+	"""
+
+	# shift miliseconds to samples
+	windowstep /= 1000.0 / sfreq
+	windowsize /= 1000.0 / sfreq
+	s, e = 0, eog.shape[-1]
+
+	# create multiple windows based on window parameters 
+	# (accept that final samples of epoch may not be included) 
+	window_idx = [(i, i + int(windowsize)) 
+					for i in range(s, e, int(windowstep)) 
+					if i + int(windowsize) < e]
+
+	# loop over all epochs and store all eye events into a list
+	eye_trials = []
+	for i, x in enumerate(eog):
+		
+		for idx in window_idx:
+			window = x[idx[0]:idx[1]]
+
+			w1 = np.mean(window[:int(window.size/2)])
+			w2 = np.mean(window[int(window.size/2):])
+
+			if abs(w1 - w2) > thresh:
+				eye_trials.append(i)
+				break
+
+	eye_trials = np.array(eye_trials, dtype = int)			
+
+	return eye_trials
+
+def get_time_slice(times, start_time, end_time, include_final = False, step = None):
+
+	# get start and end index
+	idx = [np.argmin(abs(times - t)) 
+				for t in (start_time, end_time) if t is not None]
+	if len(idx) == 0:
+		idx = [0, times.size - 1]
+	elif len(idx) == 1:
+		if start_time is None:
+			idx.insert(0,0)
+		else:
+			idx.insert(1,times.size - 1)
+
+	s, e = idx
+	if include_final:
+		e += 1
+	time_slice = slice(s, e, step)
+
+	return time_slice
+
+def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, use_tracker = True):
+	"""Filters out data based on eye movements. Either based on eye tracker data 
+	as stored in the beh file or using a step like algorhythm
+
+	
+	Arguments:
+		beh {dataframe}  -- behavioral info after preprocessing
+		eeg {epochs object} -- preprocessed eeg data
+		eye_window {tuple | list} -- Time window used for step algorhythm
+		eye_ch {str} -- Name of channel used to detect eye movements
+		eye_thresh {array} -- threshold in visual degrees. Used for eye tracking data
+		eye_dict (dict) -- dictionry with three parameters (specified as keys) for step algorhytm: 
+						windowsize (in ms), windowstep (in ms), threshold (in microV)
+		use_tracker (bool) -- specifies whether eye tracker data should be used (i.e., is reliable)				
+	
+	Returns:
+		beh {dataframe}  -- behavioral info with trials with eye movements removed
+		eeg {epochs object} -- preprocessed eeg data with eye movements removed
+		"""
+
+	if not use_tracker or 'eye_bins' not in beh:
+		beh['eye_bins'] = np.nan
+	nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
+	print('Trials without reliable eyetracking data {} out of {} clean trials ({}%)'.format(nan_idx.size, beh['eye_bins'].size, nan_idx.size/float(beh['eye_bins'].size)*100))
+
+	# limit step algorhytm to trials without eye tracking data
+	if nan_idx.size > 0:
+		s,e = [np.argmin(abs(eeg.times - t)) for t in eye_window]
+		eog = eeg._data[nan_idx,eeg.ch_names.index(eye_ch),s:e]
+
+		if eye_dict != None:
+
+			idx_eye = eog_filt(eog, sfreq = eeg.info['sfreq'], windowsize = eye_dict['windowsize'], 
+								windowstep = eye_dict['windowstep'], threshold = eye_dict['threshold'])
+			beh['eye_bins'][nan_idx[idx_eye]] = 99	
+	
+	# remove trials from beh and eeg objects
+	beh.reset_index(inplace = True)
+	to_drop = np.where(beh['eye_bins'] > eye_thresh)[0]	
+	eeg.drop(to_drop, reason='eye detection')
+	print('Dropped {} trials based on threshold criteria ({})%'.format(to_drop.size, to_drop.size/float(beh['eye_bins'].size)*100))
+	beh.drop(to_drop, inplace = True)
+	beh.reset_index(inplace = True, drop = True)
+
+	return beh, eeg
 
 
 def create_cnd_loop(cnds):
@@ -38,25 +281,7 @@ def create_cnd_loop(cnds):
 	
 	return filters
 
-def get_time_slice(times, start_time, end_time, include_final = True, step = None):
 
-	# get start and end index
-	idx = [np.argmin(abs(times - t)) 
-				for t in (start_time, end_time) if t is not None]
-	if len(idx) == 0:
-		idx = [0, times.size - 1]
-	elif len(idx) == 1:
-		if start_time is None:
-			idx.insert(0,0)
-		else:
-			idx.insert(1,times.size - 1)
-
-	s, e = idx
-	if include_final:
-		e += 1
-	time_slice = slice(s, e, step)
-
-	return time_slice
 
 def log_preproc(idx, file, nr_sj = 1, nr_sessions = 1, to_update = None):
 
@@ -211,100 +436,10 @@ def select_electrodes(ch_names: Union[list, np.ndarray], elec_oi: Union[list, st
 
 	return picks	
 
-def filter_eye(beh, eeg, eye_window, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, use_tracker = True):
-	"""Filters out data based on eye movements. Either based on eye tracker data 
-	as stored in the beh file or using a step like algorhythm
+
+
 
 	
-	Arguments:
-		beh {dataframe}  -- behavioral info after preprocessing
-		eeg {epochs object} -- preprocessed eeg data
-		eye_window {tuple | list} -- Time window used for step algorhythm
-		eye_ch {str} -- Name of channel used to detect eye movements
-		eye_thresh {array} -- threshold in visual degrees. Used for eye tracking data
-		eye_dict (dict) -- dictionry with three parameters (specified as keys) for step algorhytm: 
-						windowsize (in ms), windowstep (in ms), threshold (in microV)
-		use_tracker (bool) -- specifies whether eye tracker data should be used (i.e., is reliable)				
-	
-	Returns:
-		beh {dataframe}  -- behavioral info with trials with eye movements removed
-		eeg {epochs object} -- preprocessed eeg data with eye movements removed
-		"""
-
-	if not use_tracker or 'eye_bins' not in beh:
-		beh['eye_bins'] = np.nan
-	nan_idx = np.where(np.isnan(beh['eye_bins']) > 0)[0]
-	print('Trials without reliable eyetracking data {} out of {} clean trials ({}%)'.format(nan_idx.size, beh['eye_bins'].size, nan_idx.size/float(beh['eye_bins'].size)*100))
-
-	# limit step algorhytm to trials without eye tracking data
-	if nan_idx.size > 0:
-		s,e = [np.argmin(abs(eeg.times - t)) for t in eye_window]
-		eog = eeg._data[nan_idx,eeg.ch_names.index(eye_ch),s:e]
-
-		if eye_dict != None:
-
-			idx_eye = eog_filt(eog, sfreq = eeg.info['sfreq'], windowsize = eye_dict['windowsize'], 
-								windowstep = eye_dict['windowstep'], threshold = eye_dict['threshold'])
-			beh['eye_bins'][nan_idx[idx_eye]] = 99	
-	
-	# remove trials from beh and eeg objects
-	beh.reset_index(inplace = True)
-	to_drop = np.where(beh['eye_bins'] > eye_thresh)[0]	
-	eeg.drop(to_drop, reason='eye detection')
-	print('Dropped {} trials based on threshold criteria ({})%'.format(to_drop.size, to_drop.size/float(beh['eye_bins'].size)*100))
-	beh.drop(to_drop, inplace = True)
-	beh.reset_index(inplace = True, drop = True)
-
-	return beh, eeg
-
-
-def eog_filt(eog, sfreq, windowsize = 50, windowstep = 25, threshold = 30):
-	'''
-	Split-half sliding window approach. This function slids a window in prespecified steps over 
-	eog data. If the change in voltage from the first half to the second half of the window is greater 
-	than a threshold, this trial is marked for rejection
-
-	Arguments
-	- - - - - 
-	eog(array): epochs X times. Data used for trial rejection
-	sfreq (float): digitizing frequency
-	windowsize (int): size of the sliding window (in ms)
-	windowstep (int): step size to slide window over the trial
-	threshold (int): threshold in microvolt
-
-	Returns
-	- - - -
-
-	eye_trials: array that specifies for each epoch whether eog_filt detected an eye movement
-
-	'''	
-
-	# shift miliseconds to samples
-	windowstep /= 1000.0 / sfreq
-	windowsize /= 1000.0 / sfreq
-	s, e = 0, eog.shape[-1]
-
-	# create multiple windows based on window parameters (accept that final samples of epoch may not be included) 
-	window_idx = [(i, i + int(windowsize)) for i in range(s, e, int(windowstep)) if i + int(windowsize) < e]
-
-	# loop over all epochs and store all eye events into a list
-	eye_trials = []
-	for i, x in enumerate(eog):
-		
-		for idx in window_idx:
-			window = x[idx[0]:idx[1]]
-
-			w1 = np.mean(window[:int(window.size/2)])
-			w2 = np.mean(window[int(window.size/2):])
-
-			if abs(w1 - w2) > threshold:
-				eye_trials.append(i)
-				break
-
-	eye_trials = np.array(eye_trials, dtype = int)			
-	#print('selected {0} bad trials via eyethreshold ({1:.0f}%)'.format(eye_trials.size, eye_trials.size/float(eog.shape[0]) * 100))	
-
-	return eye_trials	
 
 
 def confidence_int(data, p_value = .05, tail='two', morey=True):

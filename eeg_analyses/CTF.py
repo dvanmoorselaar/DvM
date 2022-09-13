@@ -728,19 +728,19 @@ class CTF(BDM):
 
 		# save output
 		with open(self.folder_tracker(['ctf',self.to_decode], 
-				filename = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
+				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
 			print('saving ctfs')
 			pickle.dump(ctf, handle)
 
 		with open(self.folder_tracker(['ctf',self.to_decode], 
-				filename = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
+				fname = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
 			pickle.dump(info, handle)	
 
 		if self.ctf_param:
 			print('get ctf tuning params')
 			ctf_param = self.ctfs_tuning_params(ctf)
 			with open(self.folder_tracker(['ctf',self.to_decode], 
-					filename=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
+					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
 				print('saving ctf params')
 				pickle.dump(ctf_param, handle)
 

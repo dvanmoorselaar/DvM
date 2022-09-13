@@ -436,6 +436,7 @@ class Epochs(mne.Epochs, FolderStructure):
         # check alignment
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
+
         if nr_miss > 0:
             report_str += (f'Behavior has {nr_miss} more trials than detected '
                           'events. The following trial numbers will be '
@@ -500,7 +501,7 @@ class Epochs(mne.Epochs, FolderStructure):
         nr_matches = sum(beh[trigger_header].values == bdf_triggers)
         nr_epochs = bdf_triggers.size
         report_str += (f'\n {nr_matches} matches between beh and epoched '
-                      'data out of {nr_epochs}')
+                      f'data out of {nr_epochs}')
 
         return missing, report_str
 
@@ -939,12 +940,14 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # if eye tracker data exists align x, y eye tracker with eeg
         ext = eye_info['tracker_ext']
-        eye_files = glob.glob(self.folder_tracker(extension = ['eye','raw'], \
-					filename = f'sub_{self.sj}_session_{self.session}*'
+        eye_files = glob.glob(self.folder_tracker(ext = ['eye','raw'], \
+					fname = f'sub_{self.sj}_session_{self.session}*'
                     f'.{ext}') )
-        beh_files = glob.glob(self.folder_tracker(extension=[
+        beh_files = glob.glob(self.folder_tracker(ext=[
                     'beh', 'raw'],
-                    filename=f'subject-{self.sj}_session_{self.session}*.csv'))
+                    fname=f'subject-{self.sj}_session_{self.session}*.csv'))
+        eye_files = sorted(eye_files)
+        beh_files = sorted(beh_files)
 
         if len(eye_files) > 0:
             EO = EYE(sfreq = eye_info['sfreq'],
@@ -969,10 +972,11 @@ class Epochs(mne.Epochs, FolderStructure):
             self.metadata['eye_bins'] = bins
 
             # add x, y to epochs object
-            data = np.stack((x,y)).swapaxes(0,1)
+            data = np.stack((x,y,angles)).swapaxes(0,1)
             t_min  = eye_info['window_oi'][0]/1000
-            self.add_channel_data(data, ['x','y'], eye_info['sfreq'],
+            self.add_channel_data(data, ['x','y','dev'], eye_info['sfreq'],
                                 'eog', t_min)
+        
 
     def add_channel_data(self, data, ch_names, sfreq, ch_type, t_min):
 
@@ -1195,9 +1199,9 @@ class Epochs(mne.Epochs, FolderStructure):
     def save_preprocessed(self, preproc_name, combine_sessions: bool = True):
 
         # save eeg
-        self.save(self.folder_tracker(extension=[
+        self.save(self.folder_tracker(ext=[
                     'processed'],
-                    filename=f'subject-{self.sj}_ses-{self.session}_{preproc_name}-epo.fif'),
+                    fname=f'subject-{self.sj}_ses-{self.session}_{preproc_name}-epo.fif'),
                     split_size='2GB', overwrite = True)
 
         # check whether individual sessions need to be combined
@@ -1205,13 +1209,13 @@ class Epochs(mne.Epochs, FolderStructure):
             all_eeg = []
             for i in range(int(self.session)):
                 session = i + 1
-                all_eeg.append(mne.read_epochs(self.folder_tracker(extension=[
+                all_eeg.append(mne.read_epochs(self.folder_tracker(ext=[
                                'processed'],
-                               filename=f'subject-{self.sj}_ses-{session}_{preproc_name}-epo.fif')))
+                               fname=f'subject-{self.sj}_ses-{session}_{preproc_name}-epo.fif')))
 
             all_eeg = mne.concatenate_epochs(all_eeg)
-            all_eeg.save(self.folder_tracker(extension=[
-                         'processed'], filename=f'subject-{self.sj}_all_{preproc_name}-epo.fif'),
+            all_eeg.save(self.folder_tracker(ext=[
+                         'processed'], fname=f'subject-{self.sj}_all_{preproc_name}-epo.fif'),
                         split_size='2GB', overwrite = True)
 
     def link_behavior(self, beh: pd.DataFrame, combine_sessions: bool = True):

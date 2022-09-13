@@ -21,13 +21,13 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     sj_info = sj_info[str(sj)] if str(sj) in sj_info.keys() else {'bad_chs': []}
     
     # initiate report
-    report_file = FS.folder_tracker(extension=['preprocessing', 'report', preproc_name], 
-                     filename=f'sj_{sj}_ses_{session}.html')
+    report_file = FS.folder_tracker(ext=['preprocessing', 'report', preproc_name], 
+                     fname=f'sj_{sj}_ses_{session}.html')
     report = mne.Report(title='preprocessing overview', subject = f'{sj}_{session}')
 
     # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME 
-    EEG = mne.concatenate_raws([RawBDF(FS.folder_tracker(extension=['raw_eeg'], 
-                     filename=f'subject_{sj}_session_{session}_{run}.bdf'),
+    EEG = mne.concatenate_raws([RawBDF(FS.folder_tracker(ext=['raw_eeg'], 
+                     fname=f'subject_{sj}_session_{session}_{run}.bdf'),
                      preload=True, eog=eog) for run in eeg_runs])
             
     EEG.info['bads'] = sj_info['bad_chs'] if type(sj_info['bad_chs']) \
@@ -80,7 +80,7 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     report.save(report_file, overwrite = True)
 
     # LINK EYE MOVEMENTS
-    epochs.link_eye(eye_info, missing, vEOG=eog[:2], hEOG=eog[2:])
+    epochs.link_eye(eye_info,missing,vEOG=eog[:2],hEOG=eog[2:])
 
     # START AUTOMATIC ARTEFACT REJECTION 
     if preproc_param['run_autoreject']:
@@ -96,15 +96,11 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     report.add_epochs(epochs, title='Epochs after artefact reject')    
     report.save(report_file, overwrite = True)
 
-    # epochs.detectEye(missing, events, epochs.metadata.shape[0], time_window=(t_min*1000, t_max*1000), 
-    #                 tracker_shift = eye_info['tracker_shift'], start_event = eye_info['start_event'], 
-    #                 extension = eye_info['tracker_ext'], eye_freq = eye_info['eye_freq'], 
-    #                 screen_res = eye_info['screen_res'], viewing_dist = eye_info['viewing_dist'], 
-    #                 screen_h = eye_info['screen_h'])
-
     # save
     epochs.save_preprocessed(preproc_name)
-    log_file = FS.folder_tracker(extension=['preprocessing', 'group_info'], 
-                     filename=f'preproc_param_{preproc_name}.csv')
-    log_preproc((sj, session), log_file, nr_sj = nr_sjs, nr_sessions = nr_sessions, 
-                to_update = dict(nr_clean = len(epochs), z_thresh = z_thresh, nr_bads = len(bads), bad_el = bads))
+    log_file = FS.folder_tracker(ext=['preprocessing', 'group_info'], 
+                     fname=f'preproc_param_{preproc_name}.csv')
+    to_update = dict(nr_clean = len(epochs), z_thresh = z_thresh, 
+                    nr_bads = len(bads), bad_el = bads)
+    log_preproc((sj, session),log_file,nr_sj=nr_sjs, 
+                nr_sessions=nr_sessions,to_update = to_update)

@@ -4,53 +4,112 @@ import pickle
 import glob
 
 import pandas as pd
+
+from typing import Optional, Generic, Union, Tuple, Any
 from support.support import *
 from IPython import embed
 
 class FolderStructure(object):
 
     '''
-    Creates the folder structure
+    Handles reading and saving of files within dvm toolbox
     '''
 
     def __init__(self):
         pass
 
     @staticmethod
-    def folder_tracker(extension = [], filename = '', overwrite = True):
-        '''
-        Creates a folder address. At the same time it
-        checks whether the specific folder already exists (if not it is created)
+    def folder_tracker(ext:list=[], fname:str=None,overwrite:bool=True)->str:
+        """
+        Creates a folder address with the current working directory as 
+        a base. In case the specified path does not exits, it is created
 
-        Arguments
-        - - - - -
-        extension (list): list of subfolders that are attached to current working directory
-        filename (str): name of file
-        overwrite (bool): if overwrite is False, an * is added to the filename
+        Args:
+            ext (list, optional): list of subfolders that are attached 
+            to current working directory. Defaults to [] (i.e., 
+            no subfolders).
+            fname (str, optional): filename. Defaults to None.
+            overwrite (bool, optional): if overwrite is False, the 
+            original file remains untouched and an * is appended to the 
+            specified file name Defaults to True.
 
-        Returns
-        - - - -
-        folder (str): file adress
-
-        '''
+        Returns:
+            path: specified file path
+        """
 
         # create folder adress
-        folder = os.getcwd()
-        if extension != []:
-            folder = os.path.join(folder,*extension)
+        path = os.getcwd()
+        if ext != []:
+            path = os.path.join(path,*ext)
 
         # check whether folder exists
-        if not os.path.isdir(folder):
-            os.makedirs(folder)
+        if not os.path.isdir(path):
+            os.makedirs(path)
 
-        if filename != '':
+        if fname != '':
             if not overwrite:
-                while os.path.isfile(os.path.join(folder,filename)):
-                    end_idx = len(filename) - filename.index('.')
-                    filename = filename[:-end_idx] + '+' + filename[-end_idx:]
-            folder = os.path.join(folder,filename)
+                while os.path.isfile(os.path.join(path,fname)):
+                    end_idx = len(fname) - fname.index('.')
+                    fname = fname[:-end_idx] + '+' + fname[-end_idx:]
+            path = os.path.join(path,fname)
 
-        return folder
+        return path
+
+    def load_processed_eeg(self,sj:int,preproc_name:str,eye_dict:dict=None,
+                          beh_file:bool=True)->Tuple[pd.DataFrame,mne.Epochs]:
+        """
+        Reads in preprocessed eeg data (mne.Epochs object) and 
+        behavioral data to be used for subsequent analyses. If data is 
+        excluded based on eye movement criteria and a preproccesing 
+        overview file exists, this file is updated with eyemovement 
+        info per subject.
+ 
+        Args:
+            sj (int): subject identifier
+            preproc_name (str): name specified for specific 
+            preprocessing pipeline
+            eye_dict (dict, optional): Each key specifies criteria
+            used to exclude data based on eye_movement data. 
+            Defaults to None, i.e., no eye-movement exclusion.
+            Currently, supports the following keys:
+            eye_window (tuple): window used to search for eye movements
+            eye_ch (str): channel to search for eye movements
+            angle_thresh (float): threshold in degrees of visual angles
+            step_param (dict)
+            use_tracker (bool): should eye tracker data be used to 
+            search eye movements. If not exclusion will be based on 
+            step algorhytm applied to eog channel as specified in eye_ch
+            beh_file (bool, optional): Is epoch info stored in a 
+            seperate file or within epochs data. Defaults to True.
+
+        Returns:
+            beh (pd.DataFrame): behavioral data alligned to eeg data
+            epochs (mne.Epochs): preprocessed eeg data
+        """
+        
+        # start by reading in processed eeg data
+        epochs = mne.read_epochs(self.folder_tracker(ext = ['processed'],
+                            fname = f'subject-{sj}_{preproc_name}-epo.fif'))
+        
+        # check whether metadata is saved alongside epoched eeg
+        if epochs.metadata is not None:
+            beh = epochs.metadata
+        else:
+            if beh_file:
+                # read in seperate behavior file
+                beh = pd.read_csv(self.folder_tracker(ext=['beh','processed'],
+                    fname = f'subject-{sj}_{preproc_name}.csv'))
+            else:
+                beh = pd.DataFrame({'condition': epochs.events[:,2]})
+
+        # exclude eye movements based on threshold criteria in eye_dict
+        if eye_dict is not None:
+            file = FolderStructure().folder_tracker(
+                            ext = ['preprocessing','group_info'],
+                            fname = 'preproc_param_main.csv')
+            beh, epochs = exclude_eye(sj,beh,epochs,eye_dict,preproc_name,file)
+
+        return beh, epochs
 
 
     def load_data(self, sj, name = 'all', eyefilter = False, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
@@ -76,15 +135,15 @@ class FolderStructure(object):
         '''
 
         # read in processed EEG data
-        eeg = mne.read_epochs(self.folder_tracker(extension = ['processed'],
-                            filename = 'subject-{}_{}-epo.fif'.format(sj, name)))
+        eeg = mne.read_epochs(self.folder_tracker(ext = ['processed'],
+                            fname = 'subject-{}_{}-epo.fif'.format(sj, name)))
         if eeg.metadata is not None:
             beh = eeg.metadata
         else:
             # read in processed behavior from pickle file
             if beh_file:
-                beh = pickle.load(open(self.folder_tracker(extension = ['beh','processed'],
-                                    filename = 'subject-{}_{}.pickle'.format(sj, name)),'rb'), encoding='latin1')
+                beh = pickle.load(open(self.folder_tracker(ext = ['beh','processed'],
+                                    fname = 'subject-{}_{}.pickle'.format(sj, name)),'rb'), encoding='latin1')
                 beh = pd.DataFrame.from_dict(beh)
             else:
                 beh = pd.DataFrame({'condition': eeg.events[:,2]})
@@ -109,10 +168,10 @@ class FolderStructure(object):
 
         # get all files for this subject's session
         if not files:
-            files = glob.glob(self.folder_tracker(extension=[
+            files = sorted(glob.glob(self.folder_tracker(ext=[
                     'beh', 'raw'],
-                    filename=f'subject-{sj}_session_{session}*.csv'))
-
+                    fname=f'subject-{sj}_session_{session}*.csv')))
+                    
         # read in as dataframe
         beh = [pd.read_csv(file) for file in files]
         beh = pd.concat(beh)
@@ -144,12 +203,12 @@ class FolderStructure(object):
         for cnd in cnds:
             if sjs == 'all':
                 files = sorted(glob.glob(self.folder_tracker(
-                                extension = ['erp',erp_folder],
-                                filename = f'sj_*_{cnd}_{erp_name}-ave.fif')))
+                                ext = ['erp',erp_folder],
+                                fname = f'sj_*_{cnd}_{erp_name}-ave.fif')))
             else:
                 files = [self.folder_tracker(
-                                extension = ['erp',erp_folder],
-                                filename = f'sj_{sj}_{cnd}_{erp_name}-ave.fif')
+                                ext = ['erp',erp_folder],
+                                fname = f'sj_{sj}_{cnd}_{erp_name}-ave.fif')
                                             for sj in sjs]
 
             # read in actual data
@@ -174,14 +233,14 @@ class FolderStructure(object):
         """
 
         # set extension
-        extension = ['bdm'] + bdm_folder_path
+        ext = ['bdm'] + bdm_folder_path
 
         if sjs == 'all':
             files = sorted(glob.glob(self.folder_tracker(
-                            extension = extension,
-                            filename = f'sj_*_{bdm_name}.pickle')))
+                            ext = ext,
+                            fname = f'sj_*_{bdm_name}.pickle')))
         else:
-            files = [self.folder_tracker(extension = extension,
+            files = [self.folder_tracker(ext = ext,
                     filename = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
 
         bdm = [pickle.load(open(file, "rb")) for file in files]

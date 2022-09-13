@@ -92,7 +92,6 @@ class EYE(FolderStructure):
 
 		# check whether each beh trial is logged within eye
 		nr_miss =  eye.shape[0] - beh.shape[0]
-
 		if nr_miss < 0:
 			print('Trials in beh and eye do not match. Trials removed from') 
 			print(' beh. Please inspect data carefully')
