@@ -921,23 +921,24 @@ class Epochs(mne.Epochs, FolderStructure):
         idx_v = [ch_names.index(v) for v in vEOG] if vEOG is not None else []
         idx_h = [ch_names.index(h) for h in hEOG] if hEOG is not None else []
 
-        ch_mapping = {}
+        eog_data, eog_ch = [], []
         if len(idx_v) == 2:
-            ch_mapping.update({vEOG[0]: 'VEOG'})
-            eog._data[idx_v[0]] -= eog._data[idx_v[1]]
+            VEOG = eog._data[:,idx_v[0]] - eog._data[:,idx_v[1]]
+            eog_data.append(VEOG)
+            eog_ch.append('VEOG')
         if len(idx_h) == 2:
-            ch_mapping.update({hEOG[0]: 'HEOG'})
-            eog._data[idx_h[0]] -= eog._data[idx_h[1]]
-
-        # # add rereferenced vEOG and hEOG data to self
-        if ch_mapping:
-            eog.rename_channels(ch_mapping)
-            eog.drop_channels([vEOG[1], hEOG[1]])
-            self.add_channels([eog])
+            HEOG = eog._data[:,idx_h[0]] - eog._data[:,idx_h[1]]
+            eog_data.append(HEOG)
+            eog_ch.append('HEOG')
+        
+        if len(eog_data) > 0:
+            eog_data =  np.stack(eog_data).swapaxes(0,1)   
+            self.add_channel_data(eog_data, eog_ch, self.info['sfreq'],
+                                'eog', self.tmin)
             print(
             'EOG data (VEOG, HEOG) rereferenced with subtraction and '
             'renamed EOG channels')
-
+            
         # if eye tracker data exists align x, y eye tracker with eeg
         ext = eye_info['tracker_ext']
         eye_files = glob.glob(self.folder_tracker(ext = ['eye','raw'], \
@@ -958,7 +959,7 @@ class Epochs(mne.Epochs, FolderStructure):
             (x,
             y,
             bins,
-            angles) =EO.link_eye_to_eeg(eye_files, beh_files, eye_info['start'],
+            angles) =EO.link_eye_to_eeg(eye_files,beh_files,eye_info['start'],
                                eye_info['window_oi'], eye_info['trigger_msg'],
                                eye_info['drift_correct'])
 
@@ -976,7 +977,6 @@ class Epochs(mne.Epochs, FolderStructure):
             t_min  = eye_info['window_oi'][0]/1000
             self.add_channel_data(data, ['x','y','dev'], eye_info['sfreq'],
                                 'eog', t_min)
-        
 
     def add_channel_data(self, data, ch_names, sfreq, ch_type, t_min):
 
