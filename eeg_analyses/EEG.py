@@ -410,7 +410,6 @@ class Epochs(mne.Epochs, FolderStructure):
         print('Linking behavior to epochs')
         report_str = ''
 
-
         # read in data file and select param of interest
         beh = self.read_raw_beh(self.sj, self.session)
         beh = beh[headers]
@@ -426,7 +425,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         # get eeg triggers in epoched order
         bdf_triggers = events[self.selection, 2]
-        if idx_remove is not  None:
+        if idx_remove is not None:
             self.drop(idx_remove)
             nr_remove = idx_remove.size
             report_str += (f'{nr_remove} trigger events removed'
@@ -450,12 +449,22 @@ class Epochs(mne.Epochs, FolderStructure):
             report_str += ('EEG events are removed in an attempt to align the '
                             'data. Please inspect your data carefully! '
                             'NOT YET IMPLEMENTED\n')
+            
+            if all(beh_triggers == bdf_triggers[:nr_miss]):
+                idx_remove = np.arange(bdf_triggers.size)[nr_miss:]
+                nr_miss = 0
+            else:
+                idx_remove = []
+
             while nr_miss < 0:
                 # continue to remove bdf triggers until data files are lined up
                 for i, tr in enumerate(beh_triggers):
                     if tr != bdf_triggers[i]: # remove trigger from eeg_file
                         bdf_triggers = np.delete(bdf_triggers, i, axis = 0)
                         nr_miss += 1
+
+            self.drop(idx_remove)
+            bdf_triggers = np.delete(bdf_triggers, idx_remove)
             # check file sizes
             if sum(beh_triggers == bdf_triggers) < bdf_triggers.size:
                 raise ValueError('Behavior and eeg cannot be linked as too '

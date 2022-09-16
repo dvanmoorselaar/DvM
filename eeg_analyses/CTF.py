@@ -352,7 +352,7 @@ class CTF(BDM):
 			C2s (np.array): shifted predicted channels response
 			W (np.array): weight matrix
 		"""
-	
+
 		# apply forward model
 		B1 = train_X
 		B2 = test_X
@@ -470,13 +470,23 @@ class CTF(BDM):
 
 		# select test data (ensure that number of bins is balanced)
 		test_bins = pos_bins[test_idx]
-		test_idx = np.arange(pos_bins.size)[test_idx]
+		idx = np.arange(pos_bins.size)[test_idx]
 		bins,  counts = np.unique(test_bins, return_counts=True)
 		min_obs = min(counts)
-		test_idx = [np.random.choice(test_idx[test_bins==b],min_obs,False) 
+		idx = [np.random.choice(idx[test_bins==b],min_obs,False) 
 															for b in bins]
 		# add new axis so that trial indexing does not crash
-		test_idx = np.stack(test_idx)[None,:,None,:]
+		if bins.size == np.unique(train_bins).size:											
+			test_idx = np.stack(idx)[None,:,None,:]
+		else:
+			test_idx = np.zeros((np.unique(train_bins).size, min_obs),
+								dtype = int)
+			bin_cnt = 0
+			for bin in np.unique(train_bins):
+				if bin in bins:
+					test_idx[int(bin)] = idx[bin_cnt]
+					bin_cnt += 1
+			test_idx = test_idx[None,:,None,:]
 
 		return train_idx, test_idx
 
@@ -659,6 +669,7 @@ class CTF(BDM):
 					cnd_idx = cnds == cnd
 					if self.cross:
 						test_idx = cnds == test_cnd
+						test_bins = np.unique(pos_bins[test_idx])
 						(train_idx, 
 						test_idx) = self.train_test_cross(pos_bins,cnd_idx,
 														 test_idx)
@@ -696,9 +707,10 @@ class CTF(BDM):
 					# position bin loop
 					bin_cnt = 0
 					for bin in range(self.nr_bins):
-						test_idx = np.squeeze(info[cnd]['test_idx'][itr][bin])
-						bin_te_E[bin] = abs(np.mean(E[test_idx], axis = 0))**2
-						bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
+						if bin in test_bins:
+							test_idx = np.squeeze(info[cnd]['test_idx'][itr][bin])
+							bin_te_E[bin] = abs(np.mean(E[test_idx], axis = 0))**2
+							bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
 
 						if self.method == 'Foster':
 							for j in range(self.nr_blocks - 1):
@@ -743,6 +755,7 @@ class CTF(BDM):
 					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
 				print('saving ctf params')
 				pickle.dump(ctf_param, handle)
+
 
 	def summarize_ctfs(self, X, nr_freqs, nr_samps):
 		'''	Captures a range of summary statistics of the channel tuning function. Slopes are calculated by 	
@@ -842,6 +855,8 @@ class CTF(BDM):
 					ctf_evoked = ctf[cnd]['C2_E'][p]
 					ctf_total = ctf[cnd]['C2_T'][p]
 					for ch in range(self.nr_chans):
+						if np.all(ctf_evoked[:,:,ch] == 0):
+							continue
 						(ctf_param[cnd]['E_slopes'][p,:,:,ch],
 						ctf_param[cnd]['E_amps'][p,:,:,ch],
 						ctf_param[cnd]['E_base'][p,:,:,ch],

@@ -955,7 +955,7 @@ class BDM(FolderStructure):
 		for cnd in cnds:
 
 			# get condition indices and labels
-			(beh_te, cnd_idx, 
+			(beh_te, cnd_idx_te, 
 			cnd_labels, labels,
 			max_tr) = self.get_condition_labels(beh_te,cnd_header,cnd,max_tr, 
 												labels_oi)
@@ -1002,7 +1002,7 @@ class BDM(FolderStructure):
 														cnd_idx_tr, False)						
 						(Xte, _, 
 						Yte, _) = self.train_test_cross(X_te, y_te, 
-														cnd_idx_tr, False)
+														cnd_idx_te, False)
 
 						(class_acc[run, p], 
 						label_info[run,p],

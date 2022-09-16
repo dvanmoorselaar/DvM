@@ -90,7 +90,7 @@ class FolderStructure(object):
         # start by reading in processed eeg data
         epochs = mne.read_epochs(self.folder_tracker(ext = ['processed'],
                             fname = f'subject-{sj}_{preproc_name}-epo.fif'))
-        
+        embed()
         # check whether metadata is saved alongside epoched eeg
         if epochs.metadata is not None:
             beh = epochs.metadata
@@ -241,7 +241,7 @@ class FolderStructure(object):
                             fname = f'sj_*_{bdm_name}.pickle')))
         else:
             files = [self.folder_tracker(ext = ext,
-                    filename = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
+                    fname = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
 
         bdm = [pickle.load(open(file, "rb")) for file in files]
 

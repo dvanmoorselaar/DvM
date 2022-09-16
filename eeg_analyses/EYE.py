@@ -91,6 +91,7 @@ class EYE(FolderStructure):
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
 		# check whether each beh trial is logged within eye
+		embed()
 		nr_miss =  eye.shape[0] - beh.shape[0]
 		if nr_miss < 0:
 			print('Trials in beh and eye do not match. Trials removed from') 
