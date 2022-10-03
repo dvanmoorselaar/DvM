@@ -273,8 +273,8 @@ class CTF(BDM):
 
 		return nr_per_bin
 
-	def extract_power(self, epochs: mne.Epochs,  band: tuple, tois: slice, 
-					  downsample: int) -> Tuple[np.array, np.array]:
+	def extract_power(self,epochs:mne.Epochs,band:tuple,tois:slice, 
+					  downsample:int)->Tuple[np.array,np.array]:
 		"""
 		Isolates frequency-specific activity using a 5th order 
 		butterworth filter. A Hilbert Transform is then applied to the filtered 
@@ -380,10 +380,10 @@ class CTF(BDM):
 
 		return C2s, W 
 
-	def forward_model_loop(self, E_train: np.array,  E_test: np.array,
-							T_train: np.array,  T_test: np.array, 
-							C1: np.array) -> Tuple[np.array, np.array,
-													np.array,np.array]:
+	def forward_model_loop(self,E_train:np.array,E_test: np.array,
+							T_train:np.array,T_test:np.array,C1:np.array,
+							GAT:bool=False)->Tuple[np.array,np.array,
+												np.array,np.array]:
 		"""
 		Applies inverted encoding model (see forward_model) for each individual
 		time point
@@ -394,6 +394,9 @@ class CTF(BDM):
 			T_train (np.array): train data with total power
 			T_test (np.array): test data with total power
 			C1 (np.array): basisset
+			GAT (Optional [bool]): If True, return an train X test time 
+			decoding matrix. Otherwise only return the diagoanl of the 
+			matrix (i.e., training and testing across time) 
 
 		Returns:
 			C2_E (np.array): evoked power based shifted predicted channels 
@@ -404,21 +407,30 @@ class CTF(BDM):
 			W_T (np.array): total power weight matrices across samples
 		"""
 
+		# set params
+		_, nr_elec, nr_samp_tr = E_train.shape
+		if GAT:
+			nr_samp_te = E_test.shape[-1]
+		else:
+			nr_samp_te = 1
+
 		# initialize arrays
-		_, nr_elec, nr_samples = E_train.shape
-		C2_E = np.zeros((nr_samples, self.nr_bins, self.nr_chans))
-		W_E =  np.zeros((nr_samples, self.nr_bins, nr_elec))
+		C2_E = np.zeros((nr_samp_tr, nr_samp_te, self.nr_bins, self.nr_chans))
+		W_E =  np.zeros((nr_samp_tr, nr_samp_te, self.nr_bins, nr_elec))
 		C2_T, W_T = C2_E.copy(), W_E.copy()
 
 		# TODO: parallelize loop
-		for t in range(nr_samples):
-			# evoked power model fit
-			C2_E[t], W_E[t] = self.forward_model(E_train[:,:,t],
-												 E_test[:,:,t], C1)
+		for tr_t in range(nr_samp_tr):
+			for te_t in range(nr_samp_te):
+				# evoked power model fit
+				(C2_E[tr_t,te_t], 
+				W_E[tr_t, te_t]) = self.forward_model(E_train[:,:,tr_t],
+													E_test[:,:,te_t], C1)
 
-			# total power model fit
-			C2_T[t], W_T[t] = self.forward_model(T_train[:,:,t], 
-												T_test[:,:,t], C1)
+				# total power model fit
+				(C2_E[tr_t,te_t], 
+				W_E[tr_t, te_t]) = self.forward_model(T_train[:,:,tr_t],
+													T_test[:,:,te_t], C1)
 
 		return C2_E, W_E, C2_T, W_T
 
@@ -571,7 +583,7 @@ class CTF(BDM):
 
 	def spatial_ctf(self, pos_labels:dict ='all',cnds:dict=None, 
 					excl_factor:dict=None, window_oi:tuple=(None,None),
-					freqs:dict='main_param',downsample:int = 1, 
+					freqs:dict='main_param',downsample:int = 1,GAT:bool=False,
 					nr_perm:int= 0,collapse:bool=False,name:int='main'):
 		"""
 		calculate spatially based channel tuning functions across conditions.
@@ -607,6 +619,9 @@ class CTF(BDM):
 			the time frequency settings as specified in the CTF class. 
 			downsample (int, optional): factor to downsample data (is applied
 			after filtering). Defaults to 1.
+			GAT (bool, optional): Specifies whether decoding is done 
+			across time (default) or whether each training and testing
+			time point are combined into a decoding matrix. 
 			nr_perm (int, optional): _description_. Defaults to 0.
 			collapse (bool, optional): _description_. Defaults to False.
 			name (int, optional): _description_. Defaults to 'main'.
@@ -664,10 +679,18 @@ class CTF(BDM):
 				print(f'Running ctf for {cnd} condition')
 
 				# preallocate arrays
-				C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-								nr_samples, self.nr_bins, self.nr_chans))
-				W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-								nr_samples, self.nr_chans, nr_elec))							 
+				if GAT:
+					C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+									nr_samples, nr_samples, 
+									self.nr_bins, self.nr_chans))
+					W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+									nr_samples, nr_samples,
+									self.nr_chans, nr_elec))
+				else:
+					C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+									nr_samples, self.nr_bins, self.nr_chans))
+					W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+									nr_samples, self.nr_chans, nr_elec))												 
 				C2_T, W_T  = C2_E.copy(), W_E.copy()				 
 	
 				# partition data into training and testing sets
@@ -745,7 +768,7 @@ class CTF(BDM):
 															bin_tr_E, 
 															bin_te_E,
 															bin_tr_T, 
-															bin_te_T, C1)
+															bin_te_T, C1,GAT)
 		# take the average across model iterations
 		for cnd in train_cnds:
 			for key in ['C2_E','C2_T','W_E','W_T']:
@@ -775,8 +798,8 @@ class CTF(BDM):
 							te_header:str=None,
 							window_oi_tr:tuple=None,window_oi_te:tuple=None,
 							excl_factor:dict=None,
-							downsample:int = 1,nr_perm:int=0,
-							  name:str='loc_ctf'):
+							downsample:int = 1,nr_perm:int=0,GAT:bool=False,
+							name:str='loc_ctf'):
 
 		# set train and test data
 		epochs_tr, beh_tr = self.select_ctf_data(self.epochs[0], self.beh[0],
@@ -797,10 +820,9 @@ class CTF(BDM):
 		nr_elec = len(epochs_tr.ch_names)
 		tois_tr = get_time_slice(epochs_tr.times,
 								window_oi_tr[0],window_oi_tr[1])
-		nr_samples_tr = epochs_tr.times[tois_tr][::downsample].size
 		tois_te = get_time_slice(epochs_te.times,
-								window_oi_tr[0],window_oi_tr[1])
-		nr_samples_te = epochs_te.times[tois_te][::downsample].size
+								window_oi_te[0],window_oi_te[1])
+
 		ctf, info = {}, {}
 		freqs, nr_freqs = self.set_frequencies(freqs)
 
@@ -829,19 +851,27 @@ class CTF(BDM):
 			(E_tr, 
 			T_tr) = self.extract_power(epochs_tr.copy(),freqs[fr],
 									 tois_tr,downsample)	
+			nr_samp_tr = E_tr.shape[-1]
 			(E_te, 
 			T_te) = self.extract_power(epochs_te.copy(),freqs[fr],
-									 tois_tr,downsample)	
+									 tois_te,downsample)	
+			nr_samp_te = E_te.shape[-1]
 
 			# Loop over conditions
 			for c, cnd in enumerate(test_cnds):
 				print(f'Running localizer ctf for condition: {cnd} ')	
 
 				# preallocate arrays
-				C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-								nr_samples_tr, self.nr_bins, self.nr_chans))
-				W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-								nr_samples_tr, self.nr_chans, nr_elec))							 
+				if GAT:
+					C2_E = np.zeros((nr_perm,nr_freqs, nr_samp_tr, nr_samp_te,
+									self.nr_bins, self.nr_chans))
+					W_E = np.zeros((nr_perm,nr_freqs, nr_samp_tr, nr_samp_te,
+									self.nr_chans, nr_elec))	
+				else:
+					C2_E = np.zeros((nr_perm,nr_freqs,nr_samp_tr, 
+									self.nr_bins, self.nr_chans))
+					W_E = np.zeros((nr_perm,nr_freqs,nr_samp_tr, 
+									self.nr_chans, nr_elec))												 
 				C2_T, W_T  = C2_E.copy(), W_E.copy()	
 
 				# partition data into training and testing sets
@@ -872,13 +902,13 @@ class CTF(BDM):
 				train_idx = info[cnd]['train_idx'][0]
 
 				# initialize evoked and total power arrays
-				bin_te_E = np.zeros((self.nr_bins, nr_elec, nr_samples_te)) 
+				bin_te_E = np.zeros((self.nr_bins, nr_elec, nr_samp_te)) 
 				bin_te_T = bin_te_E.copy()
 				if self.method == 'k-fold':
 					pass
 					#TODO: implement 
 				elif self.method == 'Foster':
-					bin_tr_E = np.zeros((self.nr_bins, nr_elec, nr_samples_tr)) 
+					bin_tr_E = np.zeros((self.nr_bins, nr_elec, nr_samp_tr)) 
 					bin_tr_T = bin_tr_E.copy()
 					
 				# position bin loop
@@ -901,14 +931,14 @@ class CTF(BDM):
 						pass
 						#TODO: implement
 
-				(ctf[cnd]['C2_E'][p,fr,itr], 
-				ctf[cnd]['W_E'][p,fr,itr],
-				ctf[cnd]['C2_T'][p,fr,itr],
-				ctf[cnd]['W_T'][p,fr,itr]) = self.forward_model_loop(
+				(ctf[cnd]['C2_E'][p,fr], 
+				ctf[cnd]['W_E'][p,fr],
+				ctf[cnd]['C2_T'][p,fr],
+				ctf[cnd]['W_T'][p,fr]) = self.forward_model_loop(
 														bin_tr_E, 
 														bin_te_E,
 														bin_tr_T, 
-														bin_te_T, C1)					 
+														bin_te_T,C1,GAT)					 
 
 	def summarize_ctfs(self, X, nr_freqs, nr_samps):
 		'''	Captures a range of summary statistics of the channel tuning function. Slopes are calculated by 	
