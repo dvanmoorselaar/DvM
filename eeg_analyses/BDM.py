@@ -171,7 +171,6 @@ class BDM(FolderStructure):
 		self.seed = seed
 		self.cross = False
 
-
 	def plot_bdm(self,bdm_scores:dict,cnds:list):
 
 		times = bdm_scores['info']['times']
@@ -899,7 +898,7 @@ class BDM(FolderStructure):
 		else:
 			return bdm_scores	
 
-	def localizer_classify(self,sj:int,te_header:str=None,te_cnds:dict=None,
+	def localizer_classify(self,te_header:str=None,te_cnds:dict=None,
 						tr_window_oi:tuple=None,te_window_oi:tuple=None,
 						tr_excl_factor:dict=None,te_excl_factor:dict=None,
 						labels_oi:Union[str,list]='all',
@@ -930,7 +929,6 @@ class BDM(FolderStructure):
 		beh_te, 
 		times_te) = self.selectBDMData(self.epochs[1],self.beh[1],
 										te_window_oi,te_excl_factor)
-		
 		y_te = beh_te[te_header]
 
 		# check labels

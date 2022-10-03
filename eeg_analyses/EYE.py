@@ -91,7 +91,6 @@ class EYE(FolderStructure):
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
 		# check whether each beh trial is logged within eye
-		embed()
 		nr_miss =  eye.shape[0] - beh.shape[0]
 		if nr_miss < 0:
 			print('Trials in beh and eye do not match. Trials removed from') 
@@ -262,7 +261,7 @@ class EYE(FolderStructure):
 		# read in eye data (linked to behavior)ed
 		print('reading in eye tracker data')
 		eye, beh = self.get_eye_data('', eye_file, beh_file, start_trial)
-
+		
 		# collect x, y data 
 		x, y, times = self.get_xy(eye, window_oi[0], window_oi[1], trigger_msg)	
 		# apply drift correction if specified

@@ -407,7 +407,7 @@ class TF(FolderStructure):
 		tf = self.baseline_tf(tf, base, self.base_method, elec_oi)
 		
 		# save output
-		with open(self.FolderTracker(['tf',self.method],
+		with open(self.folder_tracker(['tf',self.method],
 				f'{tf_name}.pickle') ,'wb') as handle:
 			pickle.dump(tf, handle)	
 				

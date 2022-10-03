@@ -90,7 +90,7 @@ class FolderStructure(object):
         # start by reading in processed eeg data
         epochs = mne.read_epochs(self.folder_tracker(ext = ['processed'],
                             fname = f'subject-{sj}_{preproc_name}-epo.fif'))
-        embed()
+
         # check whether metadata is saved alongside epoched eeg
         if epochs.metadata is not None:
             beh = epochs.metadata
