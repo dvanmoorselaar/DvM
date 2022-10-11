@@ -346,8 +346,8 @@ class BDM(FolderStructure):
 
 		return output
 
-	def average_trials(self,X:np.array,beh:pd.DataFrame,
-				cnd_header:str='condition') -> Tuple[np.array, pd.DataFrame]:
+	def average_trials(self,epochs:mne.Epochs,beh:pd.DataFrame,
+				beh_headers:list) -> Tuple[np.array, pd.DataFrame]:
 		"""
 		Reduces shape of eeg data by averaging across trials. 
 		The number of trials used for averaging is set as a BDM 
@@ -358,38 +358,48 @@ class BDM(FolderStructure):
 		example 1 (data contains two labels, each with 
 		four observations):
 			
-		8, 64, 240 = X.shape
+		8, 64, 240 = epochs._data.shape
 		self.tr_avg = 4
-		X, beh = self.averageTrials(X, beh) 
-		2, 64, 240 = X.shape
+		epochs, beh = self.average_trials(epochs, beh) 
+		2, 64, 240 = epochs._data.shape
 
 		example 2 (data contains two labels, each with 
 		four observations):
 
-		8, 64, 240 = X.shape
+		8, 64, 240 = epochs._data.shape
 		self.tr_avg = 3
-		X, beh = self.averageTrials(X, beh) 
-		4, 64, 240 = X.shape
+		epochs, beh = self.average_trials(epochs, beh) 
+		4, 64, 240 = epochs._data.shape
 
 		Args:
-			X (np.array): 3-dimensional array of [trial repeats by e
-			lectrodes by time points].
+			epochs (mne.Epochs): epoched data [trial repeats by 
+			electrodes by time points].
 			beh (pd.DataFrame): behavior dataframe with two 
 			columns (conditions and labels)
-			cnd_header (str, optional): Header of condition column in 
-			beh. Defaults to 'condition'.
+			beh_headers (list): Header of decoding labels and condition 
+			info in behavior. If no condition info is specified, 
+			data will be averaged across all trials
 
 		Returns:
-			X_ (np.array): 3-dimensional array of eeg data after 
-			trial averaging
-			beh (pd.DataFrame): behavior dataframe with two columns 
-			(conditions and labels)
+			epochs (mne.Epochs):epoched data data after trial averaging
+			beh (pd.DataFrame): updated behavior dataframe 
 		"""
+
+		if self.avg_trials == 1:
+			return epochs, beh
 
 		print(f'Averaging across {self.avg_trials} trials')
 
 		# initiate condition and label list
-		cnds, labels, X_ = [], [], []
+		cnds, labels, X = [], [], []
+
+		# slice beh
+		beh = beh[[h for h in beh_headers if h is not None]]
+		if beh.shape[-1] == 1:
+			cnd_header = 'condition'
+			beh['condition'] = 'all_data'
+		else:
+			cnd_header = beh_headers[-1]	
 
 		# loop over each label and condition pair
 		options = dict(beh.apply(lambda col: col.unique()))
@@ -410,15 +420,15 @@ class BDM(FolderStructure):
 			random.shuffle(avg_idx)
 			avg_idx = [avg_idx[i:i+self.avg_trials] 
 						for i in np.arange(0,avg_idx.size, self.avg_trials)]
-			X_ += [X[idx].mean(axis = 0) for idx in avg_idx]
+			X += [epochs._data[idx].mean(axis = 0) for idx in avg_idx]
 			labels  += [var_combo[self.to_decode]] * len(avg_idx)
 			cnds += [var_combo[cnd_header]] * len(avg_idx)
 
 		# set data
-		X_ = np.stack(X_)
+		epochs._data = np.stack(X)
 		beh = pd.DataFrame.from_dict({cnd_header: cnds, self.to_decode: labels})
 
-		return X_, beh
+		return epochs, beh
 
 	def get_condition_labels(self,beh:pd.DataFrame,cnd_header:str,
 				cnd:str,max_tr:list,labels:Union[str,list]='all', 
@@ -657,26 +667,20 @@ class BDM(FolderStructure):
 
 		return W
 
-	def selectBDMData(self, epochs, beh, window_oi, excl_factor = None):
-		''' 
-		Arguments
-		- - - - - 
-		EEG (object):
-		beh (dataFrame):
-		time (tuple | list): time samples (start to end) for decoding
-		excl_factor (dict): see Classify documentation
-		Returns
-		- - - -
-		eegs (array): eeg data (trials X electrodes X time)
-		beh (dict): contains variables of interest for decoding
-		'''
+	def select_bdm_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
+						window_oi:tuple,excl_factor:dict=None,
+						cnd_header:str=None):
 
-		# check whether trials need to be excluded
-		if type(excl_factor) == dict: # remove unwanted trials from beh
+		# remove a subset of trials 
+		if type(excl_factor) == dict: 
 			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
 
 		# if not already done reset index (to properly align beh and epochs)
 		beh.reset_index(inplace = True, drop = True)
+
+		# average across trials
+		(epochs, 
+		beh) = self.average_trials(epochs,beh,[self.to_decode,cnd_header]) 		
 
 		# apply filtering and downsampling (if specified)
 		if self.bdm_type != 'broad':
@@ -763,13 +767,9 @@ class BDM(FolderStructure):
 		# read in data and set labels
 		(X, 
 		beh, 
-		times) = self.selectBDMData(self.epochs,self.beh,window_oi,excl_factor)	
+		times) = self.select_bdm_data(self.epochs.copy(),self.beh.copy(),
+									window_oi, excl_factor, cnd_header)	
 
-		if self.avg_trials > 1:
-			# TODO: allow averaging across multiple factors
-			(X, 
-			beh) = self.average_trials(X,beh[[self.to_decode,cnd_header]], 
-									  cnd_header=cnd_header) 
 		y = beh[self.to_decode]
 		nr_epochs, nr_elec, nr_time = X.shape
 
@@ -918,17 +918,25 @@ class BDM(FolderStructure):
 		if te_header is None:
 			te_header = self.to_decode
 
-		# set train and test data
+		# set train data
 		(X_tr, 
 		beh_tr, 
-		times_tr) = self.selectBDMData(self.epochs[0],self.beh[0],
-										tr_window_oi,tr_excl_factor)
+		times_tr) = self.select_bdm_data(self.epochs[0].copy(),
+										self.beh[0].copy(),tr_window_oi,
+										tr_excl_factor)
 		cnd_idx_tr = np.arange(beh_tr.shape[0])	
 
+		if not GAT:
+			X_tr = X_tr.mean(axis=-1)[..., np.newaxis]
+			times_tr = times_tr.mean()
+			GAT = True
+
+		# set testing data
 		(X_te, 
 		beh_te, 
-		times_te) = self.selectBDMData(self.epochs[1],self.beh[1],
-										te_window_oi,te_excl_factor)
+		times_te) = self.select_bdm_data(self.epochs[1].copy(),
+										self.beh[1].copy(),te_window_oi,
+										te_excl_factor,cnd_header)
 		y_te = beh_te[te_header]
 
 		# check labels
@@ -975,7 +983,7 @@ class BDM(FolderStructure):
 				label_info = np.empty((self.avg_runs,nr_perm, 
 								times_te.size,labels.size)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
-									times_te.size, nr_elec)) * np.nan
+							np.		times_te.size, nr_elec)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -1014,7 +1022,7 @@ class BDM(FolderStructure):
 
 				mean_class = class_acc.mean(axis = 0)	
 				bdm_scores.update({cnd:{'dec_scores': 
-										copy.copy(mean_class[0])},
+										copy.copy(np.squeeze(mean_class[0]))},
 										})
 
 		# store classification dict	
@@ -1174,7 +1182,7 @@ class BDM(FolderStructure):
 		else:
 			return classification	
 
-	def cross_time_decoding(self, Xtr, Xte, Ytr, Yte, labels, gat_matrix = False, X=[]):
+	def cross_time_decoding(self, Xtr, Xte, Ytr, Yte, labels, GAT= False, X=[]):
 		'''
 		Decoding is done across all time points. 
 		Arguments
@@ -1196,7 +1204,7 @@ class BDM(FolderStructure):
 		nr_labels = len(labels)
 		N = self.nr_folds
 		_, _, nr_elec, nr_time_tr = Xtr.shape
-		if gat_matrix:
+		if GAT:
 			nr_time_te = Xte.shape[-1]
 		else:
 			nr_time_te = 1	
@@ -1216,7 +1224,7 @@ class BDM(FolderStructure):
 
 			for tr_t in range(nr_time_tr):
 				for te_t in range(nr_time_te):
-					if not gat_matrix:
+					if not GAT:
 						te_t = tr_t
 
 					Xtr_ = Xtr[n,:,:,tr_t]
@@ -1252,7 +1260,7 @@ class BDM(FolderStructure):
 					predict = clf.predict(Xte_)
 					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) # 
 
-					if not gat_matrix:
+					if not GAT:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
 						label_info[n, tr_t, :] = [sum(predict == l) for l in labels]
 						class_acc[n,tr_t,:] = class_perf # 

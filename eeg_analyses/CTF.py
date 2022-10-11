@@ -428,9 +428,14 @@ class CTF(BDM):
 													E_test[:,:,te_t], C1)
 
 				# total power model fit
-				(C2_E[tr_t,te_t], 
-				W_E[tr_t, te_t]) = self.forward_model(T_train[:,:,tr_t],
+				(C2_T[tr_t,te_t], 
+				W_T[tr_t, te_t]) = self.forward_model(T_train[:,:,tr_t],
 													T_test[:,:,te_t], C1)
+		
+		C2_E = np.squeeze(C2_E)
+		W_E = np.squeeze(W_E)
+		C2_T = np.squeeze(C2_T)
+		W_T = np.squeeze(W_T)
 
 		return C2_E, W_E, C2_T, W_T
 
@@ -487,7 +492,7 @@ class CTF(BDM):
 		# add new axis so that trial indexing does not crash
 		train_idx = np.stack(train_idx)[None,:,None,:]
 
-		if isinstance(test_idx, np.ndarray): 
+		if test_idx is not None: 
 			# select test data (ensure that number of bins is balanced)
 			test_bins = pos_bins[test_idx]
 			idx = np.arange(pos_bins.size)[test_idx]
@@ -495,11 +500,8 @@ class CTF(BDM):
 			min_obs = min(counts)
 			idx = [np.random.choice(idx[test_bins==b],min_obs,False) 
 																for b in bins]
-		else:
-			test_idx = None
 
 		# add new axis so that trial indexing does not crash
-		if test_idx is not None:
 			if bins.size == nr_train_bins:											
 				test_idx = np.stack(idx)[None,:,None,:]
 			else:
@@ -797,16 +799,16 @@ class CTF(BDM):
 							freqs:dict='main_param',te_cnds:dict=None,
 							te_header:str=None,
 							window_oi_tr:tuple=None,window_oi_te:tuple=None,
-							excl_factor:dict=None,
+							excl_factor_tr:dict=None,excl_factor_te:dict=None,
 							downsample:int = 1,nr_perm:int=0,GAT:bool=False,
 							name:str='loc_ctf'):
 
 		# set train and test data
 		epochs_tr, beh_tr = self.select_ctf_data(self.epochs[0], self.beh[0],
-													self.elec_oi, excl_factor)
+												self.elec_oi,excl_factor_tr)
 
 		epochs_te, beh_te = self.select_ctf_data(self.epochs[1], self.beh[1],
-													self.elec_oi, excl_factor)
+												self.elec_oi, excl_factor_te)
 
 		if window_oi_tr is None:
 			window_oi_tr = (epochs_tr.tmin, epochs_tr.tmax)
@@ -892,8 +894,7 @@ class CTF(BDM):
 					info[cnd]['train_idx'] = train_idx
 					info[cnd]['test_idx'] = test_idx
 					if self.method == 'Foster':
-						C1 = np.empty((self.nr_bins* (self.nr_blocks - 1), 
-										self.nr_chans)) * np.nan
+						C1 = np.empty((self.nr_bins, self.nr_chans)) * np.nan
 					else:
 						C1 = self.basisset	
 
@@ -913,6 +914,7 @@ class CTF(BDM):
 					
 				# position bin loop
 				bin_cnt = 0
+
 				for bin in range(self.nr_bins):
 					if bin in test_bins:
 						test_idx = np.squeeze(info[cnd]['test_idx'][0][bin])
@@ -939,6 +941,14 @@ class CTF(BDM):
 														bin_te_E,
 														bin_tr_T, 
 														bin_te_T,C1,GAT)					 
+		if self.ctf_param:
+			print('get ctf tuning params')
+			ctf_param = self.ctfs_tuning_params(ctf)
+			with open(self.folder_tracker(['ctf',self.to_decode], 
+					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
+				print('saving ctf params')
+				pickle.dump(ctf_param, handle)
+
 
 	def summarize_ctfs(self, X, nr_freqs, nr_samps):
 		'''	Captures a range of summary statistics of the channel tuning function. Slopes are calculated by 	

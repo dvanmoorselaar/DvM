@@ -2,6 +2,7 @@ import os
 import mne
 import pickle
 import glob
+import re
 
 import pandas as pd
 
@@ -203,8 +204,9 @@ class FolderStructure(object):
         for cnd in cnds:
             if sjs == 'all':
                 files = sorted(glob.glob(self.folder_tracker(
-                                ext = ['erp',erp_folder],
-                                fname = f'sj_*_{cnd}_{erp_name}-ave.fif')))
+                            ext = ['erp',erp_folder],
+                            fname = f'sj_*_{cnd}_{erp_name}-ave.fif')),
+                            key = lambda s: int(re.search(r'\d+', s).group()))
             else:
                 files = [self.folder_tracker(
                                 ext = ['erp',erp_folder],
@@ -238,7 +240,8 @@ class FolderStructure(object):
         if sjs == 'all':
             files = sorted(glob.glob(self.folder_tracker(
                             ext = ext,
-                            fname = f'sj_*_{bdm_name}.pickle')))
+                            fname = f'sj_*_{bdm_name}.pickle')),
+                            key = lambda s: int(re.search(r'\d+', s).group()))
         else:
             files = [self.folder_tracker(ext = ext,
                     fname = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
