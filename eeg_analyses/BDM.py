@@ -466,7 +466,6 @@ class BDM(FolderStructure):
 		"""
 
 		# get condition indices
-
 		if cnd == 'all_data':
 			cnd_idx = np.arange(beh.shape[0])
 		elif cnd != 'collapsed':
@@ -786,6 +785,7 @@ class BDM(FolderStructure):
 			max_tr = [1]
 		else:
 			max_tr = [self.selectMaxTrials(beh, cnds, labels_oi,cnd_header)] 
+			nr_tests = (max(max_tr) - self.nr_folds)*self.nr_folds
 			if downscale:
 				max_tr = [(i+1)*self.nr_folds 
 							for i in range(int(max_tr[0]/self.nr_folds))][::-1]
@@ -817,15 +817,15 @@ class BDM(FolderStructure):
 			if GAT:
 				class_acc = np.empty((self.avg_runs, nr_perm,
 								nr_time, nr_time)) * np.nan
-				label_info = np.empty((self.avg_runs, nr_perm, 
-								nr_time, nr_time, labels.size)) * np.nan
+				label_inf = np.empty((self.avg_runs, nr_perm, 
+								nr_time, nr_time, nr_tests, 2)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									nr_time, nr_time, nr_elec))
 			else:	
 				class_acc = np.empty((self.avg_runs,nr_perm,
 								nr_time)) * np.nan	
-				label_info = np.empty((self.avg_runs,nr_perm, 
-								nr_time,labels.size)) * np.nan
+				label_inf = np.empty((self.avg_runs,nr_perm, 
+								nr_time,nr_tests,2)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									nr_time, nr_elec))
 
@@ -858,9 +858,9 @@ class BDM(FolderStructure):
 							(Xtr, Xte, 
 							Ytr, Yte) = self.train_test_select(X, y,
 															 train_tr, test_tr)
-
+														
 						(class_acc[run, p], 
-						label_info[run,p],
+						label_inf[run,p],
 						weights[run, p]) = self.cross_time_decoding(Xtr, Xte, 
 																	Ytr, Yte, 
 																	labels, 
@@ -938,7 +938,7 @@ class BDM(FolderStructure):
 										self.beh[1].copy(),te_window_oi,
 										te_excl_factor,cnd_header)
 		y_te = beh_te[te_header]
-
+		nr_tests = y_te.size
 		# check labels
 		if labels_oi == 'all':
 			labels_oi = np.unique(y_te)
@@ -970,9 +970,9 @@ class BDM(FolderStructure):
 			if GAT:
 				class_acc = np.empty((self.avg_runs, nr_perm,
 								times_tr.size, times_te.size)) * np.nan
-				label_info = np.empty((self.avg_runs, nr_perm, 
+				label_inf = np.empty((self.avg_runs, nr_perm, 
 								times_tr.size, times_te.size, 
-								labels.size)) * np.nan
+								nr_tests, 2)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									times_tr.size, times_te.size, 
 									nr_elec)) * np.nan
@@ -980,8 +980,8 @@ class BDM(FolderStructure):
 				#TODO: check whether time assignment works
 				class_acc = np.empty((self.avg_runs,nr_perm,
 								times_te.size)) * np.nan	
-				label_info = np.empty((self.avg_runs,nr_perm, 
-								times_te.size,labels.size)) * np.nan
+				label_inf = np.empty((self.avg_runs,nr_perm, 
+								times_te.size, nr_tests,2)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 							np.		times_te.size, nr_elec)) * np.nan
 
@@ -1011,7 +1011,7 @@ class BDM(FolderStructure):
 														cnd_idx_te, False)
 
 						(class_acc[run, p], 
-						label_info[run,p],
+						label_inf[run,p],
 						weights[run, p]) = self.cross_time_decoding(Xtr, Xte, 
 																	Ytr, Yte, 
 																	labels, 
@@ -1020,11 +1020,12 @@ class BDM(FolderStructure):
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
-				mean_class = class_acc.mean(axis = 0)	
+				mean_class = class_acc.mean(axis = 0)
+				label_inf = np.squeeze(label_inf[0,0])	
 				bdm_scores.update({cnd:{'dec_scores': 
 										copy.copy(np.squeeze(mean_class[0]))},
-										})
-
+										'label_inf':copy.copy(label_inf)})
+				
 		# store classification dict	
 		if save: 
 			ext = self.set_folder_path()
@@ -1201,8 +1202,8 @@ class BDM(FolderStructure):
 		'''
 
 		# set necessary parameters
-		nr_labels = len(labels)
 		N = self.nr_folds
+		nr_tests = Yte.shape[-1]
 		_, _, nr_elec, nr_time_tr = Xtr.shape
 		if GAT:
 			nr_time_te = Xte.shape[-1]
@@ -1214,7 +1215,7 @@ class BDM(FolderStructure):
 
 		# initiate decoding arrays
 		class_acc = np.zeros((N,nr_time_tr, nr_time_te))
-		label_info = np.zeros((N, nr_time_tr, nr_time_te, nr_labels))
+		label_inf = np.zeros((N, nr_time_tr, nr_time_te, nr_tests,2))
 		weights = np.zeros((N,nr_time_tr, nr_time_te, nr_elec))
 
 		for n in range(N):
@@ -1255,27 +1256,27 @@ class BDM(FolderStructure):
 						
 					# train model and predict
 					clf.fit(Xtr_,Ytr_)
-
 					scores = clf.predict_proba(Xte_) # get posteriar probability estimates
 					predict = clf.predict(Xte_)
 					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) # 
 
 					if not GAT:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
-						label_info[n, tr_t, :] = [sum(predict == l) for l in labels]
-						class_acc[n,tr_t,:] = class_perf # 
-						weights[n,tr_t,:] = clf.coef_[0]
+						label_inf[n, tr_t] = list(zip(Yte_, predict))
+						class_acc[n,tr_t] = class_perf # 
+						weights[n,tr_t] = clf.coef_[0]
 					else:
 						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
-						label_info[n, tr_t, te_t] = [sum(predict == l) for l in labels]	
+						label_inf[n, tr_t, te_t] = list(zip(Yte_, predict))	
 						class_acc[n,tr_t, te_t] = class_perf
 						weights[n,tr_t,te_t] = clf.coef_[0]
 
 		weights = np.squeeze(np.mean(weights, axis = 0))
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
-		label_info = np.squeeze(np.mean(label_info, axis = 0))
+		label_inf = np.reshape(label_inf,(nr_time_tr,nr_time_te,-1,2))
+		label_inf = np.squeeze(label_inf)
 
-		return class_acc, label_info, weights
+		return class_acc, label_inf, weights
 
 	def computeClassPerf(self, scores, true_labels, label_order, predict):
 		'''
