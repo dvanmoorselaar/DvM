@@ -24,7 +24,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
-from support.support import select_electrodes, trial_exclusion
+from support.support import select_electrodes, trial_exclusion, get_time_slice
 from scipy.stats import rankdata
 from scipy.signal import hilbert
 
@@ -81,8 +81,8 @@ class BDM(FolderStructure):
 
 		Args:
 			sj (int): Subject number
-			beh (pd.DataFrame | list): Dataframe with behavioral parameters 
-			per epoch (see eeg)
+			beh (pd.DataFrame | list): Dataframe with behavioral 
+			parameters per epoch (see eeg)
 			epochs (mne.Epochs | list): epoched eeg data (linked to beh)
 			to_decode (str): column in beh that contains classes used 
 			for decoding
@@ -101,8 +101,9 @@ class BDM(FolderStructure):
 			avg_trials (int, Optional): If larger then 1, specifies the 
 			number of trials that are averaged together before cross 
 			validation. Averaging is done across each unique combination 
-			of condition and decoding label. Defaults to  1 (i.e., no 
-			trial averaging). 
+			of condition and decoding label. Trial averagig is always 
+			done before subsequent optional data transformation steps.
+			Defaults to  1 (i.e., no trial averaging). 
 			sliding_window (tuple, optional): Increases the  number of 
 			features used for decoding by a factor of the size of the 
 			sliding_window by giving the classifier access to all time 
@@ -142,11 +143,13 @@ class BDM(FolderStructure):
 			avg_runs > 1, seed will be increased by 1 for each run.
 			Defaults to 42213 (A1Z26 cipher of DvM)
 		"""	
+
 		self.sj = sj					
 		self.beh = beh
 		if bdm_filter != None:
 			self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
-			self.epochs = epochs # baseline correction is done at a later stage
+			# baseline correction is done at a later stage
+			self.epochs = epochs 
 		else:	 
 			self.bdm_type = 'broad'
 			if type(epochs) == list:
@@ -170,6 +173,89 @@ class BDM(FolderStructure):
 		self.avg_trials = avg_trials
 		self.seed = seed
 		self.cross = False
+
+	def select_bdm_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
+						window_oi:tuple,excl_factor:dict=None,
+						cnd_header:str=None)-> \
+						Tuple[np.array, pd.DataFrame, np.array]:
+		"""
+		Selects bdm data and applies initial data transformation steps 
+		in the following order (all optional).
+
+		1. slicing data by excluding specific trials (set excl_factor)
+		2. data reduction via trial averaging (main param)
+		3. Time-frequency decomposition (main param)
+		4. downsampling (main param)
+		5. slicing time (window_oi) and electrodes (main param)
+		6. sliding window based data transformation
+
+		Args:
+			epochs (mne.Epochs): epoched EEG [epochs, elecs, time]
+			beh (pd.DataFrame): behavior parameters matched to epochs
+			window_oi (tuple): time window of interest
+			excl_factor (dict, optional): exclude specific conditions 
+			(see classify or localizer_classify)). Defaults to None.
+			cnd_header (str, optional): column that contains condition 
+			info. Makes sure that trial averaging is condition
+			(and label) specific. Defaults to None.
+
+		Returns:
+			X (np.array): decoding data [epochs, elecs, time]
+			beh (pd.DataFrame): behavior parameters matched to epochs)
+			times (np.array): sampling times of decoding data
+		"""
+
+		# remove a subset of trials 
+		if type(excl_factor) == dict: 
+			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+
+		# reset index(to properly align beh and epochs)
+		beh.reset_index(inplace = True, drop = True)
+
+		# average across trials
+		(epochs, 
+		beh) = self.average_trials(epochs,beh,[self.to_decode,cnd_header]) 		
+
+		# apply filtering and downsampling (if specified)
+		if self.bdm_type != 'broad':
+			#TODO: implement time-frequency decomposition
+			print('TF decomposition not yet implemented')
+			pass
+
+		if self.downsample < int(epochs.info['sfreq']):
+			if self.window_size[0] == 1:
+				print('downsampling data')
+				epochs.resample(self.downsample, npad='auto')
+			else:
+				self.down_factor = int(epochs.info['sfreq'])/self.downsample
+				print('downsampling will be done after data averaging')
+				print('in sliding window approach')
+
+		# select time window and EEG electrodes
+		if window_oi is None:
+			window_oi = (epochs.tmin, epochs.tmax)
+		idx = get_time_slice(epochs.times, window_oi[0], window_oi[1])
+		picks = mne.pick_types(epochs.info,eeg=True, eog= True, misc = True)
+		picks = select_electrodes(np.array(epochs.ch_names)[picks], 
+								self.elec_oi)
+		X = epochs._data[:,picks,idx]
+		times = epochs.times[s:e]
+
+		# transform eeg data in case of sliding window approach
+		if self.window_size[0] > 1:
+			X = self.sliding_window(X, self.window_size[0], 
+									self.window_size[1],self.window_size[2])
+			X = X[:,:,self.window_size[0]-1:]
+			end_time = times[-self.window_size[0]]
+			times = np.linspace(times[0], end_time, X.shape[-1])
+			s_freq = epochs.info['sfreq']
+			time_red = 1/s_freq * 1000 * self.window_size[0]
+			warnings.warn(('Final timepoint in analysis is reduced by'
+							f'{time_red} ms as each timepoint in analysis now'
+							f'reflects {self.window_size[0]} data samples at a'
+							f'sampling rate of {s_freq} Hz'), UserWarning)
+
+		return 	X, beh, times
 
 	def plot_bdm(self,bdm_scores:dict,cnds:list):
 
@@ -236,6 +322,13 @@ class BDM(FolderStructure):
 		# 				overwrite = True)
 			
 	def set_folder_path(self) -> list:
+		"""
+		sets the folder path for the current analysis based on 
+		input parameters
+
+		Returns:
+			list: folder path (used as extension to set file location)
+		"""
 
 		base = ['bdm']
 		base += [self.to_decode, f'{self.elec_oi}_elecs']
@@ -397,7 +490,7 @@ class BDM(FolderStructure):
 		beh = beh[[h for h in beh_headers if h is not None]]
 		if beh.shape[-1] == 1:
 			cnd_header = 'condition'
-			beh['condition'] = 'all_data'
+			beh.loc[:,'condition'] = 'all_data'
 		else:
 			cnd_header = beh_headers[-1]	
 
@@ -666,66 +759,7 @@ class BDM(FolderStructure):
 
 		return W
 
-	def select_bdm_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
-						window_oi:tuple,excl_factor:dict=None,
-						cnd_header:str=None):
 
-		# remove a subset of trials 
-		if type(excl_factor) == dict: 
-			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
-
-		# if not already done reset index (to properly align beh and epochs)
-		beh.reset_index(inplace = True, drop = True)
-
-		# average across trials
-		(epochs, 
-		beh) = self.average_trials(epochs,beh,[self.to_decode,cnd_header]) 		
-
-		# apply filtering and downsampling (if specified)
-		if self.bdm_type != 'broad':
-			print('eeg data is filtered before downsampling and slicing the time window of interest')
-			epochs.filter(self.bdm_band[0],self.bdm_band[1], method = 'iir', 
-						iir_params = dict(ftype = 'butterworth', order = 5))
-			epochs.apply_hilbert(envelope=True)	
-			tf_data = abs(epochs._data)**2
-			# db convert
-			# base_slice = slice(*[np.argmin(abs(epochs.times - t)) for t in self.baseline])
-			# print('baseline correct TF data via db convert')
-			# tf_data = tf_data.reshape(-1,epochs.times.size)
-			# tf_data = np.array(np.matrix(tf_data) / np.matrix(tf_data[:,base_slice]).mean(axis = 1)
-			# 		  ).reshape(-1,len(epochs.info['ch_names']),epochs.times.size)
-			#epochs._data = 10 * np.log10(tf_data)
-
-			# or 'standard' baseline correction
-			epochs._data = abs(epochs._data)**2
-			epochs.apply_baseline(baseline = self.baseline) # check whether this is correct???
-
-		if self.downsample < int(epochs.info['sfreq']):
-			if self.window_size[0] == 1:
-				print('downsampling data')
-				epochs.resample(self.downsample, npad='auto')
-			else:
-				self.down_factor = int(epochs.info['sfreq'])/self.downsample
-				print('downsampling will be done after data averaging')
-
-		# select time window and EEG electrodes
-		if window_oi is None:
-			window_oi = (epochs.tmin, epochs.tmax)
-		s, e = [np.argmin(abs(epochs.times - t)) for t in window_oi]
-		picks = mne.pick_types(epochs.info, eeg=True, eog= True, misc = True, exclude='bads')
-		picks = select_electrodes(np.array(epochs.ch_names)[picks], self.elec_oi)
-		eegs = epochs._data[:,picks,s:e]
-		times = epochs.times[s:e]
-
-		# transform eeg data in case of sliding window approach
-		if self.window_size[0] > 1:
-			eegs = self.sliding_window(eegs, self.window_size[0], self.window_size[1], self.window_size[2])[:,:,self.window_size[0]-1:]
-			times = np.linspace(times[0], times[-self.window_size[0]], eegs.shape[-1])
-			s_freq =epochs.info['sfreq']
-			time_red = 1/s_freq * 1000 * self.window_size[0]
-			warnings.warn(f'Final timepoint in analysis is reduced by {time_red} ms as each timepoint in analysis now reflects {self.window_size[0]} data samples at a sampling rate of {s_freq} Hz', UserWarning)
-
-		return 	eegs, beh, times
 
 	def classify(self,cnds:dict=None,window_oi:tuple=None,
 				labels_oi:Union[str,list]= 'all',collapse:bool=False,
@@ -958,6 +992,7 @@ class BDM(FolderStructure):
 
 		# set bdm name
 		bdm_name = f'sj_{self.sj}_{bdm_name}'
+
 		for cnd in cnds:
 
 			# get condition indices and labels
@@ -972,7 +1007,7 @@ class BDM(FolderStructure):
 								times_tr.size, times_te.size)) * np.nan
 				label_inf = np.empty((self.avg_runs, nr_perm, 
 								times_tr.size, times_te.size, 
-								nr_tests, 2)) * np.nan
+								nr_tests, 2+labels.size)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									times_tr.size, times_te.size, 
 									nr_elec)) * np.nan
@@ -981,9 +1016,9 @@ class BDM(FolderStructure):
 				class_acc = np.empty((self.avg_runs,nr_perm,
 								times_te.size)) * np.nan	
 				label_inf = np.empty((self.avg_runs,nr_perm, 
-								times_te.size, nr_tests,2)) * np.nan
+								times_te.size,nr_tests,2+labels.size)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
-							np.		times_te.size, nr_elec)) * np.nan
+									times_te.size, nr_elec)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -1215,7 +1250,7 @@ class BDM(FolderStructure):
 
 		# initiate decoding arrays
 		class_acc = np.zeros((N,nr_time_tr, nr_time_te))
-		label_inf = np.zeros((N, nr_time_tr, nr_time_te, nr_tests,2))
+		label_inf = np.zeros((N,nr_time_tr,nr_time_te,nr_tests,2+labels.size))
 		weights = np.zeros((N,nr_time_tr, nr_time_te, nr_elec))
 
 		for n in range(N):
@@ -1262,18 +1297,21 @@ class BDM(FolderStructure):
 
 					if not GAT:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
-						label_inf[n, tr_t] = list(zip(Yte_, predict))
+						pairs = list(zip(Yte_, predict))
+						label_inf[n, tr_t] = np.hstack((pairs, scores))
 						class_acc[n,tr_t] = class_perf # 
 						weights[n,tr_t] = clf.coef_[0]
 					else:
 						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
-						label_inf[n, tr_t, te_t] = list(zip(Yte_, predict))	
+						pairs = list(zip(Yte_, predict))	
+						label_inf[n, tr_t, te_t] = np.hstack((pairs, scores))
 						class_acc[n,tr_t, te_t] = class_perf
 						weights[n,tr_t,te_t] = clf.coef_[0]
 
 		weights = np.squeeze(np.mean(weights, axis = 0))
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
-		label_inf = np.reshape(label_inf,(nr_time_tr,nr_time_te,-1,2))
+		label_inf = np.reshape(label_inf,(nr_time_tr,nr_time_te,
+								-1,2+labels.size))
 		label_inf = np.squeeze(label_inf)
 
 		return class_acc, label_inf, weights
