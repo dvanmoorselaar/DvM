@@ -239,7 +239,7 @@ class BDM(FolderStructure):
 		picks = select_electrodes(np.array(epochs.ch_names)[picks], 
 								self.elec_oi)
 		X = epochs._data[:,picks,idx]
-		times = epochs.times[s:e]
+		times = epochs.times[idx]
 
 		# transform eeg data in case of sliding window approach
 		if self.window_size[0] > 1:
@@ -487,17 +487,18 @@ class BDM(FolderStructure):
 		cnds, labels, X = [], [], []
 
 		# slice beh
-		beh = beh[[h for h in beh_headers if h is not None]]
+		beh = beh.loc[:,[h for h in beh_headers if h is not None]]
 		if beh.shape[-1] == 1:
 			cnd_header = 'condition'
-			beh.loc[:,'condition'] = 'all_data'
+			beh['condition'] = 'all_data'
 		else:
 			cnd_header = beh_headers[-1]	
 
 		# loop over each label and condition pair
 		options = dict(beh.apply(lambda col: col.unique()))
 		keys, values = zip(*options.items())
-		for var_combo in [dict(zip(keys, v)) for v in itertools.product(*values)]:
+		for var_combo in [dict(zip(keys, v)) \
+			for v in itertools.product(*values)]:
 			for i, (k, v) in enumerate(var_combo.items()):
 				if i == 0:
 					df_filt = f'{k} == \'{v}\'' if isinstance(v,str) \
@@ -519,7 +520,7 @@ class BDM(FolderStructure):
 
 		# set data
 		epochs._data = np.stack(X)
-		beh = pd.DataFrame.from_dict({cnd_header: cnds, self.to_decode: labels})
+		beh = pd.DataFrame.from_dict({cnd_header:cnds, self.to_decode:labels})
 
 		return epochs, beh
 
@@ -571,9 +572,9 @@ class BDM(FolderStructure):
 			cnd_idx = np.where(beh.collapsed == 'yes')[0]
 		cnd_labels = beh[self.to_decode][cnd_idx].values
 
-		# make sure that labels that should not be part of analysis are excluded
+		# make sure that labels that should not be in analysis are excluded
 		# if not already done so
-		if labels != 'all':
+		if not isinstance(labels, str):
 			sub_idx = [i for i,l in enumerate(cnd_labels) if l in labels]	
 			cnd_idx = cnd_idx[sub_idx]
 			cnd_labels = cnd_labels[sub_idx]
@@ -589,25 +590,32 @@ class BDM(FolderStructure):
 
 		return beh, cnd_idx, cnd_labels, labels, max_tr
 
-	def train_test_split(self, idx: np.array, labels: np.array, max_tr: int, bdm_info: dict) -> Tuple[np.array, np.array, dict]:
+	def train_test_split(self,idx:np.array,labels:np.array,max_tr:int, 
+						bdm_info: dict) -> Tuple[np.array, np.array, dict]:
 		"""
-		Splits up data into training and test sets. The number of training and test sets is 
-		equal to the number of folds. Splitting is done such that all data is tested exactly once.
-		Number of folds determines the ratio between training and test trials. With 10 folds, 90%
-		of the data is used for training and 10% for testing. Ensures that the number of observations per class
-		is balanced both in the training and the testing set
+		Splits up data into training and test sets. The number of 
+		training and test sets is equal to the number of folds. 
+		Splitting is done such that all data is tested exactly once.
+		Number of folds determines the ratio between training and test 
+		trials. With 10 folds, 90% of the data is used for training and 
+		10% for testing. Ensures that the number of observations per 
+		class is balanced both in the training and the testing set
  
 		Args:
 			idx (np.array): trial indices of decoding labels
 			labels (np.array): array of decoding labels
 			max_tr (int): max number unique labels
-			bdm_info (dict): dictionary with selected trials per label. If the value of the current run is {}, 
+			bdm_info (dict): dictionary with selected trials per label. 
+			If the value of the current run is {}, 
 			a random subset of trials will be selected
 
 		Returns:
-			train_tr (np.array): trial indices per fold and unique label (folds X labels X trials)
-			test_tr (np.array): trial indices per fold and unique label (folds X labels X trials)
-			bdm_info (dict): cross-validation info per decoding run (can be reported for replication purposes)
+			train_tr (np.array): trial indices per fold 
+			and unique label [folds, labels, trials]
+			test_tr (np.array): trial indices per fold and 
+			unique label [folds, labels, trials]
+			bdm_info (dict): cross-validation info per decoding run 
+			(can be reported for replication purposes)
 		"""
 
 		# set up params
@@ -615,18 +623,21 @@ class BDM(FolderStructure):
 		nr_labels = np.unique(labels).size
 		steps = int(max_tr/N)
 
-		# select final sample for BDM and store those trials in dict so that they can be saved
+		# select final sample for BDM and store those trials in 
+		# dict so that they can be saved
 		if self.seed:
 			random.seed(self.seed) # set seed 
 		if bdm_info['run_' + str(self.run_info)] == {}:
 			for i, l in enumerate(np.unique(labels)):
-				bdm_info['run_' + str(self.run_info)].update({l:idx[random.sample(list(np.where(labels==l)[0]),max_tr)]})	
+				label_dct = {l:idx[random.sample(list(np.where(labels==l)[0]),
+							max_tr)]}
+				bdm_info['run_' + str(self.run_info)].update(label_dct)	
 
 		# initiate train and test arrays	
 		train_tr = np.zeros((N,nr_labels, steps*(N-1)),dtype = int)
 		test_tr = np.zeros((N,nr_labels,steps),dtype = int)
 
-		# split up the dataset into N equally sized subsets for cross validation 
+		# split dataset into N equally sized subsets for cross validation 
 		for i, b in enumerate(np.arange(0,max_tr,steps)):
 			
 			idx_train = np.ones(max_tr,dtype = bool)
@@ -635,9 +646,12 @@ class BDM(FolderStructure):
 			idx_train[b:b + steps] = False
 			idx_test[b:b + steps] = True
 
-			for j, key in enumerate(bdm_info['run_' + str(self.run_info)].keys()):
-				train_tr[i,j,:] = np.sort(bdm_info['run_' + str(self.run_info)][key][idx_train])
-				test_tr[i,j,:] = np.sort(bdm_info['run_' + str(self.run_info)][key][idx_test])
+			for j, key in enumerate(bdm_info['run_' + \
+							str(self.run_info)].keys()):
+				train = bdm_info['run_' + str(self.run_info)][key][idx_train]
+				test = bdm_info['run_' + str(self.run_info)][key][idx_test]
+				train_tr[i,j,:] = np.sort(train)
+				test_tr[i,j,:] = np.sort(test)
 
 		return train_tr, test_tr, bdm_info
 
@@ -695,8 +709,9 @@ class BDM(FolderStructure):
 			min_tr = min(label_counts)	
 
 			# select test data and labels
-			te_idx = np.hstack([random.sample(list(np.where(test_labels == l)[0]),  
-											k = min_tr) for l in labels])
+			te_idx = [random.sample(list(np.where(test_labels == l)[0]),  
+											k = min_tr) for l in labels]
+			te_idx = np.hstack(te_idx)
 			Xte = X[np.array(test_idx)[te_idx]]
 			Yte = test_labels[te_idx]
 
@@ -708,20 +723,31 @@ class BDM(FolderStructure):
 
 		return Xtr, Xte, Ytr, Yte
 
-	def train_test_select(self, X: np.array, Y: np.array, train_tr: np.array, test_tr: np.array) -> Tuple[np.array, np.array, np.array, np.array]:
+	def train_test_select(self,X:np.array,Y:np.array,train_tr:np.array, 
+						test_tr:np.array) -> \
+						Tuple[np.array, np.array, np.array, np.array]:
 		"""
-		Based on training and test data (as returned by trainTestSplit) splits data into training and test data
+		Based on training and test data 
+		(as returned by train_test_split) splits data into training and 
+		test data
 
 		Args:
-			X (np.array): input data (nr trials X electrodes X timepoints)
+			X (np.array): input data [nr trials, electrodes, timepoints]
 			Y (np.array): decoding labels 
-			train_tr (np.array): indices of train trials per fold and unique label (nr of folds X nr unique train labels X nr train trials)
-			test_tr (np.array): indices of test trials per fold and unique label (nr of folds X nr unique train labels X nr train trials)
+			train_tr (np.array): indices of train trials per fold and 
+			unique label 
+			[nr of folds,nr unique train labels, nr train trials]
+			test_tr (np.array): indices of test trials per fold and 
+			unique label 
+			[nr of folds, nr unique test labels, nr test trials]
 
 		Returns:
-			Xtr (array): training data (nr folds X nr trials X elecs X timepoints) 
-			Xte (array): test data (nr folds X nr trials X elecs X timepoints) 
-			Ytr (array): training labels. Training label for trial epoch in Xtr
+			Xtr (array): training data 
+			[nr folds, nr trials, elecs,timepoints] 
+			Xte (array): test data 
+			[nr folds, nr trials, elecs, timepoints]
+			Ytr (array): training labels. Training label for trial epoch 
+			in Xtr
 			Yte (array): test labels. Test label for each trial in Xte
 		"""
 
@@ -759,83 +785,95 @@ class BDM(FolderStructure):
 
 		return W
 
-
-
 	def classify(self,cnds:dict=None,window_oi:tuple=None,
-				labels_oi:Union[str,list]= 'all',collapse:bool=False,
+				labels_oi:Union[str,list]='all',collapse:bool=False,
 				excl_factor:dict=None,nr_perm:int=0,GAT:bool=False, 
-				downscale:bool=False,save:bool=True,bdm_name:str='main'):
-		''' 
-		Arguments
-		- - - - - 
-		sj(int): subject number
-		cnds (list): list of condition labels (as stored in beh dict). 
-		cnd_header (str): variable name containing conditions of interest
-		bdm_labels (list | str): Specifies whether all labels or only a subset of labels should be decoded
-		excl_factor (dict | None): This gives the option to exclude specific conditions from analysis. 
-								For example, to only include trials where the cue was pointed to the left and not to the right specify
-								the following: factor = dict('cue_direc': ['right']). Mutiple column headers and multiple variables per 
-								header can be specified 
-		time (tuple | list): time samples (start to end) for decoding
-		collapse (boolean): If True also run analysis collapsed across all conditions
-		nr_perm (int): If perm = 0, run standard decoding analysis. 
-					If perm > 0, the decoding is performed on permuted labels. 
-					The number sets the number of permutations
-		gat_matrix (bool): If True, train X test decoding analysis is performed
-		downscale (bool): If True, decoding is repeated with increasingly less trials. Set to True if you are 
-						interested in the minimum number of trials that support classification
-		save (bool): sets whether output is saved (via standard file organization) or returned 	
-		Returns
-		- - - -
-		'''	
+				downscale:bool=False,save:bool=True,
+				bdm_name:str='main')->dict:
+		"""_summary_
 
-		# set condition data
+		Args:
+			cnds (dict, optional): Dictionary key specifies the column 
+			that contains conditions in the beh DataFrame. Values should 
+			be a list of all conditions to be included in the analysis 
+            (e.g., dict(condition = ['present','absent'])).  
+			Defaults to None. (i.e., decoding is done across all trials)
+			window_oi (tuple, optional): time window of interest. 
+			Defaults to None.
+			labels_oi (Union[str,list], optional): Labels (as specified)
+			used for decoding. . Defaults to 'all'.
+			collapse (bool, optional): Also perform decoding collapsed
+			across all conditions. Defaults to False.
+			excl_factor (dict, optional): This gives the option to 
+			exclude specific conditions from analysis. For example, 
+			to only include trials where the cue was pointed to the left 
+			and not to the right specify the following: 
+			excl_factor = dict('cue_direc': ['right']). Mutiple column 
+			headers and multiple variables per header can be specified. 
+			Defaults to None.
+			nr_perm (int, optional): If perm > 0, decoding is 
+			additionaly performed on permuted labels,
+			where the number sets the number of permutations. 
+			Defaults to 0.
+			GAT (bool, optional): perform decosing across
+			all combinations of timepoints (i.e., generate a 
+			generalization across time decoding matrix). 
+			Defaults to False.
+			downscale (bool, optional): Allows decoding to be repeatedly 
+			run with increasingly less trials. Can be used to examine 
+			the minimum number of trials that support reliable 
+			classification. Defaults to False.
+			save (bool, optional): save decoding output to disk.
+			Defaults to True.
+			bdm_name (str, optional): name of decoding analysis used 
+			during saving. Defaults to 'main'.
+
+		Returns:
+			bdm_scores: decoding output
+		"""
+
+		# select condition specific data
 		if cnds is None:
-			# TODO: Make sure that trial averaging also works without condition info
-			cnds = ['all_data']
-			cnd_header = None
+			(cnd_head,cnds) = (None,['all_data'])
 		else:
-			(cnd_header, cnds), = cnds.items()
+			(cnd_head,cnds), = cnds.items()
 
-		# read in data and set labels
 		(X, 
 		beh, 
-		times) = self.select_bdm_data(self.epochs.copy(),self.beh.copy(),
-									window_oi, excl_factor, cnd_header)	
+		times) = self.select_bdm_data(self.epochs.copy(), self.beh.copy(),
+									window_oi, excl_factor, cnd_head)	
 
-		y = beh[self.to_decode]
+		# based on input and data set decoding parameters
+		nr_perm += 1
 		nr_epochs, nr_elec, nr_time = X.shape
+		y = beh[self.to_decode]
 
-		# check input variables to set decoding type
 		if isinstance(cnds[0], list):
-			# if cnds consists of list, decoding is done across conditions
-			self.cross = True
-			if self.nr_folds > 1:
-				self.nr_folds = 1
-				print('cross time decoding only requires a single fold. Nr folds is reset to 1')
-			# split train and test conditions
 			# TODO: allow for multiple test conditions
+			# split train and test conditions for cross train analysis
 			cnds, test_cnd = cnds
+			self.cross = True
+			self.nr_folds = 1
 			max_tr = [1]
 		else:
-			max_tr = [self.selectMaxTrials(beh, cnds, labels_oi,cnd_header)] 
+			max_tr = [self.selectMaxTrials(beh, cnds, labels_oi,cnd_head)] 
 			nr_tests = (max(max_tr) - self.nr_folds)*self.nr_folds
 			if downscale:
 				max_tr = [(i+1)*self.nr_folds 
 							for i in range(int(max_tr[0]/self.nr_folds))][::-1]
 
-		# first round of classification is always done on non-permuted labels
-		nr_perm += 1
-
-		# set up dict to save decoding scores
-		bdm_scores = {'info': {'elec':self.elec_oi,'times':times}}
-
 		if collapse:
 			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
+						
+		# set up dict to save decoding scores
+		bdm_scores = {'info':{'elec':self.elec_oi,'times':times}}
 
-		# set bdm name
+		# set bdm_name
 		bdm_name = f'sj_{self.sj}_{bdm_name}'
+		
+		#TODO: insert function call
+
 		for cnd in cnds:
 
 			# reset selected trials
@@ -953,6 +991,7 @@ class BDM(FolderStructure):
 			te_header = self.to_decode
 
 		# set train data
+		print('prepare training data')
 		(X_tr, 
 		beh_tr, 
 		times_tr) = self.select_bdm_data(self.epochs[0].copy(),
@@ -966,6 +1005,7 @@ class BDM(FolderStructure):
 			GAT = True
 
 		# set testing data
+		print('prepare testing data')
 		(X_te, 
 		beh_te, 
 		times_te) = self.select_bdm_data(self.epochs[1].copy(),
