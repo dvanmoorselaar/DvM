@@ -396,7 +396,7 @@ class Epochs(mne.Epochs, FolderStructure):
 
         Raises:
             ValueError: In case behavior and eeg data do not align
-            (i.e., contain different trial numbers). If there are more behavior
+             (i.e., contain different trial numbers). If there are more behavior
             trials than epochs,raises an error in case there is no column
             'nr_trials', which prevents informed alignment of eeg and behavior.
             Also raises an error if there are too many epochs and automatic
