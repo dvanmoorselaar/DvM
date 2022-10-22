@@ -235,6 +235,10 @@ class BDM(FolderStructure):
 		# select time window and EEG electrodes
 		if window_oi is None:
 			window_oi = (epochs.tmin, epochs.tmax)
+		elif isinstance(window_oi, (int, float)):
+			# limit decoding to a single timepoint
+			step = np.diff(epochs.times)[0] * self.window_size[0]
+			window_oi = (window_oi, window_oi + step)
 		idx = get_time_slice(epochs.times, window_oi[0], window_oi[1])
 		picks = mne.pick_types(epochs.info,eeg=True, eog= True, misc = True)
 		picks = select_electrodes(np.array(epochs.ch_names)[picks], 
@@ -274,46 +278,50 @@ class BDM(FolderStructure):
 
 	def report_bdm(self,bdm_scores:dict,cnds:list,bdm_name:str):
 
+		pass
 		# set report and condition name
-		name_info = bdm_name.split('_')
-		report_name = name_info[-1]
-		report_path = self.set_folder_path()
-		report_name = self.folder_tracker(report_path,
-										f'report_{report_name}.h5')
+		# if self.elec_oi != 'all':
+		# 	return None
 
-		# create fake info object (so that weights can be plotted in report)
-		montage = mne.channels.make_standard_montage(self.montage)
-		n_elec = len(montage.ch_names)
-		info = mne.create_info(ch_names=montage.ch_names,sfreq=self.downsample,
-                               ch_types='eeg')
-		t_min = bdm_scores['info']['times'][0]
+		# name_info = bdm_name.split('_')
+		# report_name = name_info[-1]
+		# report_path = self.set_folder_path()
+		# report_name = self.folder_tracker(report_path,
+		# 								f'report_{report_name}.h5')
 
-		# loop over all specified conditins
-		for cnd in cnds:
+		# # create fake info object (so that weights can be plotted in report)
+		# montage = mne.channels.make_standard_montage(self.montage)
+		# n_elec = len(montage.ch_names)
+		# info = mne.create_info(ch_names=montage.ch_names,sfreq=self.downsample,
+        #                        ch_types='eeg')
+		# t_min = bdm_scores['info']['times'][0]
 
-			# set condition name
-			cnd_name = '_'.join(map(str, name_info[:-1] + [cnd]))
+		# # loop over all specified conditins
+		# for cnd in cnds:
+
+		# 	# set condition name
+		# 	cnd_name = '_'.join(map(str, name_info[:-1] + [cnd]))
 	
-			# create fake ekoked array
-			W = bdm_scores[cnd]['W']
-			W_evoked = mne.EvokedArray(W.T, info, tmin = t_min)
-			W_evoked.set_montage(montage)
+		# 	# create fake ekoked array
+		# 	W = bdm_scores[cnd]['W']
+		# 	W_evoked = mne.EvokedArray(W.T, info, tmin = t_min)
+		# 	W_evoked.set_montage(montage)
 
-			# check whether report exists
-			if os.path.isfile(report_name):
-				with mne.open_report(report_name) as report:
-					# if section exists delete it first
-					report.remove(title=cnd_name)
-					report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
-				 				  n_time_points=30)
-				report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
-						overwrite = True)
-			else:
-				report = mne.Report(title='Single subject evoked overview')
-				report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
-				 				n_time_points=30)
-				report.save(report_name)
-				report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
+		# 	# check whether report exists
+		# 	if os.path.isfile(report_name):
+		# 		with mne.open_report(report_name) as report:
+		# 			# if section exists delete it first
+		# 			report.remove(title=cnd_name)
+		# 			report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
+		# 		 				  n_time_points=30)
+		# 		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
+		# 				overwrite = True)
+		# 	else:
+		# 		report = mne.Report(title='Single subject evoked overview')
+		# 		report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
+		# 		 				n_time_points=30)
+		# 		report.save(report_name)
+		# 		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
 
 		# name = '_'.join(map(str, name_info[:-1]))
 
@@ -403,7 +411,7 @@ class BDM(FolderStructure):
 			output (np.array): reshaped array where second dimension 
 			increased by size of size_window
 		"""
-    
+
 		try:
 			n_obs, n_elec, n_time = X.shape
 		except ValueError:
@@ -966,7 +974,8 @@ class BDM(FolderStructure):
 	
 		# create report (specific to unpermuted data)
 		if not GAT:
-			self.report_bdm(bdm_scores, cnds, bdm_name)
+			pass
+			#self.report_bdm(bdm_scores, cnds, bdm_name)
 
 		# store classification dict	
 		if save: 
@@ -1265,6 +1274,7 @@ class BDM(FolderStructure):
 	
 			classification.update({tr_cnd:{'standard': copy.copy(class_acc)}})
 		# store classification dict	
+		embed()
 		if save: 
 			with open(self.FolderTracker(['bdm', self.elec_oi, 'cross', bdm_name], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)

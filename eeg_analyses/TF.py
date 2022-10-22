@@ -261,7 +261,9 @@ class TF(FolderStructure):
 			cnd_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 
 		for cnd in cnds:
-			power = tf['power'][cnd]
+			if method != 'Z':
+				#TODO: implement Z scoring baseline
+				power = np.mean(tf['power'][cnd], axis = 0)
 			if method == 'cnd_spec':	
 				tf['power'][cnd] = self.db_convert(power, base[cnd])
 			elif method == 'cnd_avg':
@@ -269,7 +271,6 @@ class TF(FolderStructure):
 			elif method == 'norm':
 				print('For normalization procedure it is assumed that it is as'
 				 	 ' if all stimuli of interest are presented right')
-				power = np.mean(power, axis = 0)
 				tf['power'][cnd], info = self.normalize_power(power, 
 															 list(elec_oi)) 
 				tf.update(dict(norm_info = info))
@@ -279,8 +280,8 @@ class TF(FolderStructure):
 				raise ValueError('Invalid method specified')
 
 			# power values can now safely be averaged
-			if method != 'norm':
-				tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
+			# if method != 'norm':
+			# 	tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
 
 		return tf
 				
