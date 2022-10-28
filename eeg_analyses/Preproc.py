@@ -61,6 +61,8 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
             tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, 
             reject_by_annotation = False) 
+    report.add_epochs(epochs, title='initial epoch')
+    report.save(report_file, overwrite = True)
 
     # ICA
     AR = ArtefactReject(z_thresh = 4, max_bad = 5, flt_pad = epochs.flt_pad, filter_z = True)
@@ -76,7 +78,6 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
     idx_remove = sj_info['bdf_remove'] if 'bdf_remove' in sj_info.keys() else None
     missing, report_str = epochs.align_meta_data(events, trigger_header = trigger_header, headers = beh_oi, idx_remove = idx_remove)
     report.add_html(report_str, title = 'Linking events to behavior')
-    report.add_epochs(epochs, title='initial epoch')
     report.save(report_file, overwrite = True)
 
     # LINK EYE MOVEMENTS

@@ -1,14 +1,29 @@
 import os
+import sys
 import mne
 import pickle
 import glob
 import re
 
+import numpy as np
 import pandas as pd
 
 from typing import Optional, Generic, Union, Tuple, Any
 from support.support import *
 from IPython import embed
+
+def blockPrinting(func):
+    def func_wrapper(*args, **kwargs):
+        # block all printing to the console
+        sys.stdout = open(os.devnull, 'w')
+        # call the method in question
+        value = func(*args, **kwargs)
+        # enable all printing to the console
+        sys.stdout = sys.__stdout__
+        # pass the return value of the method back
+        return value
+
+    return func_wrapper
 
 class FolderStructure(object):
 
@@ -56,8 +71,9 @@ class FolderStructure(object):
 
         return path
 
-    def load_processed_eeg(self,sj:int,preproc_name:str,eye_dict:dict=None,
-                          beh_file:bool=True)->Tuple[pd.DataFrame,mne.Epochs]:
+    def load_processed_eeg(self,sj:int,fname:str,preproc_name:str,
+                        eye_dict:dict=None,beh_file:bool=True)->\
+                        Tuple[pd.DataFrame,mne.Epochs]:
         """
         Reads in preprocessed eeg data (mne.Epochs object) and 
         behavioral data to be used for subsequent analyses. If data is 
@@ -67,6 +83,7 @@ class FolderStructure(object):
  
         Args:
             sj (int): subject identifier
+            fname (str): name of processed eeg data
             preproc_name (str): name specified for specific 
             preprocessing pipeline
             eye_dict (dict, optional): Each key specifies criteria
@@ -90,7 +107,7 @@ class FolderStructure(object):
         
         # start by reading in processed eeg data
         epochs = mne.read_epochs(self.folder_tracker(ext = ['processed'],
-                            fname = f'subject-{sj}_{preproc_name}-epo.fif'))
+                            fname = f'subject-{sj}_{fname}-epo.fif'))
 
         # check whether metadata is saved alongside epoched eeg
         if epochs.metadata is not None:
@@ -99,7 +116,7 @@ class FolderStructure(object):
             if beh_file:
                 # read in seperate behavior file
                 beh = pd.read_csv(self.folder_tracker(ext=['beh','processed'],
-                    fname = f'subject-{sj}_{preproc_name}.csv'))
+                    fname = f'subject-{sj}_{fname}.csv'))
             else:
                 beh = pd.DataFrame({'condition': epochs.events[:,2]})
 
@@ -107,8 +124,8 @@ class FolderStructure(object):
         if eye_dict is not None:
             file = FolderStructure().folder_tracker(
                             ext = ['preprocessing','group_info'],
-                            fname = 'preproc_param_main.csv')
-            beh, epochs = exclude_eye(sj,beh,epochs,eye_dict,preproc_name,file)
+                            fname = f'preproc_param_{preproc_name}.csv')
+            beh, epochs = exclude_eye(sj,beh,epochs,eye_dict,file)
 
         return beh, epochs
 
@@ -179,8 +196,9 @@ class FolderStructure(object):
 
         return beh
 
+    #@blockPrinting
     def read_erps(self, erp_folder:str,erp_name:str,
-                cnds:list=None,sjs:list='all')->dict:
+                cnds:list=None,sjs:list='all')->Tuple[dict,np.array]:
         """
         Read in evoked files of a specific analysis. Evoked data is returned
         in dictionary
@@ -215,8 +233,9 @@ class FolderStructure(object):
 
             # read in actual data
             erps[cnd] = [mne.read_evokeds(file)[0] for file in files]
+        times = erps[cnd][0].times
 
-        return erps
+        return erps, times
 
     def read_bdm(self,bdm_folder_path:list,bdm_name:str,sjs:list='all')->dict:
         """

@@ -1372,7 +1372,7 @@ class ArtefactReject(object):
                     ica=ica,
                     title='ICA blink cleaning',
                     picks=range(15),
-                    inst=eog_epochs,
+                    inst=fit_inst,
                     eog_evoked=eog_epochs.average(),
                     eog_scores=eog_scores[0],
                     )

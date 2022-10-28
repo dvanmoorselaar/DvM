@@ -15,8 +15,8 @@ from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
 def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
-				eye_dict:dict,preproc_name:str,
-				preproc_file:str=None)->Tuple[pd.DataFrame,mne.Epochs]:
+				eye_dict:dict,preproc_file:str=None)->\
+				Tuple[pd.DataFrame,mne.Epochs]:
 	"""
 	Filters out eye movements based on either a step algorhytm or 
 	deviation from fixation as measured with the eyetracker. In the 
@@ -40,7 +40,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 			use_tracker (bool): should eye tracker data be used to 
             search eye movements. If not exclusion will be based on 
             step algorhytm applied to eog channel as specified in eye_ch
-		preproc_name (str): name specified for specific 
+		preproc_file (str): name specified for specific 
             preprocessing pipeline. Used to update the preprocessing 
 			document
 	Returns:
@@ -62,12 +62,22 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		tracker_bins = np.full(beh.shape[0], np.nan)
 		perc_tracker = 'no tracker'
 	else:
-		angles = epochs._data[:,epochs.ch_names.index('dev'),window_idx]
-		min_samples = 40 * epochs.info['sfreq']/1000 # 40 ms
-		tracker_bins = bin_tracker_angles(angles, eye_dict['angle_thresh'],
-						min_samples)
-		perc_tracker = np.round(sum(tracker_bins == 1)/ 
-					   sum(tracker_bins < 2)*100,1)
+		if 'dev' in epochs.ch_names:
+			angles = epochs._data[:,epochs.ch_names.index('dev'),window_idx]
+			if 'drift_correct' in  eye_dict:
+				nr_time = angles.shape[-1]
+				s, e = eye_dict['drift_correct']
+				idx = get_time_slice(epochs.times, s,e)
+				angles = np.array(np.matrix(angles) - np.matrix(angles[:,idx]).mean(axis = 1)).reshape(-1,nr_time)
+
+			min_samples = 40 * epochs.info['sfreq']/1000 # 40 ms
+			tracker_bins = bin_tracker_angles(angles, eye_dict['angle_thresh'],
+							min_samples)
+			perc_tracker = np.round(sum(tracker_bins == 1)/ 
+						sum(tracker_bins < 2)*100,1)
+		else:
+			perc_tracker = 'no tracker data found'
+			tracker_bins = np.full(beh.shape[0], np.nan)
 
 	# apply step algorhytm to trials with missing data
 	nan_idx = np.where(np.isnan(tracker_bins) > 0)[0]
@@ -75,7 +85,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		eye_ch = eye_dict['eye_ch']
 		eog = epochs._data[nan_idx,epochs.ch_names.index(eye_ch),window_idx]
 		if 'step_param' not in eye_dict:
-			size, step, thresh = (200, 10, 20)
+			size, step, thresh = (200, 10, 100e-6)
 		else:
 			size, step, thresh = eye_dict['step_param']
 		idx_art = eog_filt(eog,sfreq = epochs.info['sfreq'], windowsize = size, 
@@ -98,7 +108,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 
 	# remove trials from behavior and eeg
 	beh.reset_index(inplace = True)
-	to_drop = np.where(tracker_bins == 1)[0]	
+	to_drop = np.where(tracker_bins >= 1 )[0]	
 	epochs.drop(to_drop, reason='eye detection')
 	beh.drop(to_drop, inplace = True)
 	beh.reset_index(inplace = True, drop = True)

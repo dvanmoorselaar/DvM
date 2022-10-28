@@ -638,7 +638,6 @@ class ERP(FolderStructure):
                         [mne.combine_evoked(v,weights='equal') 
                                         for (k,v) in erps.items()]
                                 ,weights = 'equal')
-            channels = grand_mean.ch_names
 
             # step 2: limit data to electrodes of interest
             if isinstance(elec_oi[0], str):
@@ -646,6 +645,8 @@ class ERP(FolderStructure):
             else:
                 X = grand_mean._data[contra_idx] - grand_mean._data[ipsi_idx]
 
+            # average over electrodes
+            X = X.mean(axis = 0)
             # step 3: get time window based on peak detection
             if polarity == 'pos':
                 idx_peak = np.argmax(X[window_idx])

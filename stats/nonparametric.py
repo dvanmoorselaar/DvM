@@ -5,13 +5,42 @@ Created by Dirk van Moorselaar on 27-02-2018.
 Copyright (c) 2018 DvM. All rights reserved.
 """
 
-import cv2
-
 import numpy as np
 
 from math import sqrt
 from scipy.stats import ttest_rel, ttest_ind, wilcoxon, ttest_1samp
 from IPython import embed 
+
+
+def bootstrap_SE(X:np.array,nr_iter:int=9999):
+	"""
+	Uses bootstrapping to calculate the standard error of the mean 
+	around timecourse X
+
+	Args:
+		X (np.array):timecourse data [nr_obs X nr_time]
+		nr_iter (int, optional): Number of iterations for random 
+		sampling (with replacment). Defaults to 1000.
+
+	Returns:
+		SE (np.array): standard error of the mean for each sample
+		avg (np.array): mean timecourse
+	"""
+
+	nr_obs = X.shape[0]
+	bootstr = np.zeros((nr_iter,X.shape[1]))
+
+	print(f'bootstrapping using {nr_iter} iterations')
+	for b in range(nr_iter):
+		# sample nr observations from X (with replacement)
+		idx = np.random.choice(nr_obs,size = nr_obs,replace = True) 				
+		bootstr[b,:] = np.mean(X[idx,:],axis = 0)
+
+	# calculate standard error of the mean
+	SE = np.std(bootstr,ddof=1,axis = 0)/sqrt(nr_obs)
+	avg_X = X.mean(axis = 0)
+
+	return SE, avg_X
 
 def permutationTTest(X1, X2, nr_perm):
 	'''
@@ -452,30 +481,7 @@ def signedRankArray(X, Y, method = 'ttest_rel'):
 	return p_vals		
 
 
-def bootstrap(X, b_iter = 1000):
-	'''
-	bootstrap uses a bootstrap procedure to calculate standard error of data in X.
 
-	Arguments
-	- - - - - 
-	test
-
-	Returns
-	- - - -
-
-	'''	
-
-	nr_obs = X.shape[0]
-	bootstrapped = np.zeros((b_iter,X.shape[1]))
-
-	for b in range(b_iter):
-		idx = np.random.choice(nr_obs,nr_obs,replace = True) 				# sample nr subjects observations from the slopes sample (with replacement)
-		bootstrapped[b,:] = np.mean(X[idx,:],axis = 0)
-
-	error = np.std(bootstrapped, axis = 0)
-	mean = X.mean(axis = 0)
-
-	return error, mean
 
 
 def jacklatency(x1, x2, thresh_1, thresh_2, times, info = False):
