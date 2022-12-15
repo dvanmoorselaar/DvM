@@ -4,12 +4,13 @@ import mne
 import pickle
 import glob
 import re
+import copy
 
 import numpy as np
 import pandas as pd
 
 from typing import Optional, Generic, Union, Tuple, Any
-from support.support import *
+from support.support import exclude_eye
 from IPython import embed
 
 def blockPrinting(func):
@@ -111,7 +112,7 @@ class FolderStructure(object):
 
         # check whether metadata is saved alongside epoched eeg
         if epochs.metadata is not None:
-            beh = epochs.metadata
+            beh = copy.copy(epochs.metadata)
         else:
             if beh_file:
                 # read in seperate behavior file
@@ -237,7 +238,7 @@ class FolderStructure(object):
 
         return erps, times
 
-    def read_bdm(self,bdm_folder_path:list,bdm_name:str,sjs:list='all')->dict:
+    def read_bdm(self,bdm_folder_path:list,bdm_name:str,sjs:list='all')->list:
         """
         Read in classification data as created by BDM class.
         Decoding scores are returned within a dictionary.
@@ -250,7 +251,7 @@ class FolderStructure(object):
             sjs (list, optional): List of subjects. Defaults to 'all'.
 
         Returns:
-            erps (dict): Dictionary with evoked data (with conditions as keeys)
+            bdm (list): list with decoding data
         """
 
         # set extension
@@ -269,3 +270,20 @@ class FolderStructure(object):
 
         return bdm
 
+    def read_ctfs(self,ctf_folder_path:list,ctf_name:str,sjs:list='all')->list:
+
+        # set extension
+        ext = ['ctf'] + ctf_folder_path
+
+        if sjs == 'all':
+            files = sorted(glob.glob(self.folder_tracker(
+                            ext = ext,
+                            fname = f'ctf_param_*_{ctf_name}.pickle')),
+                            key = lambda s: int(re.search(r'\d+', s).group()))
+        else:
+            files = [self.folder_tracker(ext = ext,
+                    fname = f'ctf_param_{sj}_{ctf_name}.pickle')for sj in sjs]
+
+        ctfs = [pickle.load(open(file, 'rb')) for file in files]
+
+        return ctfs

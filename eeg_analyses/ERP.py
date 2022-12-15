@@ -17,9 +17,11 @@ import pandas as pd
 from itertools import combinations
 from typing import Optional, Generic, Union, Tuple, Any
 
+
 from IPython import embed
 from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
+from sklearn.metrics import auc
 from support.FolderStructure import *
 from support.support import select_electrodes,trial_exclusion,create_cnd_loop,\
                             get_time_slice
@@ -27,7 +29,7 @@ from support.support import select_electrodes,trial_exclusion,create_cnd_loop,\
 class ERP(FolderStructure):
 
     def __init__(self, sj, epochs, beh, header, baseline, 
-                l_filter = None, h_filter = None):
+                l_filter = None, h_filter = None,report=False):
 
         # if filters are specified, filter data before trial averaging  
         if l_filter is not None or h_filter is not None:
@@ -37,6 +39,7 @@ class ERP(FolderStructure):
         self.beh = beh
         self.header = header
         self.baseline = baseline
+        self.report = report
 
     def report_erps(self, evoked: mne.Evoked, erp_name: str):
 
@@ -134,7 +137,8 @@ class ERP(FolderStructure):
         evoked.save(self.folder_tracker(['erp', self.header],
                                         f'{erp_name}-ave.fif'))
         # update report
-        self.report_erps(evoked, erp_name)
+        if self.report:
+            self.report_erps(evoked, erp_name)
 
         # split trials in fast and slow trials based on median RT
         if RT_split:
@@ -400,14 +404,14 @@ class ERP(FolderStructure):
         return contra_idx, ipsi_idx
 
     @staticmethod
-    def group_erp(erp:list,elec_oi:str,
+    def group_erp(erp:list,elec_oi:list='all',
                  set_mean:bool=False)->Tuple[np.array,mne.Evoked]:
         """
         Combines all individual data at the group level
 
         Args:
             erp (list): list with evoked items (mne)
-            elec_oi (str): electrodes of interest
+            elec_oi (list): electrodes of interest
             set_mean (bool, optional): If True, returns array with averaged 
             data. Otherwise data from individual datasets is stacked in the
             first dimension. Defaults to False.
@@ -419,6 +423,8 @@ class ERP(FolderStructure):
         # get mean and individual data
         evoked = mne.combine_evoked(erp, weights = 'equal')
         channels = evoked.ch_names
+        if elec_oi == 'all':
+            elec_oi = channels
         elec_oi_idx = np.array([channels.index(elec) for elec in elec_oi])
         evoked_X = np.stack([e._data[elec_oi_idx] for e in erp])
 
@@ -493,8 +499,23 @@ class ERP(FolderStructure):
         return diff, evoked
 
     @staticmethod
+    def measure_erp(X, times, method):
+
+        if method == 'mean_amp':
+            output = X.mean(axis = -1)
+        if 'auc' in method:
+            if 'pos' in method:
+                X[X<0] = 0
+            elif 'neg' in method:
+                X[X>0] = 0
+            output = [auc(times, x) for x in X]
+
+        return output
+
+    @staticmethod
     def erp_to_csv(erps:Union[dict,list],window_oi:Union[tuple,dict],
-                  elec_oi:list,cnds:list=None,name:str='main'):
+                  elec_oi:list,cnds:list=None,method:str='mean_amp',
+                  name:str='main'):
         ## TODO: add different methods (peak, onset latency)
         """
         Outputs ERP metrics (e.g., mean activity) to a csv file. The csv file
@@ -516,6 +537,7 @@ class ERP(FolderStructure):
             cnds (list, optional): If specified allows to limit export
             to a subset of conditions as specified in the erps dictionary. 
             Defaults to None.
+            method (str, optional): 
             name (str, optional): Name ofoutput file. Defaults to 'main'.
         """
 
@@ -540,16 +562,25 @@ class ERP(FolderStructure):
             # check whether output needs to be lateralized
             if isinstance(elec_oi[0], str):
                 evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi)
-                X.append(evoked_X[:,idx].mean(axis = 1))
+                y = ERP.measure_erp(evoked_X[:,idx],times[idx],method)
+                X.append(y)
+                #X.append(evoked_X[:,idx].mean(axis = 1))
                 headers.append(cnd)
             else:
+                d_wave = []
                 for h, hemi in enumerate(['contra','ipsi']):
                     evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi[h])
-                    X.append(evoked_X[:,idx].mean(axis = 1))
+                    d_wave.append(evoked_X)
+                    y = ERP.measure_erp(evoked_X[:,idx],times[idx],method)
+                    X.append(y)
+                    #X.append(evoked_X[:,idx].mean(axis = 1))
                     headers.append(f'{cnd}_{hemi}')
 
                 # add contra vs hemi difference
-                X.append(X[-2] - X[-1])
+                d_wave = d_wave[0] - d_wave[1]
+                y = ERP.measure_erp(d_wave[:,idx],times[idx],method)
+                X.append(y)
+                #X.append(X[-2] - X[-1])
                 headers.append(f'{cnd}_diff')
 
         # save data
@@ -666,7 +697,9 @@ class ERP(FolderStructure):
                     X = cnd_mean._data[elec_oi_idx]
                 else:
                     X = cnd_mean._data[contra_idx] - cnd_mean._data[ipsi_idx]
-
+                
+                # average over electrodes
+                X = X.mean(axis = 0)
                 if polarity == 'pos':
                     idx_peak = np.argmax(X[window_idx])
                 elif polarity == 'neg':
@@ -676,7 +709,7 @@ class ERP(FolderStructure):
                                    times[window_idx][idx_peak] + window_size/2)
 
         return erp_window
-        
+
     @staticmethod
     def select_waveform(erps:list, elec_oi:list):
 

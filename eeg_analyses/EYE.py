@@ -4,7 +4,6 @@ analyze Eyetracker data
 Created by Dirk van Moorselaar on 24-08-2017.
 Copyright (c) 2017 DvM. All rights reserved.
 """
-
 import glob
 import os
 import pickle
@@ -22,13 +21,12 @@ from copy import copy
 from matplotlib.patches import Ellipse, Circle
 from matplotlib.collections import PatchCollection
 from scipy.signal import savgol_filter
+from support.support import get_time_slice
 from support.FolderStructure import *
 from pygazeanalyser.edfreader import *
 from pygazeanalyser.eyetribereader import *
 from pygazeanalyser.detectors import *
 from pygazeanalyser.gazeplotter import *
-from support.support import eog_filt
-
 
 class EYE(FolderStructure):
 
@@ -49,7 +47,8 @@ class EYE(FolderStructure):
 		self.scr_h = screen_h
 		self.sfreq = sfreq
 
-	def get_eye_data(self, sj, eye_files = 'all', beh_files = 'all', start = 'start_trial'):
+	def get_eye_data(self,sj,eye_files='all',beh_files= 'all',
+					start='start_trial',trial_info=None,stop = None):
 		''' 
 
 		Reads in eyetracker and behavioral file for subsequent processing 
@@ -58,7 +57,7 @@ class EYE(FolderStructure):
 		- - - - - 
 
 		sj (int): subject number
-		eye_files (list | int): list of asc files. If int reads in all files for given subject in eye folder 
+		eye_files (list | int): list of asc files. If all reads in all files for given subject in eye folder 
 		beh_files (list | str): list of csv files. If all reads in all files for given subject in beh folder
 		start (str): string indexing the start of the trial in asc file 
 
@@ -85,8 +84,14 @@ class EYE(FolderStructure):
 		if eye_files[0][-3:] == 'tsv':			
 			eye = [read_eyetribe(file, start = start, missing = 0) for file in eye_files]
 		elif eye_files[0][-3:] == 'asc':	
-			eye = [read_edf(file, start = start, missing = 0) for file in eye_files]
+			if stop is None:
+				eye = [read_edf(file,start=start,trial_info=trial_info,missing=0) for file in eye_files]
+			else:	
+				eye = [read_edf_time_overlap(file, start = start, stop = stop, missing = 0) for file in eye_files]
+			trial_info = [e[1] for e in eye]
+			eye = [e[0] for e in eye]
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
+		trial_info = np.array(trial_info[0]) if len(eye_files) == 1 else np.hstack(trial_info)
 		beh = self.read_raw_beh(files = beh_files)
 		beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
@@ -113,12 +118,18 @@ class EYE(FolderStructure):
 			else:
 				eye_mask = np.in1d(beh['nr_trials'].values, eye_trials)
 				beh = beh[np.array(eye_mask)]		
+		elif nr_miss > 0:
+			print('Trials in beh and eye do not match. Final {nr_miss}')
+			print(' removed from eye. Please inspect data carefully')
+			eye = eye[:-nr_miss]
+			trial_info = trial_info[:-nr_miss]
 
 		# remove practice trials from eye and beh data
 		eye = eye[np.array(beh['practice'] == 'no')]
+		trial_info = trial_info[np.array(beh['practice'] == 'no')]
 		beh = beh[beh['practice'] == 'no']
 
-		return eye, beh
+		return eye, beh, np.squeeze(np.array(trial_info))
 
 	def interp_trial(self, trial):
 
@@ -130,8 +141,8 @@ class EYE(FolderStructure):
 		if not blinks:
 			return x, y	
 
-		#pad 200ms before and after blink
-		pad = int(self.sfreq/20) 
+		#pad 100ms before and after blink
+		pad = int(100/(1000/self.sfreq))
 		for blink in blinks:
 			idx = get_time_slice(trial['trackertime'], blink[0], blink[1])
 			idx = slice(idx.start - pad, idx.stop + pad)
@@ -173,8 +184,8 @@ class EYE(FolderStructure):
 		# initiate x and y array  
 		x = np.zeros((len(eye),times.size))
 		y = np.copy(x)
-
 		# look for start_event in all logged events
+
 		for i, trial in enumerate(eye):
 			for event in trial['events']['msg']:
 				if start_event in event[1]:
@@ -228,8 +239,15 @@ class EYE(FolderStructure):
 
 		SD = SaccadeGlissadeDetection(self.sfreq)
 
+		# check whether x,y contain missing data at start and/or end trial
+		mask = x[0] > 0
+		for i in range(1, x.shape[0]):
+			if all(x[i] == 0):
+				continue
+			mask = np.logical_and(mask,  x[i] > 0)
+
 		# set blink and noise trials to nan
-		for i, (x_, y_) in enumerate(zip(x,y)):
+		for i, (x_, y_) in enumerate(zip(x[:,mask],y[:,mask])):
 
 			V, A = SD.calcVelocity(x_,y_)
 			x_, y_, V, A = SD.noiseDetect(x_, y_, V, A)
@@ -250,17 +268,27 @@ class EYE(FolderStructure):
 						x_ += (self.scr_res[0]/2) - x_d.mean()
 						y_ += (self.scr_res[1]/2) - y_d.mean()
 		
-			x[i,:] = x_
-			y[i,:] = y_
+			x[i,mask] = x_
+			y[i,mask] = y_
 
 		return x, y	
 
-	def link_eye_to_eeg(self, eye_file, beh_file, start_trial, window_oi, 
+	def angles_from_xy(self,x:np.array,y:np.array,times:np.array,
+					  drift_correct:tuple=None):
+
+		# apply drift correction if specified
+		if drift_correct:
+			x, y = self.set_xy(x,y, times, drift_correct)
+		bins, angles = self.createAngleBins(x,y,0,3,0.25,40)
+
+		return angles
+
+	def link_eye_to_eeg(self, eye_file, beh_file, start_trial, stop_trial,window_oi, 
 						trigger_msg, drift_correct):
 
-		# read in eye data (linked to behavior)ed
+		# read in eye data (linked to behavior)
 		print('reading in eye tracker data')
-		eye, beh = self.get_eye_data('', eye_file, beh_file, start_trial)
+		eye, beh, trial_info = self.get_eye_data('', eye_file, beh_file, start_trial, trigger_msg,stop_trial)
 		
 		# collect x, y data 
 		x, y, times = self.get_xy(eye, window_oi[0], window_oi[1], trigger_msg)	
@@ -269,7 +297,7 @@ class EYE(FolderStructure):
 			x, y = self.set_xy(x,y, times, drift_correct)
 		bins, angles = self.createAngleBins(x,y, 0,3,0.25, 40)
 
-		return x, y, bins, angles
+		return x, y, bins, angles, trial_info
 
 
 	def saccadeVector(self, sj, start = -300, end = 800):
@@ -854,7 +882,6 @@ class SaccadeGlissadeDetection(object):
 		F = int(2 * span - 1)							# window length
 
 		# calculate the velocity and acceleration
-
 		x_ = savgol_filter(x, F, N, deriv = 0)
 		y_ = savgol_filter(y, F, N, deriv = 0)
 

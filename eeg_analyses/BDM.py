@@ -19,12 +19,12 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import LinearSVC
 from sklearn.calibration import CalibratedClassifierCV
-
+ 
 from sklearn.pipeline import make_pipeline
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, confusion_matrix
 from support.support import select_electrodes, trial_exclusion, get_time_slice
 from scipy.stats import rankdata
 from scipy.signal import hilbert
@@ -68,15 +68,17 @@ class BDM(FolderStructure):
 		load raw eeg/ behavior and save decoding ouput
 	"""
 
-	def __init__(self, sj:int,epochs:Union[mne.Epochs,list],
+	def __init__(self,sj:int,epochs:Union[mne.Epochs,list],
 				beh:Union[pd.DataFrame,list],to_decode:str, 
-				nr_folds:int=10,classifier:str='LDA',method:str='auc',
+				nr_folds:int=10,classifier:str='LDA',data:str='raw',
+				tf_bands:Union[dict,list]=None,method:str='auc',
 				elec_oi:Union[str,list]='all',downsample:int=128,
 				avg_runs:int=1,avg_trials:int=1,
 				sliding_window:tuple=(1,True,False),
 				scale:dict={'standardize':False,'scale':False}, 
 				pca_components:tuple=(0,'across'),montage:str='biosemi64',
-				bdm_filter: Optional[dict]=None,baseline:Optional[tuple]=None, 
+				output_params:Optional[bool]=False,
+				bdm_filter:Optional[dict]=None,baseline:Optional[tuple]=None, 
 				seed:Union[int, bool] = 42213):
 		"""set decoding parameters that will be used in BDM class
 
@@ -92,6 +94,14 @@ class BDM(FolderStructure):
 			classifier (str, optional): Sets which classifier is used 
 			for decoding. Supports 'LDA' (linear discriminant analysis),
 			'svm' (support vector machine), 'GNB' (Gaussian Naive Bayes)
+			data (str, optional): Specifies whether decoding should be 
+			performed on raw data ('raw') or on power after 
+			time-frequency decomposition ('tfr'). In the latter case, 
+			decoding can be done on a single band (e.g., alpha) or a 
+			range of frequency bands. By default decoding is performed
+			on the alpha band, unless specified otherwise. See tf_bands. 
+			tf_bands (dict | list): 
+		
 			method (str, optional): [description]. Defaults to 'auc'.
 			elec_oi (Optional[str, list], optional): [description]. 
 			Defaults to 'all'.
@@ -147,20 +157,11 @@ class BDM(FolderStructure):
 
 		self.sj = sj					
 		self.beh = beh
-		if bdm_filter != None:
-			self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
-			# baseline correction is done at a later stage
-			self.epochs = epochs 
-		else:	 
-			self.bdm_type = 'broad'
-			if type(epochs) == list:
-				self.epochs = [ep.apply_baseline(baseline = baseline) 
-												for ep in epochs] 
-			else:
-				self.epochs = epochs.apply_baseline(baseline = baseline)
 		self.classifier = classifier
 		self.baseline = baseline
 		self.to_decode = to_decode
+		self.data = data
+		self.tf_bands = tf_bands
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
 		self.downsample = downsample
@@ -174,6 +175,22 @@ class BDM(FolderStructure):
 		self.avg_trials = avg_trials
 		self.seed = seed
 		self.cross = False
+		self.output_params = output_params
+		if baseline is None:
+			self.epochs = epochs
+		else:
+			if bdm_filter != None:
+				self.bdm_type, self.bdm_band = list(bdm_filter.items())[0]
+				# baseline correction is done at a later stage
+				self.epochs = epochs 
+			else:	 
+				self.bdm_type = 'broad'
+				
+				if type(epochs) == list:
+					self.epochs = [ep.apply_baseline(baseline = baseline) 
+													for ep in epochs] 
+				else:
+					self.epochs = epochs.apply_baseline(baseline = baseline)
 
 	def select_bdm_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
 						window_oi:tuple,excl_factor:dict=None,
@@ -218,10 +235,25 @@ class BDM(FolderStructure):
 		beh) = self.average_trials(epochs,beh,[self.to_decode,cnd_header]) 		
 
 		# apply filtering and downsampling (if specified)
-		if self.bdm_type != 'broad':
-			#TODO: implement time-frequency decomposition
-			print('TF decomposition not yet implemented')
-			pass
+		if self.data == 'tfr':
+			print('start tf decomposition')
+			#TODO: only supports a single band
+			power = []
+			if isinstance(self.tf_bands, list):
+				frex = np.linspace(self.tf_bands[0], \
+									self.tf_bands[1],self.tf_bands[2])
+				bands = [(frex[i], frex[i+1]) for i in range(len(frex) -1)]
+				self.tf_bands = {f'band_{i}': band 
+											for i, band in enumerate(bands)}
+			elif self.tf_bands is None:
+				self.tf_bands = {'alpha':[8,12]}
+			for band, val in self.tf_bands.items():
+				temp_ = epochs.copy().filter(val[0],val[1], method = 'iir', 
+						iir_params = dict(ftype = 'butterworth', order = 5))
+				temp_.apply_hilbert()
+				power.append(temp_.get_data())
+			# fix as soon as multiple bands are implemented
+			epochs._data = abs(np.stack(power)[0])**2
 
 		if self.downsample < int(epochs.info['sfreq']):
 			if self.window_size[0] == 1:
@@ -345,8 +377,8 @@ class BDM(FolderStructure):
 		if self.cross:
 			base += ['cross']
 
-		if self.bdm_type != 'broad':
-			base += [self.classifier]
+		# if self.bdm_type != 'broad':
+		# 	base += [self.classifier]
 
 		if self.classifier != 'LDA':
 			base += [self.self.bdm_type]
@@ -882,6 +914,7 @@ class BDM(FolderStructure):
 						
 		# set up dict to save decoding scores
 		bdm_scores = {'info':{'elec':self.elec_oi,'times':times}}
+		bdm_params = {}
 
 		# set bdm_name
 		bdm_name = f'sj_{self.sj}_{bdm_name}'
@@ -908,6 +941,8 @@ class BDM(FolderStructure):
 								2+labels.size)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									nr_time, nr_time, nr_elec))
+				conf_matrix = np.empty((self.avg_runs, nr_perm,
+									nr_time, nr_time, labels.size,labels.size))									
 			else:	
 				class_acc = np.empty((self.avg_runs,nr_perm,
 								nr_time)) * np.nan	
@@ -915,6 +950,8 @@ class BDM(FolderStructure):
 								nr_time,nr_tests,2+labels.size)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									nr_time, nr_elec))
+				conf_matrix = np.empty((self.avg_runs, nr_perm,
+									nr_time, labels.size,labels.size))	
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
@@ -948,7 +985,8 @@ class BDM(FolderStructure):
 						
 						(class_acc[run, p], 
 						label_inf[run,p],
-						weights[run, p]) = self.cross_time_decoding(Xtr, Xte, 
+						weights[run, p],
+						conf_matrix[run,p]) = self.cross_time_decoding(Xtr, Xte, 
 																	Ytr, Yte, 
 																	labels, 
 																	GAT, X)
@@ -957,14 +995,19 @@ class BDM(FolderStructure):
 						self.run_info += 1
 
 					mean_class = class_acc.mean(axis = 0)	
+					W = weights.mean(axis = 0)[0]
+					conf_M = conf_matrix.mean(axis = 0)
 					if i == 0:
-						# get non-permuted weights
-						W = weights.mean(axis = 0)[0]
+						# get standard dec scores
 						W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
 						bdm_scores.update({cnd:{'dec_scores': 
-											copy.copy(mean_class[0]),
-											'W':W}, 
+											copy.copy(mean_class[0])}, 
 											'bdm_info': bdm_info})
+						if self.output_params:
+							bdm_params.update({cnd:{'W':W}, 
+											'conf_matrix':copy.copy(conf_M[0])
+											})
+
 					else:
 						bdm_scores[cnd]['{}-nrlabels'.format(n)] = \
 										copy.copy(mean_class[0])
@@ -983,6 +1026,10 @@ class BDM(FolderStructure):
 			with open(self.folder_tracker(ext, fname = 
 					f'{bdm_name}.pickle') ,'wb') as handle:
 				pickle.dump(bdm_scores, handle)
+			if self.output_params:
+				with open(self.folder_tracker(ext, fname = 
+						f'{bdm_name}_params.pickle') ,'wb') as handle:
+					pickle.dump(bdm_params, handle)				
 		else:
 			return bdm_scores	
 
@@ -1106,7 +1153,7 @@ class BDM(FolderStructure):
 														
 						(class_acc[run, p], 
 						label_inf[run,p],
-						weights[run, p]) = self.cross_time_decoding(Xtr, Xte, 
+						weights[run, p],_) = self.cross_time_decoding(Xtr, Xte, 
 																	Ytr, Yte, 
 																	labels, 
 																	GAT, Xtr)
@@ -1274,7 +1321,6 @@ class BDM(FolderStructure):
 	
 			classification.update({tr_cnd:{'standard': copy.copy(class_acc)}})
 		# store classification dict	
-		embed()
 		if save: 
 			with open(self.FolderTracker(['bdm', self.elec_oi, 'cross', bdm_name], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
 				pickle.dump(classification, handle)
@@ -1315,6 +1361,7 @@ class BDM(FolderStructure):
 		class_acc = np.zeros((N,nr_time_tr, nr_time_te))
 		label_inf = np.zeros((N,nr_time_tr,nr_time_te,nr_tests,2+labels.size))
 		weights = np.zeros((N,nr_time_tr, nr_time_te, nr_elec))
+		conf_matrix = np.zeros((N,nr_time_tr, nr_time_te,labels.size,labels.size))
 
 		for n in range(N):
 			print('\r Fold {} out of {} folds in average run {}'.format(n + 1,N, self.run_info),end='')
@@ -1356,13 +1403,15 @@ class BDM(FolderStructure):
 					clf.fit(Xtr_,Ytr_)
 					scores = clf.predict_proba(Xte_) # get posteriar probability estimates
 					predict = clf.predict(Xte_)
-					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) # 
+					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) #
+					conf_m = confusion_matrix(Yte_, predict,labels=labels) 
 
 					if not GAT:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
 						pairs = list(zip(Yte_, predict))
 						label_inf[n, tr_t] = np.hstack((pairs, scores))
 						class_acc[n,tr_t] = class_perf # 
+						conf_matrix[n,tr_t] = conf_m
 						if not self.pca_components[0]:
 							weights[n,tr_t] = clf.coef_[0]
 					else:
@@ -1370,6 +1419,7 @@ class BDM(FolderStructure):
 						pairs = list(zip(Yte_, predict))	
 						label_inf[n, tr_t, te_t] = np.hstack((pairs, scores))
 						class_acc[n,tr_t, te_t] = class_perf
+						conf_matrix[n,tr_t,te_t] = conf_m
 						if not self.pca_components[0]:
 							weights[n,tr_t,te_t] = clf.coef_[0]
 
@@ -1377,12 +1427,13 @@ class BDM(FolderStructure):
 			weights = np.squeeze(np.mean(weights, axis = 0))
 		else:
 			weights = None
+		conf_matrix = np.squeeze(np.sum(conf_matrix, axis = 0))
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
 		label_inf = np.reshape(label_inf,(nr_time_tr,nr_time_te,
 								-1,2+labels.size))
 		label_inf = np.squeeze(label_inf)
 
-		return class_acc, label_inf, weights
+		return class_acc, label_inf, weights, conf_matrix
 
 	def computeClassPerf(self, scores, true_labels, label_order, predict):
 		'''

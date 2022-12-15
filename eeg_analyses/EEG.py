@@ -30,6 +30,7 @@ from autoreject import get_rejection_threshold
 from eeg_analyses.EYE import *
 from math import sqrt
 from IPython import embed
+from support.support import get_time_slice
 from support.FolderStructure import *
 from scipy.stats.stats import pearsonr
 from mne.viz.epochs import plot_epochs_image
@@ -344,13 +345,13 @@ class Epochs(mne.Epochs, FolderStructure):
         self.sj = sj
         self.session = str(session)
         self.flt_pad = flt_pad
-        if type(flt_pad) == tuple:
+        if isinstance(flt_pad, (tuple,list)):
             tmin -= flt_pad[0]
             tmax += flt_pad[1]
         else:
             tmin -= flt_pad
             tmax += flt_pad
-
+  
         super(Epochs, self).__init__(raw=raw, events=events, event_id=event_id,
                                     tmin=tmin, tmax=tmax,baseline=baseline,
                                     picks=picks, preload=preload,
@@ -435,7 +436,6 @@ class Epochs(mne.Epochs, FolderStructure):
         # check alignment
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
-
         if nr_miss > 0:
             report_str += (f'Behavior has {nr_miss} more trials than detected '
                           'events. The following trial numbers will be '
@@ -478,7 +478,7 @@ class Epochs(mne.Epochs, FolderStructure):
             for i, tr in enumerate(bdf_triggers):
                 if tr != beh_triggers[i]: # remove trigger from beh_file
                     miss = beh['nr_trials'].iloc[i]
-                    missing_trials.append(i)
+                    missing_trials.append(miss)
                     report_str += f'{miss}, '
                     beh.drop(beh.index[i], inplace=True)
                     beh_triggers = np.delete(beh_triggers, i, axis = 0)
@@ -488,10 +488,10 @@ class Epochs(mne.Epochs, FolderStructure):
 
             # check whether there are missing trials at end of beh file
             if beh_triggers.size > bdf_triggers.size and stop:
-
                 # drop the last items from the beh file
+                new_miss = beh.loc[beh.index[-nr_miss:].values,'nr_trials']
                 missing_trials = np.hstack((missing_trials,
-                                           beh.index[-nr_miss:].values))
+                                           new_miss.values))
                 beh.drop(beh.index[-nr_miss:], inplace=True)
                 report_str += (f'\n Removed final {nr_miss} trials from '
                               'behavior to allign data. Please inspect your '
@@ -960,6 +960,8 @@ class Epochs(mne.Epochs, FolderStructure):
         beh_files = sorted(beh_files)
 
         if len(eye_files) > 0:
+            if 'stop' not in eye_info:
+                eye_info['stop'] = None
             EO = EYE(sfreq = eye_info['sfreq'],
                     viewing_dist = eye_info['viewing_dist'],
                     screen_res = eye_info['screen_res'],
@@ -968,16 +970,26 @@ class Epochs(mne.Epochs, FolderStructure):
             (x,
             y,
             bins,
-            angles) =EO.link_eye_to_eeg(eye_files,beh_files,eye_info['start'],
-                               eye_info['window_oi'], eye_info['trigger_msg'],
-                               eye_info['drift_correct'])
+            angles,
+            trial_inf) =EO.link_eye_to_eeg(eye_files,beh_files,eye_info['start'],
+                            eye_info['stop'],eye_info['window_oi'], 
+                            eye_info['trigger_msg'],
+                            eye_info['drift_correct'])
 
-            if missing.size > 0:
-                bins = np.delete(bins, np.array(missing, dtype = int))
-                angles = np.delete(angles, np.array(missing, dtype = int),
-                                 axis = 0)
-                x = np.delete(x, np.array(missing, dtype = int), axis =0)
-                y = np.delete(y, np.array(missing, dtype = int), axis = 0)
+            # check whether missing trials in trial_info
+            drop_eye = False
+            remove = np.intersect1d(missing, trial_inf)
+            idx = []
+            if remove.size > 0:
+                _,_,idx = np.intersect1d(remove,trial_inf,return_indices=True) 
+            elif self.metadata.shape[0] < trial_inf.size:
+                to_remove = trial_inf.size - self.metadata.shape[0]
+                idx = np.arange(trial_inf.size)[-to_remove:]
+
+            bins = np.delete(bins,idx,axis = 0)
+            angles = np.delete(angles, idx,axis = 0)
+            x = np.delete(x, idx, axis =0)
+            y = np.delete(y, idx, axis = 0)              
 
             self.metadata['eye_bins'] = bins
 
@@ -1313,7 +1325,7 @@ class ArtefactReject(object):
 
     def __init__(self,
                 z_thresh: float = 4.0, max_bad: int = 5,
-                flt_pad: float = 0, filter_z: bool = True):
+                flt_pad:Union[float,tuple,list]=0.0,filter_z: bool = True):
 
         self.flt_pad = flt_pad
         self.filter_z = filter_z
@@ -1623,9 +1635,9 @@ class ArtefactReject(object):
 
         return epochs, bad_epochs, cleaned_epochs
 
-    def auto_repair_noise(self, epochs: mne.Epochs,
-                         band_pass: list =[110, 140],
-                         z_thresh: float = 4.0, report: mne.Report = None):
+    def auto_repair_noise(self,epochs:mne.Epochs,drop_bads:bool,
+                        z_thresh:float=4.0,band_pass: list =[110, 140],
+                        report:mne.Report=None):
 
         # z score data (after hilbert transform)
         (Z, elecs_z,
@@ -1646,14 +1658,20 @@ class ArtefactReject(object):
         picks = mne.pick_types(epochs.info, eeg=True, exclude= 'bads')
 
         # drop bad epochs
-        epochs.drop(np.array(bad_epochs), reason='Artefact reject')
+        if drop_bads:
+            epochs.drop(np.array(bad_epochs), reason='Artefact reject')
+        else:
+            epochs.metadata.reset_index(inplace=True)
+            epochs.metadata['bad_epochs'] = 0
+            epochs.metadata.loc[epochs.metadata.index.isin(bad_epochs),'bad_epochs'] = 1
+
 
         if report is not None:
             channels = np.array(epochs.info['ch_names'])[picks]
             report.add_figure(self.plot_auto_repair(channels, Z, z_thresh),
                                 title = 'Iterative z cleaning procedure')
 
-        return epochs, z_thresh, report
+        return epochs,z_thresh,report
 
         print('This interactive window selectively shows epochs marked as bad. You can overwrite automatic artifact detection by clicking on selected epochs')
         bad_eegs = self[bad_epochs]
@@ -1668,7 +1686,7 @@ class ArtefactReject(object):
                         missing.size, len(bad_epochs),100 * round(missing.size / float(len(bad_epochs)), 2)))
         bad_epochs = np.delete(bad_epochs, missing)
 
-    def preprocess_epochs(self, epochs: mne.Epochs, band_pass: list =[110, 140]):
+    def preprocess_epochs(self,epochs:mne.Epochs,band_pass:list=[110, 140]):
 
         # set params
         flt_pad = self.flt_pad
@@ -1681,11 +1699,15 @@ class ArtefactReject(object):
         X = self.box_smoothing(X, sfreq)
 
         # z score data (while ignoring flt_pad samples) using default settings
-        mask = np.logical_and(tmin + self.flt_pad <= times, times <= tmax - self.flt_pad)
+        if isinstance(self.flt_pad,(float,int)):
+            mask = np.logical_and(tmin + self.flt_pad <= times, times <= tmax - self.flt_pad)
+            time_idx = epochs.time_as_index([tmin + flt_pad, tmax - flt_pad])
+        else:
+            mask = np.logical_and(tmin + self.flt_pad[0] <= times, times <= tmax - self.flt_pad[1])
+            time_idx = epochs.time_as_index([tmin + flt_pad[0], tmax - flt_pad[1]])
         Z, elecs_z, z_thresh = self.z_score_data(X, self.z_thresh, mask, (self.filter_z, sfreq))
 
         # control for filter padding
-        time_idx = epochs.time_as_index([tmin + flt_pad, tmax - flt_pad])
         Z = Z[:, slice(*time_idx)]
         elecs_z = elecs_z[:,:,slice(*time_idx)]
         times = times[slice(*time_idx)]

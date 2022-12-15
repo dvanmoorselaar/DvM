@@ -204,12 +204,19 @@ class CTF(BDM):
 		# get data of interest
 		idx = np.intersect1d(cnd_idx, pos_idx)
 		pos_bins = beh[pos_header].values[idx]
+		if 'level_0' in beh:
+			del beh['level_0']
+		beh.reset_index(inplace = True)
+		beh.drop([c for c in np.arange(beh.shape[0]) 
+						if c not in idx], inplace = True)
+
+		beh.reset_index(inplace = True, drop = True)
 		cnds = cnds[idx]
 		epochs = epochs[idx]
 		pos_bins, cnds, epochs = self.select_bins_oi(pos_bins, cnds, epochs)
 		max_tr = self.set_max_trial(cnds, pos_bins, self.method)
 
-		return pos_bins, cnds, epochs, max_tr
+		return pos_bins, cnds, epochs, beh, max_tr
 
 	def select_bins_oi(self, pos_bins: np.array, cnds: np.array, 
 					  epochs: mne.Epochs) -> Tuple[np.array, 
@@ -647,10 +654,6 @@ class CTF(BDM):
 			print('Method not yet  implemented')
 			print('nr_blocks is irrelevant and will be reset to 1')
 			#self.nr_blocks = 1						
-		if collapse:
-			pass
-			# TODO: fix
-			#conditions += ['all_trials']
 	
 		if type(cnds) == dict:
 			train_cnds, test_cnd = self.check_cnds_input(cnds)
@@ -660,6 +663,9 @@ class CTF(BDM):
 					' nr_blocks and nr_iter is reset to 1')
 				self.nr_blocks = 2 # in effect equal to 1 (see below)
 				nr_itr = 1
+			if collapse:
+				train_cnds = copy.copy(train_cnds)
+				train_cnds += ['collapsed']
 		else:
 			train_cnds = ['all_data']
 			
@@ -667,8 +673,10 @@ class CTF(BDM):
 		(pos_bins, 
 		cnds, 
 		epochs, 
+		beh,
 		max_tr) = self.select_ctf_labels(epochs, beh, pos_labels, cnds)
-  
+		print(max_tr)
+		
 		# Frequency loop (ensures that data is only filtered once)
 		for fr in range(nr_freqs):
 			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
@@ -704,6 +712,16 @@ class CTF(BDM):
 									'W_E':W_E,'W_T':W_T}})
 					# get condition indices
 					cnd_idx = cnds == cnd
+					if cnd == 'collapsed':
+						cnd_idx = np.ones(cnds.size, dtype= bool)
+						# reset max_tr so that analysis is not underpowered
+						(_, 
+						_, 
+						_, 
+						_,
+						max_tr) = self.select_ctf_labels(epochs,beh,
+														pos_labels, None)
+
 					if self.cross:
 						test_idx = cnds == test_cnd
 						test_bins = np.unique(pos_bins[test_idx])
@@ -838,11 +856,13 @@ class CTF(BDM):
 		(pos_bins_tr, 
 		_,
 		epochs_tr, 
+		_,
 		_) = self.select_ctf_labels(epochs_tr, beh_tr, pos_labels_tr, None)
 
 		(pos_bins_te, 
 		cnds, 
 		epochs_te, 
+		_,
 		_) = self.select_ctf_labels(epochs_te, beh_te, pos_labels_te, te_cnds)
 
 		# Frequency loop (ensures that data is only filtered once)
@@ -1343,6 +1363,7 @@ class CTF(BDM):
 		(pos_bins, 
 		cnds, 
 		epochs, 
+		beh,
 		max_tr) = self.select_ctf_labels(epochs, beh, pos_labels, cnds)
 
 		# set params
@@ -1363,8 +1384,8 @@ class CTF(BDM):
 		nr_freqs = frqs.shape[0]
 
 		if collapse:
-			TODO: fix
-			conditions += ['all_data']	
+			beh['collapsed'] = 'no'
+			cnds += ['collapsed']	
 
 		# Frequency loop (ensures that data is only filtered once)
 		for fr in range(nr_freqs):

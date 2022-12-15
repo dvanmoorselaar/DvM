@@ -12,10 +12,12 @@ from support.FolderStructure import FolderStructure as FS
 from support.support import log_preproc
 from IPython import embed
 
-def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: list, ref: list, t_min: float, 
-                t_max: float, event_id: list, preproc_param: dict, project_folder: str, sj_info: dict, eye_info: dict, 
-                beh_oi: list, trigger_header: str = 'trigger', flt_pad: float = 0.5, binary: int = 0,
-                preproc_name: str = 'main', nr_sjs: int = 24):
+def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
+                ref:list,t_min:float,t_max:float,event_id:list,
+                preproc_param:dict,project_folder:str,sj_info:dict,
+                eye_info:dict,beh_oi:list,trigger_header:str='trigger', 
+                flt_pad:float=0.5,binary:int = 0,
+                preproc_name:str='main',nr_sjs:int=24):
 
     # check subject specific parameters
     sj_info = sj_info[str(sj)] if str(sj) in sj_info.keys() else {'bad_chs': []}
@@ -85,7 +87,8 @@ def preproc_eeg(sj: int, session: int, eeg_runs: list, nr_sessions: int, eog: li
 
     # START AUTOMATIC ARTEFACT REJECTION 
     if preproc_param['run_autoreject']:
-        epochs, z_thresh, report = AR.auto_repair_noise(epochs, report = report)
+        drop_bads = sj_info['drop_bads'] if 'drop_bads' in sj_info.keys() else False
+        epochs,z_thresh,report = AR.auto_repair_noise(epochs,drop_bads,report=report)
         report.save(report_file, overwrite = True)
     else:
         z_thresh = 0

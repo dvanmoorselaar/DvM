@@ -5,10 +5,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from scipy.signal import savgol_filter
 from eeg_analyses.ERP import *
 from stats.nonparametric import bootstrap_SE
 from typing import Optional, Generic, Union, Tuple, Any
-from support.support import get_time_slice
+from support.support import get_time_slice, get_diff_pairs
 
 from IPython import embed
 
@@ -27,13 +28,17 @@ meanlineprops = dict(linestyle='--', linewidth=1, color='black')
 medianlineprops = dict(linestyle='-', linewidth=1, color='black')
 
 
-def plot_time_course(x:np.array,y:np.array,show_SE:bool=False,**kwargs):
+def plot_time_course(x:np.array,y:np.array,
+					show_SE:bool=False,smooth:bool=False,**kwargs):
 
 	if y.ndim > 1:
 		if show_SE:
 			err, y = bootstrap_SE(y)
 		else:
 			y = y.mean(axis=0)
+
+	if smooth:
+		y = savgol_filter(y, 51, 3)
 
 	plt.plot(x,y,**kwargs)
 
@@ -42,13 +47,16 @@ def plot_time_course(x:np.array,y:np.array,show_SE:bool=False,**kwargs):
 		plt.fill_between(x,y+err,y-err,alpha=0.2,**kwargs)
 	
 def plot_erp_time_course(erps:Union[list,dict],times:np.array,elec_oi:list,
-						contra_ipsi:str=None,colors:list=None,
-						show_SE:bool=False,window_oi:Tuple=None,
+						contra_ipsi:str=None,cnds:list=None,colors:list=None,
+						show_SE:bool=False,smooth:bool=False,window_oi:Tuple=None,
 						offset_axes:int=10,onset_times:Union[list,bool]=[0],
 						show_legend:bool=True,ls = '-'):
 
 	if isinstance(erps, list):
 		erps = {'temp':erps}
+
+	if cnds is not None:
+		erps = {key:value for (key,value) in erps.items() if key in cnds}
 	
 	if colors is None or len(colors) < len(erps):
 		print('not enough colors specified. Using default colors')
@@ -72,7 +80,7 @@ def plot_erp_time_course(erps:Union[list,dict],times:np.array,elec_oi:list,
 		#do actual plotting
 		for i, y_ in enumerate(y):
 			color = colors.pop() 
-			plot_time_course(times,y_,show_SE,
+			plot_time_course(times,y_,show_SE,smooth,
 							label=labels[i],color=color,ls=ls)
 
 	# clarify plot
@@ -100,13 +108,49 @@ def plot_erp_time_course(erps:Union[list,dict],times:np.array,elec_oi:list,
 		for t in onset_times:
 			plt.axvline(t,color = 'black',ls='--',lw=1)
 
-
 	sns.despine(offset = offset_axes)
 			
-			
-			
+def plot_erp_topography(erps:Union[list,dict],times:np.array,
+						window_oi:tuple=None,cnds:list=None,
+						topo:str='raw',montage:str='biosemi64',**kwargs):
 
+	if isinstance(erps, list):
+		erps = {'temp':erps}
 
+	if cnds is not None:
+		erps = {key:value for (key,value) in erps.items() if key in cnds}
+
+	if window_oi is None:
+		window_oi = (times[0],times[-1])
+	idx = get_time_slice(times, window_oi[0],window_oi[1])
+
+	for c, cnd in enumerate(erps.keys()):
+		ax = plt.subplot(1,len(erps), c+1, title = cnd)
+		_, evoked = ERP.group_erp(erps[cnd],set_mean=True)
+		data = evoked._data[:,idx].mean(axis = 1)
+
+		if topo == 'diff':
+			preflip = np.copy(data)
+			# visualize contra vs. ipsi
+			ch_names = evoked.ch_names
+			pairs = get_diff_pairs(montage, ch_names)
+			# flip data
+			for el, pair in pairs.items():
+				data[ch_names.index(el)] = preflip[pair[0]] - preflip[pair[1]]
+
+		# do actual plotting
+		plot_topography(data,montage=montage,axes=ax,**kwargs)
+
+def plot_topography(X:np.array,ch_types:str='eeg',montage:str='biosemi64',
+					sfreq:int=512.0,**kwargs):
+
+	# create montage 
+	ch_names = mne.channels.make_standard_montage(montage).ch_names
+	info = mne.create_info(ch_names, ch_types=ch_types,sfreq=sfreq)
+	info.set_montage(montage)
+
+	# do actuall plotting
+	mne.viz.plot_topomap(X, info,**kwargs)
 			
 
 

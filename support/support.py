@@ -1,6 +1,5 @@
 import os
 import mne
-import scipy.sparse as sparse
 import warnings
 import itertools
 
@@ -13,6 +12,43 @@ from math import sqrt
 from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
+
+
+def get_diff_pairs(montage:str, ch_names:list)->dict:
+	"""Returns a dictionary that allows for the creation of a 
+	contralateral vs. ipsilateral topography, where left 
+	electrodes depict contra - ipsi, and right electrodes depict 
+	the inverse (it is assumed that left electrodes are contralateral
+	to the effect of interest). Scores on the vertical midline will be 
+	automatically set to zero.
+
+	Args:
+		montage (str): montage used during recording
+		ch_names (list): list of channel names
+
+	Returns:
+		idx_pairs (dict): Dictionary containing electrode pair indices per
+		electrode
+	"""
+
+	if montage == 'biosemi64':
+		pairs = {'Fp1':'Fp2','Fpz':'Fpz','AF7':'AF8','AF3':'AF4','AFz':'AFz',
+				'F7':'F8','F5':'F6','F3':'F4','F1':'F2','Fz':'Fz','FT7':'FT8',
+				'FC5':'FC6','FC3':'FC4','FC1':'FC2','FCz':'FCz','T7':'T8',
+				'C5':'C6','C3':'C4','C1':'C2','Cz':'Cz','TP7':'TP8',
+				'CP5':'CP6','CP3':'CP4','CP1':'CP2','CPz':'CPz','P9':'P10',
+				'P7':'P8','P5':'P6','P3':'P4','P1':'P2','Pz':'Pz',
+				'PO7':'PO8','PO3':'PO4','POz':'POz','O1':'O2','Oz':'Oz',
+				'Iz':'Iz'}
+
+	idx_pairs = {}
+	for contra, ipsi in pairs.items():
+		idx_pairs[contra] = (ch_names.index(contra), ch_names.index(ipsi))
+		if contra != ipsi:
+			idx_pairs[ipsi] = (ch_names.index(ipsi), ch_names.index(contra))
+
+	return idx_pairs
+
 
 def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 				eye_dict:dict,preproc_file:str=None)->\
@@ -49,12 +85,16 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 	"""
 
 	# initialize some parameters
-	if 'eye_window' not in eye_dict:
-		eye_dict['eye_window'] = (epochs.tmin, epochs.tmax)
+	if 'drift_correct' in eye_dict:
+		drift_correct = eye_dict['drift_correct'] 
+	else:
+		drift_correct = False
+	if 'window_oi' not in eye_dict:
+		eye_dict['window_oi'] = (epochs.tmin, epochs.tmax)
 	if 'eye_ch' not in eye_dict:
 		print('Eye channel is not specified in eyedict, using HEOG as default')
 		eye_dict['eye_ch'] = 'HEOG'
-	s, e = eye_dict['eye_window']
+	s, e = eye_dict['window_oi']
 	window_idx = get_time_slice(epochs.times,s,e)
 
 	# check whether selection should be based on eyetracker data
@@ -62,19 +102,29 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		tracker_bins = np.full(beh.shape[0], np.nan)
 		perc_tracker = 'no tracker'
 	else:
-		if 'dev' in epochs.ch_names:
-			angles = epochs._data[:,epochs.ch_names.index('dev'),window_idx]
-			if 'drift_correct' in  eye_dict:
-				nr_time = angles.shape[-1]
-				s, e = eye_dict['drift_correct']
-				idx = get_time_slice(epochs.times, s,e)
-				angles = np.array(np.matrix(angles) - np.matrix(angles[:,idx]).mean(axis = 1)).reshape(-1,nr_time)
-
+		if 'x' in epochs.ch_names:
+			x = epochs._data[:,epochs.ch_names.index('x')]
+			y = epochs._data[:,epochs.ch_names.index('y')]
+			times = epochs.times
+			from eeg_analyses.EYE import EYE, SaccadeGlissadeDetection
+			EO = EYE(sfreq = epochs.info['sfreq'],
+					viewing_dist = eye_dict['viewing_dist'],
+					screen_res = eye_dict['screen_res'],
+					screen_h = eye_dict['screen_h'])
+			angles = EO.angles_from_xy(x,y,times,drift_correct)
+			angles_oi = np.array(angles)[:,window_idx]
 			min_samples = 40 * epochs.info['sfreq']/1000 # 40 ms
-			tracker_bins = bin_tracker_angles(angles, eye_dict['angle_thresh'],
+			tracker_bins = bin_tracker_angles(angles_oi, eye_dict['angle_thresh'],
 							min_samples)
 			perc_tracker = np.round(sum(tracker_bins == 1)/ 
-						sum(tracker_bins < 2)*100,1)
+					sum(tracker_bins < 2)*100,1)
+		# temp code for docky				
+		elif 'eye_bins' in beh:
+			tracker_bins = beh.eye_bins.values
+			tracker_bins[tracker_bins <= eye_dict['angle_thresh']] = 0
+			tracker_bins[tracker_bins > eye_dict['angle_thresh']] = 1
+			perc_tracker = np.round(sum(tracker_bins == 1)/ 
+					sum(tracker_bins < 2)*100,1)
 		else:
 			perc_tracker = 'no tracker data found'
 			tracker_bins = np.full(beh.shape[0], np.nan)
@@ -99,7 +149,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 	if os.path.isfile(preproc_file):
 		print('Eye exclusion info saved in preprocessing file (at session 1')
 		idx = (sj, 1)
-		df = pd.read_csv(preproc_file, index_col=[0,1])
+		df = pd.read_csv(preproc_file, index_col=[0,1],on_bad_lines='skip')
 		df.loc[idx,'% tracker'] = str(perc_tracker)
 		df.loc[idx,'% eog'] = str(perc_eog)
 
@@ -107,10 +157,14 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		df.to_csv(preproc_file)
 
 	# remove trials from behavior and eeg
-	beh.reset_index(inplace = True)
+	if 'level_0' not in beh:
+		beh.reset_index(inplace = True)
+	else:
+		beh.drop('level_0', axis=1, inplace=True)
+		beh.reset_index(inplace = True, drop = True)
 	to_drop = np.where(tracker_bins >= 1 )[0]	
 	epochs.drop(to_drop, reason='eye detection')
-	beh.drop(to_drop, inplace = True)
+	beh.drop(to_drop, inplace = True, axis = 0)
 	beh.reset_index(inplace = True, drop = True)
 
 	return beh, epochs
@@ -200,6 +254,26 @@ def eog_filt(eog:np.array,sfreq:float,windowsize:int=200,
 	eye_trials = np.array(eye_trials, dtype = int)			
 
 	return eye_trials
+
+def trial_exclusion(beh, epochs, excl_factor):
+
+	mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
+	for m in mask: 
+		mask[0] = np.logical_or(mask[0],m)
+	mask = mask[0]
+
+	if mask.sum() > 0:
+		beh.reset_index(inplace = True, drop = True)
+		to_drop = np.where(mask)[0]
+		epochs.drop(to_drop, reason='trial exclusion')
+		beh.drop(to_drop, inplace = True)
+		beh.reset_index(inplace = True, drop = True)	
+		print('Dropped {} trials after specifying excl_factor'.format(sum(mask)))
+		print('NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN')
+	else:
+		print('Trial exclusion: no trials selected that matched specified criteria')
+
+	return beh, epochs
 
 def get_time_slice(times, start_time, end_time, include_final = False, step = None):
 
@@ -316,26 +390,7 @@ def log_preproc(idx, file, nr_sj = 1, nr_sessions = 1, to_update = None):
 	df.to_csv(file)
 
 
-def trial_exclusion(beh, eeg, excl_factor):
 
-
-	mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
-	for m in mask: 
-		mask[0] = np.logical_or(mask[0],m)
-	mask = mask[0]
-
-	if mask.sum() > 0:
-		beh.reset_index(inplace = True, drop = True)
-		to_drop = np.where(mask)[0]
-		eeg.drop(to_drop, reason='trial exclusion')
-		beh.drop(to_drop, inplace = True)
-		beh.reset_index(inplace = True, drop = True)	
-		print('Dropped {} trials after specifying excl_factor'.format(sum(mask)))
-		print('NOTE DROPPING IS DONE IN PLACE. PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN')
-	else:
-		print('Trial exclusion: no trials selected that matched specified criteria')
-
-	return beh, eeg
 
 def cnd_baseline(EEG, beh, cnds, cnd_header, base_period = (-0.1, 0), nr_elec = 64):
 	"""Does baselining per condition
