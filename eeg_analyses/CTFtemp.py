@@ -282,7 +282,7 @@ class CTF(BDM):
 			power_x (np.array): power extracted from 
 	
 		"""
-		if isinstance(band, list):
+		if isinstance(band, (list,tuple)):
 			power = abs(x)**2
 		else:
 			power = x
@@ -322,7 +322,7 @@ class CTF(BDM):
 						iir_params = dict(ftype = 'butterworth', order = 5))
 				epochs.apply_hilbert()
 				E = epochs._data
-				T = self.extract_power(E)
+				T = self.extract_power(E,band)
 			elif self.power == 'wavelet':
 				print('Method not yet implemented')
 				pass 

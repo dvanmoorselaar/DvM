@@ -453,18 +453,19 @@ class TF(FolderStructure):
 		'''
 
 		# read in data
-		eegs, beh = self.selectTFData(self.laplacian, factor)
-		times = self.EEG.times
+
+		eegs, beh = self.select_tf_data(factor, flip)
+		times = self.epochs.times
 		if elec_oi == 'all':
-			picks = mne.pick_types(self.EEG.info, eeg=True, exclude='bads')
-			ch_names = list(np.array(self.EEG.ch_names)[picks])
+			picks = mne.pick_types(self.epochs.info, eeg=True, exclude='bads')
+			ch_names = list(np.array(self.epochs.ch_names)[picks])
 		else:
 			ch_names = elec_oi	
 
 		# flip subset of trials (allows for lateralization indices)
 		if flip != None:
 			key = list(flip.keys())[0]
-			eegs = self.topoFlip(eegs, beh[key], self.EEG.ch_names, left = flip.get(key))
+			eegs = self.topoFlip(eegs, beh[key], self.epochs.ch_names, left = flip.get(key))
 
 		# get parameters
 		nr_time = eegs.shape[-1]
@@ -472,7 +473,7 @@ class TF(FolderStructure):
 		if method == 'wavelet':
 			wavelets, frex = self.createMorlet(min_freq = min_freq, max_freq = max_freq, num_frex = num_frex, 
 									cycle_range = cycle_range, freq_scaling = freq_scaling, 
-									nr_time = nr_time, s_freq = self.EEG.info['sfreq'])
+									nr_time = nr_time, s_freq = self.epochs.info['sfreq'])
 		
 		elif method == 'hilbert':
 			frex = [(i,i + 4) for i in range(min_freq, max_freq, 2)]
@@ -507,7 +508,7 @@ class TF(FolderStructure):
 			# loop over channels
 			for idx, ch in enumerate(ch_names[:nr_chan]):
 				# find ch_idx
-				ch_idx = self.EEG.ch_names.index(ch)
+				ch_idx = self.epochs.ch_names.index(ch)
 
 				print('Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)), end='\r')
 

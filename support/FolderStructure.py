@@ -195,6 +195,10 @@ class FolderStructure(object):
         beh = [pd.read_csv(file) for file in files]
         beh = pd.concat(beh)
 
+        # control for duplicate trial numbers
+        if len(files) > 1 and 'nr_trials' in beh:
+            nr_trials = beh.nr_trials.values
+
         return beh
 
     #@blockPrinting

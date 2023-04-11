@@ -108,9 +108,9 @@ class ERP(FolderStructure):
 
         return beh, epochs
 
-    def create_erps(self, epochs: mne.Epochs, beh: pd.DataFrame,
-                     idx: np.array = None, time_oi: tuple = None,
-                    erp_name: str = 'all', RT_split: bool = False):
+    def create_erps(self,epochs:mne.Epochs,beh:pd.DataFrame,idx:np.array=None, 
+                    time_oi:tuple=None,erp_name:str = 'all',
+                    RT_split:bool=False,save:bool=True):
         """
         Creates evoked objects using mne functionality
 
@@ -124,6 +124,8 @@ class ERP(FolderStructure):
             Defaults to 'all'.
             RT_split (bool, optional): If True data will also be analyzed 
             seperately for fast and slow trials. Defaults to False.
+            save (bool, optional): If False, rather than saving the 
+            evoked instance is returned 
         """
 
         beh = beh.iloc[idx].copy()
@@ -133,9 +135,14 @@ class ERP(FolderStructure):
         evoked = epochs.average().apply_baseline(baseline = self.baseline)
         # if specified select time window of interest
         if time_oi is not None:
-            evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1]) 
-        evoked.save(self.folder_tracker(['erp', self.header],
-                                        f'{erp_name}-ave.fif'))
+            evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1])
+        if save: 
+            evoked.save(self.folder_tracker(['erp', self.header],
+                                        f'{erp_name}-ave.fif'),
+                                        overwrite=True)
+        else:
+            return evoked
+
         # update report
         if self.report:
             self.report_erps(evoked, erp_name)
@@ -297,24 +304,37 @@ class ERP(FolderStructure):
 
             self.create_erps(epochs, beh, idx_c, time_oi, erp_name, RT_split)
 
-    def residual_eye(pos_info:dict,ch_oi:list=['HEOG'],cnds:dict=None,
-                    midline:dict=None,time_oi:tuple=None,excl_factor:dict=None,
-                    RT_split:bool=False,name:str='eye'):
+    def residual_eye(self,left_info:dict=None,right_info:dict=None,
+                    ch_oi:list=['HEOG'],cnds:dict=None,
+                    midline:dict=None,window_oi:tuple=None,
+                    excl_factor:dict=None,name:str='resid_eye'):
 
+        # set file name
+        erp_name= f'sj_{self.sj}_{name}.p'	
+        f_name = self.folder_tracker(['erp', 'eog'],erp_name)
         # get data
         beh, epochs = self.select_erp_data(excl_factor)
 
+        # get index of channels of interest
+        ch_oi_idx = [epochs.ch_names.index(ch) for ch in ch_oi]
+
+        # get window of interest
+        if window_oi is None:
+            window_oi = (epochs.tmin, epochs.tmax)
+        time_idx = get_time_slice(epochs.times, window_oi[0], window_oi[1])
+
         # split left and right trials
-        (header, labels), = pos_info.items()
-        idx_l = select_lateralization_idx(beh, {header:labels[0]}, midline)
-        if len(labels) > 1:
-            idx_r = select_lateralization_idx(beh, {header:labels[1]}, midline)
+        if left_info is not None:
+            idx_l = self.select_lateralization_idx(beh, left_info, midline)
+        if right_info is not None:
+            idx_r = self.select_lateralization_idx(beh, right_info, midline)            
 
        # loop over all conditions
         if cnds is None:
             cnds = ['all_data']
         else:
             (cnd_header, cnds), = cnds.items()
+        eye_dict = {cnd:[] for cnd in cnds}
 
         for cnd in cnds:
             # set erp name
@@ -329,7 +349,15 @@ class ERP(FolderStructure):
                 idx_c_l = np.intersect1d(idx_l, idx_c)
                 idx_c_r = np.intersect1d(idx_r, idx_c)
 
-            self.create_diff_wave()
+            # extract data
+            left_wave = epochs._data[idx_c_l][:,ch_oi_idx].mean(axis=(0,1))
+            right_wave = epochs._data[idx_c_r][:,ch_oi_idx].mean(axis=(0,1))
+            eye_wave = np.mean((left_wave, right_wave*-1), axis = 0)
+            eye_dict[cnd] = eye_wave[time_idx]
+
+        # save data
+        pickle.dump(eye_dict, open(f_name, 'wb'))
+
 
     def create_diff_wave(self,epochs:mne.Epochs,idx:np.array,
                         contra_elec:list,ipsi_elec:list)->np.array:

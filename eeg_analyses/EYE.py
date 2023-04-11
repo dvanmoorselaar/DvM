@@ -138,7 +138,7 @@ class EYE(FolderStructure):
 		blinks = trial['events']['Eblk']
 		x = np.array(trial['x'])
 		y = np.array(trial['y'])
-		if not blinks:
+		if not np.any(x):
 			return x, y	
 
 		#pad 100ms before and after blink
@@ -185,8 +185,8 @@ class EYE(FolderStructure):
 		x = np.zeros((len(eye),times.size))
 		y = np.copy(x)
 		# look for start_event in all logged events
-
 		for i, trial in enumerate(eye):
+			print(i)
 			for event in trial['events']['msg']:
 				if start_event in event[1]:
 
@@ -240,20 +240,17 @@ class EYE(FolderStructure):
 		SD = SaccadeGlissadeDetection(self.sfreq)
 
 		# check whether x,y contain missing data at start and/or end trial
-		mask = x[0] > 0
-		for i in range(1, x.shape[0]):
-			if all(x[i] == 0):
-				continue
-			mask = np.logical_and(mask,  x[i] > 0)
+		mask = np.ones(x.shape[1],dtype = bool)
+		for i in range(mask.size):
+			if not np.any(x[:,i]):
+				mask[i] = False
 
 		# set blink and noise trials to nan
 		for i, (x_, y_) in enumerate(zip(x[:,mask],y[:,mask])):
-
-			V, A = SD.calcVelocity(x_,y_)
-			x_, y_, V, A = SD.noiseDetect(x_, y_, V, A)
-
+			V, A = SD.calcVelocity(x_.copy(),y_.copy())
+			x_,y_,V,A = SD.noiseDetect(x_.copy(),y_.copy(),V.copy(),A.copy())
 			if drift_correct:
-				idx = get_time_slice(times, drift_correct[0], drift_correct[1])
+				idx = get_time_slice(times[mask], drift_correct[0], drift_correct[1])
 				x_d = np.array(x_[idx])
 				y_d = np.array(y_[idx])
 				#fix_d = np.mean(np.sqrt((self.scr_res[0]/2-x_d)**2 + 

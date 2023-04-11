@@ -23,6 +23,9 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from scipy.stats import zscore
+from mne import BaseEpochs
+from mne.io import BaseRaw
+
 
 from typing import Optional, Generic, Union, Tuple, Any
 from termios import tcflush, TCIFLUSH
@@ -53,28 +56,28 @@ def blockPrinting(func):
 
     return func_wrapper
 
-class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
+class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
     '''
     Child originating from MNE built-in RawEDF, such that new methods can be added to this built in class
     '''
 
-    def __init__(self, input_fname, eog=None, stim_channel=-1,
-                exclude=(), preload=True, verbose=None):
+    def __init__(self,input_fname,eog=None,stim_channel=-1,
+                exclude=(),preload=True,verbose=None):
 
-        super(RawBDF, self).__init__(input_fname=input_fname, eog=eog,
-                                     stim_channel=stim_channel, preload=preload, verbose=verbose)
-
+        super(RawEEG, self).__init__(input_fname=input_fname,eog=eog,
+                                    stim_channel=stim_channel,preload=preload, 
+                                    verbose=verbose)
+  
     def report_raw(self, report, events, event_id):
         '''
 
         '''
 
         # report raw
-        report.add_raw(self, title='raw EEG', psd=True )
+        report.add_raw(self, title='raw EEG',psd=True)
         # and events
         events = events[np.in1d(events[:,2], event_id)]
         report.add_events(events, title = 'detected events', sfreq = self.info['sfreq'])
-
 
         return report
 
@@ -320,7 +323,7 @@ class RawBDF(mne.io.edf.edf.RawEDF, FolderStructure):
 
         return beh, missing
 
-class Epochs(mne.Epochs, FolderStructure):
+class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
     '''
     Epochs extracted from a Raw instance. Child class based on mne built-in
     Epochs, such that extract functionality can be added to this base class.
@@ -363,6 +366,8 @@ class Epochs(mne.Epochs, FolderStructure):
                                     metadata=metadata,
                                     event_repeated=event_repeated,
                                     verbose=verbose)
+
+
 
     def align_meta_data(self, events: np.array,  trigger_header: str='trigger',
                         headers: list=[], idx_remove: np.array=None,
@@ -434,6 +439,14 @@ class Epochs(mne.Epochs, FolderStructure):
             bdf_triggers = np.delete(bdf_triggers, idx_remove)
 
         # check alignment
+        session_switch = np.diff(beh.nr_trials) < 1
+        if sum(session_switch) > 0:
+            idx = np.where(session_switch)[0]+1
+            trial_split = np.array_split(beh.nr_trials.values,idx)
+            for i in range(1,len(trial_split)):
+                trial_split[i] += trial_split[i-1][-1]
+            beh.nr_trials = np.hstack(trial_split)
+            
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
         if nr_miss > 0:
@@ -520,7 +533,7 @@ class Epochs(mne.Epochs, FolderStructure):
         if missing is not None:
             report.add_html(missing, title = 'missing trials in beh')
 
-        report.add_epochs(self, title=title)
+        report.add_epochs(self, title=title, psd = True)
 
         return report
 
@@ -949,13 +962,16 @@ class Epochs(mne.Epochs, FolderStructure):
             'renamed EOG channels')
             
         # if eye tracker data exists align x, y eye tracker with eeg
-        ext = eye_info['tracker_ext']
+        if eye_info is not None:
+            ext = eye_info['tracker_ext']
+        else:
+            ext = '.asc'
         eye_files = glob.glob(self.folder_tracker(ext = ['eye','raw'], \
-					fname = f'sub_{self.sj}_session_{self.session}*'
-                    f'.{ext}') )
+                fname = f'sub_{self.sj}_session_{self.session}*'
+                f'.{ext}') )
         beh_files = glob.glob(self.folder_tracker(ext=[
-                    'beh', 'raw'],
-                    fname=f'subject-{self.sj}_session_{self.session}*.csv'))
+                'beh', 'raw'],
+                fname=f'subject-{self.sj}_session_{self.session}*.csv'))
         eye_files = sorted(eye_files)
         beh_files = sorted(beh_files)
 
@@ -975,7 +991,15 @@ class Epochs(mne.Epochs, FolderStructure):
                             eye_info['stop'],eye_info['window_oi'], 
                             eye_info['trigger_msg'],
                             eye_info['drift_correct'])
-
+               
+            # check alignment
+            session_switch = np.diff(trial_inf) < 1
+            if sum(session_switch) > 0:
+                idx = np.where(session_switch)[0]+1
+                trial_split = np.array_split(trial_inf,idx)
+                for i in range(1,len(trial_split)):
+                    trial_split[i] += trial_split[i-1][-1]
+                trial_inf = np.hstack(trial_split)
             # check whether missing trials in trial_info
             drop_eye = False
             remove = np.intersect1d(missing, trial_inf)
@@ -1380,6 +1404,7 @@ class ArtefactReject(object):
 
         while True:
             if report is not None:
+                pass
                 report.add_ica(
                     ica=ica,
                     title='ICA blink cleaning',

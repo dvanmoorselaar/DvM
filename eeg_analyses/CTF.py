@@ -449,6 +449,7 @@ class CTF(BDM):
 	def set_frequencies(self, freqs):
 		# DOUBLE CHECK THIS: self.power=='band'???
 
+		embed()
 		if freqs == 'main_param':
 			if self.freq_scaling == 'log':
 				frex = np.logspace(np.log10(self.min_freq), 

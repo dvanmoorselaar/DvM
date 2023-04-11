@@ -28,7 +28,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     report = mne.Report(title='preprocessing overview', subject = f'{sj}_{session}')
 
     # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME 
-    EEG = mne.concatenate_raws([RawBDF(FS.folder_tracker(ext=['raw_eeg'], 
+    EEG = mne.concatenate_raws([RawEEG(FS.folder_tracker(ext=['raw_eeg'], 
                      fname=f'subject_{sj}_session_{session}_{run}.bdf'),
                      preload=True, eog=eog) for run in eeg_runs])
             
@@ -63,7 +63,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
             tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, 
             reject_by_annotation = False) 
-    report.add_epochs(epochs, title='initial epoch')
+    report.add_epochs(epochs, title='initial epoch', psd = True)
     report.save(report_file, overwrite = True)
 
     # ICA
@@ -87,7 +87,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
 
     # START AUTOMATIC ARTEFACT REJECTION 
     if preproc_param['run_autoreject']:
-        drop_bads = sj_info['drop_bads'] if 'drop_bads' in sj_info.keys() else False
+        drop_bads = preproc_param['drop_bads'] if 'drop_bads' in preproc_param.keys() else True
         epochs,z_thresh,report = AR.auto_repair_noise(epochs,drop_bads,report=report)
         report.save(report_file, overwrite = True)
     else:
@@ -97,7 +97,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     bads = epochs.info['bads']   
     epochs.interpolate_bads(reset_bads=True, mode='accurate')
 
-    report.add_epochs(epochs, title='Epochs after artefact reject')    
+    report.add_epochs(epochs, title='Epochs after artefact reject',psd = True)    
     report.save(report_file, overwrite = True)
 
     # save

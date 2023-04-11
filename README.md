@@ -28,6 +28,7 @@ The necessary steps are outlined below:
 9. pip install -U autoreject
 In case you want to make use of picard during ica
 10. pip install python-picard
+11. pip install openpyxl
 
 
 ## Folderstructure
@@ -36,7 +37,7 @@ Analysis are run from specfic project scripts (e.g. Wholevspartial.py). To make 
 on your own computer within this script you have to make sure that the project folder is specified.
 This folder needs to contain the following subfolders:
 
-1. raw (with raw eeg file)
+1. raw_eeg (with raw eeg file)
 2. beh/raw (raw behavior files .csv)
 3. eye/raw (raw eye files if available .asc or .tsv)
 

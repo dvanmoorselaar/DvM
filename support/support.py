@@ -135,13 +135,15 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		eye_ch = eye_dict['eye_ch']
 		eog = epochs._data[nan_idx,epochs.ch_names.index(eye_ch),window_idx]
 		if 'step_param' not in eye_dict:
-			size, step, thresh = (200, 10, 100e-6)
+			size, step, thresh = (200, 10, 15e-6)
 		else:
 			size, step, thresh = eye_dict['step_param']
 		idx_art = eog_filt(eog,sfreq = epochs.info['sfreq'], windowsize = size, 
 								windowstep = step, thresh = thresh)
 		tracker_bins[nan_idx[idx_art]] = 2
 		perc_eog = np.round(sum(tracker_bins == 2)/ nan_idx.size*100,1)
+		print('{} trials missing eyetracking'.format(len(nan_idx)))
+		print('data (used eog instead')
 	else:
 		perc_eog = 'eog not used for exclusion'
 
@@ -198,7 +200,7 @@ def bin_tracker_angles(angles:np.array,thresh:float,min_samp:float)->np.array:
 		# check whether a segment exceeds min duration
 		if np.where(np.array([s.size for s in segments])>min_samp)[0].size > 0:
 			tracker_bins.append(1)
-		elif not np.any(angle):
+		elif np.any(np.isnan(angle)):
 			tracker_bins.append(np.nan)
 		else:
 			tracker_bins.append(0)
