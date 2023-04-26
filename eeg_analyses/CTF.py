@@ -361,6 +361,7 @@ class CTF(BDM):
 			W (np.array): weight matrix
 		"""
 
+		embed()
 		# apply forward model
 		B1 = train_X
 		B2 = test_X

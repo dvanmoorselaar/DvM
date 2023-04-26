@@ -369,9 +369,9 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
 
 
 
-    def align_meta_data(self, events: np.array,  trigger_header: str='trigger',
-                        headers: list=[], idx_remove: np.array=None,
-                        del_practice: bool = True):
+    def align_meta_data(self,events:np.array,trigger_header:str='trigger',
+                        headers:list=[],idx_remove:np.array=None,
+                        del_practice:bool=True):
         """
         Aligns epoched data with behavioral data as stored in a .csv file. The
         .csv file should contains all behavioral parameters organised in
@@ -385,7 +385,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         In case of a mismatch between detected eeg events and behavioral data
         (i.e., rows in .csv file) as a result of missing eeg events, trials
         are removed from the behavioral metadata to align datasets (see
-        info inpreprocessing report).
+        info in preprocessing report).
 
         Args:
             events (np.array): event info as returned by RAW.event_selection
@@ -402,8 +402,9 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
 
         Raises:
             ValueError: In case behavior and eeg data do not align
-             (i.e., contain different trial numbers). If there are more behavior
-            trials than epochs,raises an error in case there is no column
+             (i.e., contain different trial numbers). If there are more 
+             behavior trials than epochs,raises an error in case there is 
+             no column
             'nr_trials', which prevents informed alignment of eeg and behavior.
             Also raises an error if there are too many epochs and automatic
             allignment fails
@@ -420,9 +421,19 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         beh = self.read_raw_beh(self.sj, self.session)
         beh = beh[headers]
 
+        # get eeg triggers in epoched order
+        bdf_triggers = events[self.selection, 2]
+
         # remove practice trials
         if del_practice and 'practice' in headers:
             nr_remove = beh[beh.practice == 'yes'].shape[0]
+            # check whether bdf and practice triggers overlap
+            practice_triggers = beh[trigger_header].values[:nr_remove]
+            if all(practice_triggers == bdf_triggers[:nr_remove]):
+                self.drop(np.arange(nr_remove))    
+                report_str += (f'{nr_remove} practice events removed'
+                           ' based on automatic detection')
+                bdf_triggers = np.delete(bdf_triggers, np.arange(nr_remove))
             print(f'{nr_remove} practice trials removed from behavior')
             beh = beh[beh.practice == 'no']
             beh = beh.drop(['practice'], axis=1)
@@ -430,7 +441,6 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         beh_triggers = beh[trigger_header].values
 
         # get eeg triggers in epoched order
-        bdf_triggers = events[self.selection, 2]
         if idx_remove is not None:
             self.drop(idx_remove)
             nr_remove = idx_remove.size

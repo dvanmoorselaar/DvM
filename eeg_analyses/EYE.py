@@ -186,7 +186,6 @@ class EYE(FolderStructure):
 		y = np.copy(x)
 		# look for start_event in all logged events
 		for i, trial in enumerate(eye):
-			print(i)
 			for event in trial['events']['msg']:
 				if start_event in event[1]:
 
@@ -238,7 +237,7 @@ class EYE(FolderStructure):
 		'''	
 
 		SD = SaccadeGlissadeDetection(self.sfreq)
-
+		embed()
 		# check whether x,y contain missing data at start and/or end trial
 		mask = np.ones(x.shape[1],dtype = bool)
 		for i in range(mask.size):
@@ -286,7 +285,7 @@ class EYE(FolderStructure):
 		# read in eye data (linked to behavior)
 		print('reading in eye tracker data')
 		eye, beh, trial_info = self.get_eye_data('', eye_file, beh_file, start_trial, trigger_msg,stop_trial)
-		
+
 		# collect x, y data 
 		x, y, times = self.get_xy(eye, window_oi[0], window_oi[1], trigger_msg)	
 		# apply drift correction if specified

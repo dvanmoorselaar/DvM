@@ -48,10 +48,12 @@ class CTF(BDM):
 
 	def __init__(self,sj:int,epochs:mne.Epochs,beh:pd.DataFrame, 
 				to_decode:str,nr_bins:int,nr_chans:int,nr_iter:int=10, 
-				nr_blocks:int=3,elec_oi:Union[str,list]='all', 
-				delta:bool=False,method:str='Foster',avg_ch:bool=True,
-				ctf_param:bool=True,power:str='band',min_freq:int=4,
-				max_freq:int=40,num_frex:int=25,freq_scaling:str='log'):
+				nr_blocks:int=3,elec_oi:Union[str,list]='all',
+				sin_power = 7,delta:bool=False,method:str='Foster',
+				avg_ch:bool=True,ctf_param:bool=True,power:str='band',
+				min_freq:int=4,max_freq:int=40,num_frex:int=25,
+				freq_scaling:str='log',slide_window:int=0,
+				laplacian:bool=False,pca_cmp:int=10):
 		''' 
 		
 		Arguments
@@ -94,9 +96,90 @@ class CTF(BDM):
 		self.max_freq = max_freq
 		self.num_frex = num_frex
 		self.freq_scaling = freq_scaling
+		self.slide_wind = slide_window
+		self.laplacian = laplacian
+		self.pca=pca_cmp
 		# hypothesized set tuning functions underlying power measured across electrodes
-		self.basisset = self.calculateBasisset(self.nr_bins, self.nr_chans, 
-											  delta = delta)
+		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans, 
+											  sin_power,delta)
+
+	def calculate_basis_set(self,nr_bins:int,nr_chans:int, 
+			 				sin_power:int,delta:bool)->np.array:
+		"""
+		calculateBasisset returns a basisset that is used to reconstruct 
+		location-selective CTFs from the topographic distribution 
+		of oscillatory power across electrodes. It is assumed that power 
+		measured at each electrode reflects the weighted sum of 
+		a specific number of spatial channels (i.e. neural populations), 
+		each tuned for a different angular location. 
+
+		The basisset either assumes a particular shape of the CTF. 
+		In this case the profile of each channel across angular 
+		locations is modeled as a half sinusoid raised to the sin_power, 
+		given by: 
+
+		R = sin(0.50)**sin_power
+
+		, where 0 is angular location and R is response of the spatial 
+		channel in arbitrary units. If no shape is assumed the channel 
+		response for each target position is set to 1, while setting all 
+		the other channel response to 0 (delta function).
+
+		The R is then circularly shifted for each channel such that the 
+		peak response of each channel is centered over one of the 
+		location bins.
+		
+		Arguments
+		- - - - - 
+		nr_bins (int): 
+		nr_chans(int): assumed nr of spatial channels 
+		sin_power (int): power for sinussoidal function
+
+		Returns
+		- - - -
+		bassisset(array): set of basis functions used to predict channel 
+		responses in forward model
+		'''
+
+		Args:
+			nr_bins (int, optional): nr of spatial locations to decode. 
+			nr_chans (int, optional): assumed nr of spatial channels. 
+			sin_power (int, optional): power for sinussoidal function. 
+			delta (bool, optional): defines whether the ctf has a 
+			particular shape (as set by sin_power), or alternatively is 
+			a stick function. 
+
+		Returns:
+			bassisset (np.array): basisset used in during forward 
+			encoding
+		"""
+
+
+		# specify basis set
+		if nr_bins % 2 == 0:
+			x = np.linspace(0, 2*pi - 2*pi/nr_bins, nr_bins)
+		else:
+			x = np.linspace(0, 2*pi - 2*pi/nr_bins, nr_bins) + np.deg2rad(180/nr_bins)
+
+		c_centers = np.linspace(0, 2*pi - 2*pi/nr_chans, nr_chans)			
+		c_centers = np.rad2deg(c_centers)
+		
+		if delta:
+			pred = np.zeros(nr_bins)
+			pred[-1] = 1
+		else:
+			pred = np.sin(0.5*x)**sin_power									# hypothetical channel responses
+		
+		if nr_bins % 2 == 0:											# shift the initial basis function	
+			pred = np.roll(pred,nr_chans - (np.argmax(pred) + 1))
+		else:
+			pred = np.roll(pred,np.argmax(pred))	
+
+		basisset = np.zeros((nr_chans,nr_bins))
+		for c in range(nr_chans):
+			basisset[c,:] = np.roll(pred,c+1)
+	
+		return basisset	
 
 	def select_ctf_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
 						elec_oi: Union[list, str]=  'all',
@@ -123,6 +206,9 @@ class CTF(BDM):
 		# if specified remove trials matching specified criteria
 		if excl_factor is not None:
 			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+
+		if self.laplacian:
+			epochs = mne.preprocessing.compute_current_source_density(epochs)
 
 		# limit analysis to electrodes of interest
 		picks = select_electrodes(epochs.ch_names, elec_oi) 
@@ -371,14 +457,26 @@ class CTF(BDM):
 			W (np.array): weight matrix
 		"""
 
+		# check input shapes and adjust data shapes if needed
+		## TODO: potentially remove
+		if train_X.ndim == 3:
+			train_X = train_X.mean(axis=-1)
+			test_X = test_X.mean(axis=-1)
+
 		# apply forward model
 		B1 = train_X
 		B2 = test_X
+
+		if self.pca:
+			pca = PCA(n_components=self.pca, svd_solver = 'full').fit(B1)
+			B1 = pca.transform(B1)
+			B2 = pca.transform(B2)
+
 		# estimate weight matrix W (nr_chans x nr_electrodes)
 		W, resid_w, rank_w, s_w = np.linalg.lstsq(C1,B1, rcond = -1)
 		# estimate channel response C2 (nr_chans x nr test blocks)		
-		C2, resid_c, rank_c, s_c = np.linalg.lstsq(W.T,B2.T, rcond = -1)	 
-
+		C2, resid_c, rank_c, s_c = np.linalg.lstsq(W.T,B2.T, rcond = -1)	
+		
 		# TRANSPOSE C2 so that we average across channels 
 		# rather than across position bins
 		C2 = C2.T
@@ -423,19 +521,26 @@ class CTF(BDM):
 
 		# initialize arrays
 		_, nr_elec, nr_samples = E_train.shape
-		C2_E = np.zeros((nr_samples, self.nr_bins, self.nr_chans))
-		W_E =  np.zeros((nr_samples, self.nr_bins, nr_elec))
+		nr_bins = self.nr_bins
+		C2_E = np.zeros((nr_samples-self.slide_wind, nr_bins, self.nr_chans))
+		W_E =  np.zeros((nr_samples-self.slide_wind, nr_bins,nr_elec))
 		C2_T, W_T = C2_E.copy(), W_E.copy()
 
 		# TODO: parallelize loop
-		for t in range(nr_samples):
+		# TODO: potentially remove
+		for t in range(nr_samples-self.slide_wind):
 			# evoked power model fit
-			C2_E[t], W_E[t] = self.forward_model(E_train[:,:,t],
-												 E_test[:,:,t], C1)
+			c2_e, w_e = self.forward_model(E_train[...,t:t+1+self.slide_wind],
+											E_test[...,t:t+1+self.slide_wind], 
+											C1)			
+			
+			C2_E[t], W_E[t,:,:w_e.shape[1]] = c2_e, w_e
 
 			# total power model fit
-			C2_T[t], W_T[t] = self.forward_model(T_train[:,:,t], 
-												T_test[:,:,t], C1)
+			c2_t, w_t = self.forward_model(T_train[...,t:t+1+self.slide_wind], 
+											T_test[...,t:t+1+self.slide_wind], 
+											C1)
+			C2_T[t], W_T[t,:,:w_t.shape[1]] = c2_t, w_t
 
 		return C2_E, W_E, C2_T, W_T
 
@@ -483,8 +588,20 @@ class CTF(BDM):
 		min_obs = min(counts)
 		train_idx = [np.random.choice(train_idx[train_bins==b],min_obs,False) 
 															for b in bins]
-		# add new axis so that trial indexing does not crash
-		train_idx = np.stack(train_idx)[None,:,None,:]
+		#randomly split training blocks in half for each iteration
+		train_idx = np.stack(train_idx)[:,None,:]
+		split_arrays = []
+		if train_idx.shape[-1] % 2 == 0:
+			to_split = train_idx.shape[-1] 
+		else:
+			to_split = train_idx.shape[-1] -1 
+		split = to_split // 2
+		for i in range(self.nr_iter):
+			split_idx = np.random.permutation(train_idx.shape[-1])[:split*2]
+			splitted = np.split(train_idx[..., split_idx],[split],axis=-1)
+			split_arrays.append(np.concatenate(splitted, axis=1))
+		
+		train_idx = np.stack(split_arrays)
 
 		# select test data (ensure that number of bins is balanced)
 		test_bins = pos_bins[test_idx]
@@ -505,6 +622,8 @@ class CTF(BDM):
 					test_idx[int(bin)] = idx[bin_cnt]
 					bin_cnt += 1
 			test_idx = test_idx[None,:,None,:]
+
+		test_idx = np.tile(test_idx, (self.nr_iter, 1, 1, 1))
 
 		return train_idx, test_idx
 
@@ -646,10 +765,7 @@ class CTF(BDM):
 			train_cnds, test_cnd = self.check_cnds_input(cnds)
 			if test_cnd is not None:
 				self.cross = True
-				print('cross time decoding only requires a single fold:' 
-					' nr_blocks and nr_iter is reset to 1')
-				self.nr_blocks = 2 # in effect equal to 1 (see below)
-				nr_itr = 1
+				nr_itr = self.nr_iter
 		else:
 			train_cnds = ['all_data']
 			
@@ -672,9 +788,11 @@ class CTF(BDM):
 
 				# preallocate arrays
 				C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-								nr_samples, self.nr_bins, self.nr_chans))
+								nr_samples-self.slide_wind,self.nr_bins, 
+								self.nr_chans))
 				W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-								nr_samples, self.nr_chans, nr_elec))							 
+								nr_samples-self.slide_wind, self.nr_chans, 
+								nr_elec))							 
 				C2_T, W_T  = C2_E.copy(), W_E.copy()				 
 	
 				# partition data into training and testing sets
@@ -1061,59 +1179,6 @@ class CTF(BDM):
 											nr_freq,nr_samples)
 
 		return ctf_param
-
-	def calculateBasisset(self, nr_bins = 8, nr_chans = 8, sin_power = 7, delta = False):
-		'''
-		calculateBasisset returns a basisset that is used to reconstruct location-selective CTFs from the topographic distribution 
-		of oscillatory power across electrodes. It is assumed that power measured at each electrode reflects the weighted sum of 
-		a specific number of spatial channels (i.e. neural populations), each tuned for a different angular location. 
-
-		The basisset either assumes a particular shape of the CTF. In this case the profile of each channel across angular locations 
-		is modeled as a half sinusoid raised to the sin_power, given by: 
-
-		R = sin(0.50)**sin_power
-
-		, where 0 is angular location and R is response of the spatial channel in arbitrary units. If no shape is assumed the channel 
-		response for each target position is set to 1, while setting all the other channel response to 0 (delta function).
-
-		The R is then circularly shifted for each channel such that the peak response of each channel is centered over one of the location bins.
-		
-		Arguments
-		- - - - - 
-		nr_bins (int): nr of spatial locations to decode
-		nr_chans(int): assumed nr of spatial channels 
-		sin_power (int): power for sinussoidal function
-
-		Returns
-		- - - -
-		bassisset(array): set of basis functions used to predict channel responses in forward model
-		'''
-
-		# specify basis set
-		if nr_bins % 2 == 0:
-			x = np.linspace(0, 2*pi - 2*pi/nr_bins, nr_bins)
-		else:
-			x = np.linspace(0, 2*pi - 2*pi/nr_bins, nr_bins) + np.deg2rad(180/nr_bins)
-
-		c_centers = np.linspace(0, 2*pi - 2*pi/nr_chans, nr_chans)			
-		c_centers = np.rad2deg(c_centers)
-		
-		if delta:
-			pred = np.zeros(nr_bins)
-			pred[-1] = 1
-		else:
-			pred = np.sin(0.5*x)**sin_power									# hypothetical channel responses
-		
-		if nr_bins % 2 == 0:											# shift the initial basis function	
-			pred = np.roll(pred,nr_chans - (np.argmax(pred) + 1))
-		else:
-			pred = np.roll(pred,np.argmax(pred))	
-
-		basisset = np.zeros((nr_chans,nr_bins))
-		for c in range(nr_chans):
-			basisset[c,:] = np.roll(pred,c+1)
-	
-		return basisset	
 
 	def forwardModel(self, train_X, test_X, C1):
 		'''
