@@ -800,10 +800,16 @@ class BDM(FolderStructure):
 			beh (pd.DataFrame): updated behavior dataframe 
 		"""
 
-		if self.avg_trials == 1:
+		# get averaging info
+		if isinstance(self.avg_trials, list):
+			avg_trials = self.avg_trials[-1]
+		else:
+			avg_trials = self.avg_trials
+
+		if avg_trials == 1:
 			return epochs, beh
 
-		print(f'Averaging across {self.avg_trials} trials')
+		print(f'Averaging across {avg_trials} trials')
 
 		# initiate condition and label list
 		cnds, labels, X = [], [], []
@@ -834,8 +840,8 @@ class BDM(FolderStructure):
 			# select subset of data and average across random selection
 			avg_idx = beh.query(df_filt).index.values
 			random.shuffle(avg_idx)
-			avg_idx = [avg_idx[i:i+self.avg_trials] 
-						for i in np.arange(0,avg_idx.size, self.avg_trials)]
+			avg_idx = [avg_idx[i:i+avg_trials] 
+						for i in np.arange(0,avg_idx.size, avg_trials)]
 			X += [epochs._data[idx].mean(axis = 0) for idx in avg_idx]
 			labels  += [var_combo[self.to_decode]] * len(avg_idx)
 			cnds += [var_combo[cnd_header]] * len(avg_idx)
@@ -1130,8 +1136,11 @@ class BDM(FolderStructure):
 			te_header = self.to_decode
 
 		# set train data
+		if isinstance(self.avg_trials, list):
+			self.avg_trials += [self.avg_trials[0]]
 		print('prepare training data')
 		(X_tr, 
+		_,
 		beh_tr, 
 		times_tr) = self.select_bdm_data(self.epochs[0].copy(),
 										self.beh[0].copy(),tr_window_oi,
@@ -1144,13 +1153,15 @@ class BDM(FolderStructure):
 			GAT = True
 
 		# set testing data
+		if isinstance(self.avg_trials, list):
+			self.avg_trials += [self.avg_trials[1]]
 		print('prepare testing data')
 		(X_te, 
+		y_te,	
 		beh_te, 
 		times_te) = self.select_bdm_data(self.epochs[1].copy(),
 										self.beh[1].copy(),te_window_oi,
 										te_excl_factor,cnd_header)
-		y_te = beh_te[te_header]
 
 		# check labels
 		if labels_oi == 'all':
@@ -1187,9 +1198,9 @@ class BDM(FolderStructure):
 			if GAT:
 				class_acc = np.empty((self.avg_runs, nr_perm,
 								times_tr.size, times_te.size)) * np.nan
-				label_inf = np.empty((self.avg_runs, nr_perm, 
+				conf_matrix = np.empty((self.avg_runs, nr_perm, 
 								times_tr.size, times_te.size, 
-								nr_tests, 2+labels.size)) * np.nan
+								labels.size, labels.size)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									times_tr.size, times_te.size, 
 									nr_elec)) * np.nan
@@ -1197,8 +1208,9 @@ class BDM(FolderStructure):
 				#TODO: check whether time assignment works
 				class_acc = np.empty((self.avg_runs,nr_perm,
 								times_te.size)) * np.nan	
-				label_inf = np.empty((self.avg_runs,nr_perm, 
-								times_te.size,nr_tests,2+labels.size)) * np.nan
+				conf_matrix = np.empty((self.avg_runs, nr_perm, 
+								times_tr.size, labels.size, 
+								labels.size)) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									times_te.size, nr_elec)) * np.nan
 
@@ -1226,19 +1238,20 @@ class BDM(FolderStructure):
 						(Xte, _, 
 						Yte, _) = self.train_test_cross(X_te, y_te, 
 														cnd_idx_te, False)
-														
+						
 						(class_acc[run, p], 
-						label_inf[run,p],
-						weights[run, p],_) = self.cross_time_decoding(Xtr, Xte, 
+						weights[run, p],
+						conf_matrix[run,p]) = self.cross_time_decoding(Xtr,Xte, 
 																	Ytr, Yte, 
 																	labels, 
 																	GAT, Xtr)
-						
+												
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
 				mean_class = class_acc.mean(axis = 0)
-				label_inf = np.squeeze(label_inf[0,0])	
+				conf_M = conf_matrix.mean(axis = 0)
+				#conf_matrix = np.squeeze(conf_matrix[0,0])	
 				# bdm_scores.update({cnd:{'dec_scores': 
 				# 						copy.copy(np.squeeze(mean_class[0]))},
 				# 						'label_inf':copy.copy(label_inf)})
