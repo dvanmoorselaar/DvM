@@ -285,18 +285,18 @@ class BDM(FolderStructure):
 		if collapse:
 			beh['collapsed'] = 'no'
 			cnds += ['collapsed']
-						
-		# set up dict to save decoding scores
-		bdm_scores = {'info':{'elec':self.elec_oi,'times':times}}
-		bdm_params = {}
 
 		# set bdm_name
-		bdm_name = f'sj_{self.sj}_{bdm_name}'
+		bdm_name = f'sj_{self.sj}_{bdm_name}'				
 		
+		# set up dict to save decoding scores
+		bdm_params = {}
+
 		(bdm_scores, 
 		bdm_params, 
 		bdm_info) = self.classify_(X,y,beh,cnds,cnd_head,max_tr,labels_oi,
 					collapse,GAT,nr_perm,test_cnd)
+		bdm_scores.update({'info':{'elec':self.elec_oi,'times':times}})
 	
 		# create report (specific to unpermuted data)
 		if not GAT:
@@ -360,6 +360,7 @@ class BDM(FolderStructure):
 									nr_time, labels.size,labels.size))	
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
+			#TODO: check position of permutation loop
 			for p in range(nr_perm):
 
 				if p > 0: # shuffle condition labels
@@ -1118,11 +1119,13 @@ class BDM(FolderStructure):
 	def localizer_classify(self,te_header:str=None,te_cnds:dict=None,
 						tr_window_oi:tuple=None,te_window_oi:tuple=None,
 						tr_excl_factor:dict=None,te_excl_factor:dict=None,
-						labels_oi:Union[str,list]='all',
+						labels_oi_tr:Union[str,list]='all',
+						labels_oi_te:Union[str,list]='all',
 						GAT:bool=False,nr_perm:int=0,save:bool=True,
 						bdm_name:str='loc_dec'):
 
 		# set parameters
+		bdm_params = {}
 		self.nr_folds = 1
 		max_tr = [1]
 		if te_cnds is None:
@@ -1130,7 +1133,7 @@ class BDM(FolderStructure):
 			cnds = ['all_data']
 			cnd_header = None
 		else:
-			(cnd_header, cnds), = cnds.items()
+			(cnd_header, cnds), = te_cnds.items()
 
 		if te_header is None:
 			te_header = self.to_decode
@@ -1164,12 +1167,21 @@ class BDM(FolderStructure):
 										te_excl_factor,cnd_header)
 
 		# check labels
-		if labels_oi == 'all':
-			labels_oi = np.unique(y_te)
-		mask = np.in1d(beh_tr[self.to_decode], labels_oi)
-		y_tr = beh_tr[self.to_decode][mask].reset_index(drop = True)
-		X_tr = X_tr[mask]
+		if labels_oi_tr == 'all':
+			labels_oi_tr = np.unique(beh_tr[self.to_decode])
+		if labels_oi_te == 'all':
+			labels_oi_te = np.unique(y_te)
+
+		# seperate for train 
+		mask_tr = np.in1d(beh_tr[self.to_decode], labels_oi_tr)
+		y_tr = beh_tr[self.to_decode][mask_tr].reset_index(drop = True)
+		X_tr = X_tr[mask_tr]
 		cnd_idx_tr = np.arange(y_tr.size)
+
+		# # and test data
+		# mask_te = np.in1d(y_te, labels_oi_te)
+		# y_te = y_te[mask_te]
+		# X_te = X_te[mask_te]
 
 		_, label_counts = np.unique(y_te, return_counts = True)
 		nr_tests = min(label_counts) * np.unique(y_te).size
@@ -1192,7 +1204,7 @@ class BDM(FolderStructure):
 			(beh_te, cnd_idx_te, 
 			cnd_labels, labels,
 			max_tr) = self.get_condition_labels(beh_te,cnd_header,cnd,max_tr, 
-												labels_oi)
+												labels_oi_te)
 
 			# initiate decoding arrays
 			if GAT:
@@ -1200,7 +1212,7 @@ class BDM(FolderStructure):
 								times_tr.size, times_te.size)) * np.nan
 				conf_matrix = np.empty((self.avg_runs, nr_perm, 
 								times_tr.size, times_te.size, 
-								labels.size, labels.size)) * np.nan
+								len(labels_oi_te), len(labels_oi_tr))) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									times_tr.size, times_te.size, 
 									nr_elec)) * np.nan
@@ -1209,8 +1221,8 @@ class BDM(FolderStructure):
 				class_acc = np.empty((self.avg_runs,nr_perm,
 								times_te.size)) * np.nan	
 				conf_matrix = np.empty((self.avg_runs, nr_perm, 
-								times_tr.size, labels.size, 
-								labels.size)) * np.nan
+								times_tr.size, len(labels_oi_te), 
+								len(labels_oi_tr))) * np.nan
 				weights = np.empty((self.avg_runs, nr_perm,
 									times_te.size, nr_elec)) * np.nan
 
@@ -1242,16 +1254,32 @@ class BDM(FolderStructure):
 						(class_acc[run, p], 
 						weights[run, p],
 						conf_matrix[run,p]) = self.cross_time_decoding(Xtr,Xte, 
-																	Ytr, Yte, 
-																	labels, 
-																	GAT, Xtr)
+																Ytr, Yte, 
+																(labels_oi_tr,
+		 														labels_oi_te),
+																GAT, Xtr)
 												
 						self.seed += 1 # update seed used for cross validation
 						self.run_info += 1
 
-				mean_class = class_acc.mean(axis = 0)
-				conf_M = conf_matrix.mean(axis = 0)
-				#conf_matrix = np.squeeze(conf_matrix[0,0])	
+					mean_class = class_acc.mean(axis = 0)
+					conf_M = conf_matrix.mean(axis = 0)
+					W = weights.mean(axis = 0)[0]
+
+					if i == 0:
+						# get standard dec scores
+						#W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
+						bdm_scores.update({cnd:{'dec_scores': 
+										copy.copy(np.squeeze(mean_class[0]))}})
+						if self.output_params:
+							bdm_params.update({cnd:{'W':W, 
+											'conf_matrix':copy.copy(conf_M[0])
+											}})
+
+					else:
+						bdm_scores[cnd]['{}-nrlabels'.format(n)] = \
+										copy.copy(mean_class[0])
+
 				# bdm_scores.update({cnd:{'dec_scores': 
 				# 						copy.copy(np.squeeze(mean_class[0]))},
 				# 						'label_inf':copy.copy(label_inf)})
@@ -1265,6 +1293,11 @@ class BDM(FolderStructure):
 			with open(self.folder_tracker(ext, fname = 
 					f'{bdm_name}.pickle') ,'wb') as handle:
 				pickle.dump(bdm_scores, handle)
+
+			if self.output_params:
+				with open(self.folder_tracker(ext, fname = 
+						f'{bdm_name}_params.pickle') ,'wb') as handle:
+					pickle.dump(bdm_params, handle)	
 
 		return bdm_scores			
 
@@ -1447,9 +1480,13 @@ class BDM(FolderStructure):
 		clf = self.select_classifier()
 
 		# initiate decoding arrays
+		if isinstance(labels, np.ndarray):
+			labels = (labels,labels)
+
 		class_acc = np.zeros((N,nr_time_tr, nr_time_te))
 		weights = np.zeros((N,nr_time_tr, nr_time_te, nr_elec))
-		conf_matrix = np.zeros((N,nr_time_tr, nr_time_te,labels.size,labels.size))
+		conf_matrix = np.zeros((N,nr_time_tr, nr_time_te,
+			  					len(labels[1]),len(labels[0])))
 
 		for n in range(N):
 			print('\r Fold {} out of {} folds in average run {}'.format(n + 1,N, self.run_info),end='')
@@ -1491,8 +1528,12 @@ class BDM(FolderStructure):
 					clf.fit(Xtr_,Ytr_)
 					scores = clf.predict_proba(Xte_) # get posteriar probability estimates
 					predict = clf.predict(Xte_)
-					class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) #
-					conf_m = confusion_matrix(Yte_, predict,labels=labels) 
+					if bool(set(Ytr_)& set(Yte_)):
+						class_perf = self.computeClassPerf(scores, Yte_, np.unique(Ytr_), predict) #
+						conf_m = confusion_matrix(Yte_, predict,labels=labels[0])
+					else:
+						class_perf = 0
+						conf_m = self.get_fake_confusion_matrix(Yte_, predict) 
 
 					if not GAT:
 						#class_acc[n,tr_t, :] = sum(predict == Yte_)/float(Yte_.size)
@@ -1515,10 +1556,27 @@ class BDM(FolderStructure):
 			weights = np.squeeze(np.mean(weights, axis = 0))
 		else:
 			weights = None
-		conf_matrix = np.squeeze(np.sum(conf_matrix, axis = 0))
+		
+		conf_matrix = np.sum(conf_matrix, axis = 0)
+		if nr_time_tr == 1:
+			conf_matrix = conf_matrix.mean(axis=0)
+
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
 
 		return class_acc, weights, conf_matrix
+
+	def get_fake_confusion_matrix(self,y_true:np.array,
+			       				y_pred:np.array)->np.array:
+
+		row_values = np.unique(y_true)
+		col_values = np.unique(y_pred)
+		output = np.zeros((row_values.size, col_values.size)) 
+
+		for r,r_value in enumerate(row_values):
+			for c,c_value in enumerate(col_values):
+				output[r,c] = sum(y_pred[y_true == r_value] == c_value)
+
+		return output
 
 	def computeClassPerf(self, scores, true_labels, label_order, predict):
 		'''

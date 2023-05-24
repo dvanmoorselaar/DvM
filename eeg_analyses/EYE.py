@@ -237,7 +237,7 @@ class EYE(FolderStructure):
 		'''	
 
 		SD = SaccadeGlissadeDetection(self.sfreq)
-		embed()
+
 		# check whether x,y contain missing data at start and/or end trial
 		mask = np.ones(x.shape[1],dtype = bool)
 		for i in range(mask.size):

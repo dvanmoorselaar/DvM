@@ -48,12 +48,13 @@ class CTF(BDM):
 
 	def __init__(self,sj:int,epochs:mne.Epochs,beh:pd.DataFrame, 
 				to_decode:str,nr_bins:int,nr_chans:int,nr_iter:int=10, 
-				nr_blocks:int=3,elec_oi:Union[str,list]='all',
+				nr_folds:int=3,elec_oi:Union[str,list]='all',
 				sin_power = 7,delta:bool=False,method:str='Foster',
 				avg_ch:bool=True,ctf_param:Union[str,bool]='slope',
 				power:str='band',min_freq:int=4,max_freq:int=40,
 				num_frex:int=25,freq_scaling:str='log',slide_window:int=0,
-				laplacian:bool=False,pca_cmp:int=16):
+				laplacian:bool=False,pca_cmp:int=0,
+				baseline:Optional[tuple]=None):
 		''' 
 		
 		Arguments
@@ -64,7 +65,7 @@ class CTF(BDM):
 		decoding (str)): String specifying what to decode. 
 		but can be changed to different locations (e.g. decoding of the location of an intervening stimulus).
 		nr_iter (int):  number iterations to apply forward model 	
-		nr_blocks (str): number of blocks to apply forward model
+		nr_folds (str): number of folds used for cross validation
 		nr_bins (int): number of location bins used in experiment
 		nr_chans (int): number of hypothesized underlying channels
 		delta (bool): should basisset assume a shape of CTF or be a delta function
@@ -83,13 +84,14 @@ class CTF(BDM):
 		self.ctf_param = ctf_param
 		self.avg_ch = avg_ch
 		self.cross = False
+		self.baseline = baseline
 
 		# specify model parameters
 		self.method = method
 		self.nr_bins = nr_bins													# nr of spatial locations 
 		self.nr_chans = nr_chans 												# underlying channel functions coding for spatial location
 		self.nr_iter = nr_iter													# nr iterations to apply forward model 		
-		self.nr_blocks = nr_blocks												# nr blocks to split up training and test data with leave one out test procedure
+		self.nr_folds = nr_folds												# nr blocks to split up training and test data with leave one out test procedure
 		self.sfreq = 512														# shift of channel position
 		self.power = power
 		self.min_freq = min_freq
@@ -236,7 +238,7 @@ class CTF(BDM):
 											self.elec_oi, excl_factor)
 
 		# set params
-		nr_itr = self.nr_iter * self.nr_blocks
+		nr_itr = self.nr_iter * self.nr_folds
 		ctf_name = f'{self.sj}_{name}'
 		nr_perm += 1
 		nr_elec = len(epochs.ch_names)
@@ -244,11 +246,12 @@ class CTF(BDM):
 		nr_samples = epochs.times[tois][::downsample].size
 		ctf, info = {}, {}
 		freqs, nr_freqs = self.set_frequencies(freqs)
+		data_type = 'power' if freqs != ['raw'] else 'raw'
 		if self.method == 'k-fold':
 			# TODO: fix
 			print('Method not yet  implemented')
-			print('nr_blocks is irrelevant and will be reset to 1')
-			#self.nr_blocks = 1						
+			print('nr_folds is irrelevant and will be reset to 1')
+			#self.nr_folds = 1						
 		if collapse:
 			pass
 			# TODO: fix
@@ -272,6 +275,7 @@ class CTF(BDM):
 			print('Creating generalization across time matrix.',
 	 			'This may take some time and is generally not ',
 				'recommended')
+			
 		# Frequency loop (ensures that data is only filtered once)
 		for fr in range(nr_freqs):
 			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
@@ -316,8 +320,8 @@ class CTF(BDM):
 						test_idx = cnds == test_cnd
 						test_bins = np.unique(pos_bins[test_idx])
 						(train_idx, 
-						test_idx) = self.train_test_cross(pos_bins,cnd_idx,
-														 test_idx)
+						test_idx) = self.train_test_cross(pos_bins, cnd_idx,
+														test_idx, self.nr_iter)
 					else:
 						(train_idx, 
 						test_idx) = self.train_test_split(pos_bins,
@@ -327,7 +331,7 @@ class CTF(BDM):
 					info[cnd]['train_idx'] = train_idx
 					info[cnd]['test_idx'] = test_idx
 					if self.method == 'Foster':
-						C1 = np.empty((self.nr_bins* (self.nr_blocks - 1), 
+						C1 = np.empty((self.nr_bins * (self.nr_folds - 1), 
 										self.nr_chans)) * np.nan
 					else:
 						C1 = self.basisset
@@ -346,7 +350,7 @@ class CTF(BDM):
 						pass
 						#TODO: implement 
 					elif self.method == 'Foster':
-						nr_itr_tr = self.nr_bins * (self.nr_blocks - 1)
+						nr_itr_tr = self.nr_bins * (self.nr_folds - 1)
 						bin_tr_E = np.zeros((nr_itr_tr, nr_elec, nr_samples)) 
 						bin_tr_T = bin_tr_E.copy()
 						
@@ -360,7 +364,7 @@ class CTF(BDM):
 											E[test_idx], axis = 0),freqs[fr])
 
 						if self.method == 'Foster':
-							for j in range(self.nr_blocks - 1):
+							for j in range(self.nr_folds - 1):
 								evoked = self.extract_power(np.mean(\
 											E[train_idx[bin][j]], axis = 0),
 											freqs[fr])
@@ -380,12 +384,18 @@ class CTF(BDM):
 															bin_tr_E, 
 															bin_te_E,
 															bin_tr_T, 
-															bin_te_T, C1,GAT)
+															bin_te_T,C1,GAT)
 		# take the average across model iterations
 		for cnd in train_cnds:
 			for key in ['C2_E','C2_T','W_E','W_T']:
 				ctf[cnd][key] = ctf[cnd][key].mean(axis = 2)
 
+			if freqs == ['raw']:
+				ctf[cnd]['C2_raw'] = ctf[cnd].pop('C2_E')
+				ctf[cnd]['W_raw'] = ctf[cnd].pop('W_E')
+				del ctf[cnd]['C2_T']
+				del ctf[cnd]['W_T']
+				
 		# save output
 		with open(self.folder_tracker(['ctf',self.to_decode], 
 				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
@@ -399,7 +409,9 @@ class CTF(BDM):
 		if self.ctf_param:
 			print('get ctf tuning params')
 			ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
-					  							avg_ch=self.avg_ch)
+					  							data_type, GAT,
+												avg_ch=self.avg_ch)
+
 			with open(self.folder_tracker(['ctf',self.to_decode], 
 					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
 				print('saving ctf params')
@@ -410,7 +422,7 @@ class CTF(BDM):
 						excl_factor: dict = None) -> Tuple[mne.Epochs,
 															pd.DataFrame]:
 		"""
-		Selects the data of interest by selectiong epochs and electrodes
+		Selects the data of interest by selecting epochs and electrodes
 		of interest
 
 		Args:
@@ -576,7 +588,7 @@ class CTF(BDM):
 		# select cell with lowest number of observations
 		min_count = np.min(bin_count)
 		if method == 'Foster':
-			nr_per_bin = int(np.floor(min_count/self.nr_blocks))						
+			nr_per_bin = int(np.floor(min_count/self.nr_folds))						
 		elif method == 'k-fold':
 			nr_per_bin = int(np.floor(min_count/self.nr_iter)*self.nr_iter)
 
@@ -641,6 +653,7 @@ class CTF(BDM):
 				print('Method not yet implemented')
 				pass 
 		elif band == 'raw':
+			epochs.apply_baseline(baseline = self.baseline)
 			T = epochs._data
 			E = epochs._data
 
@@ -649,8 +662,13 @@ class CTF(BDM):
 		T = T[:,:,tois]
 
 		# downsample 
-		E = E[:,:,::downsample]
-		T = T[:,:,::downsample]
+		if band != 'raw':
+			E = E[:,:,::downsample]
+			T = T[:,:,::downsample]
+		else:
+			#TODO: addd mne downsampling method
+			E = E[:,:,::downsample]
+			T = T[:,:,::downsample]		
 
 		return E, T
 
@@ -777,11 +795,11 @@ class CTF(BDM):
 
 				# evoked power model fit
 				c2_e, w_e = self.forward_model(E_train[...,tr_t:tr_t+slide],
-											E_test[...,tr_t:tr_t+slide], 
+											E_test[...,te_t:te_t+slide], 
 											C1)			
 
 				# total power model fit
-				c2_t, w_t = self.forward_model(T_train[...,te_t:te_t+slide], 
+				c2_t, w_t = self.forward_model(T_train[...,tr_t:tr_t+slide], 
 												T_test[...,te_t:te_t+slide], 
 												C1)
 				
@@ -800,7 +818,8 @@ class CTF(BDM):
 		return C2_E, W_E, C2_T, W_T
 
 	def train_test_cross(self, pos_bins: np.array,train_idx:np.array,
-						test_idx:np.array)->Tuple[np.array, np.array]:
+						test_idx:np.array,
+						nr_iter:int)->Tuple[np.array, np.array]:
 		"""
 		selects trial indices for the train and the test set
 
@@ -809,6 +828,7 @@ class CTF(BDM):
 			train_idx (np.array): array with indices for training 
 			condition
 			test_idx (np.array): array with indices for test condition
+			nr_iter (int): number of iterations in cross validation
 
 		Returns:
 			train_idx (np.array): indices used to train the model (with 
@@ -824,6 +844,7 @@ class CTF(BDM):
 		min_obs = min(counts)
 		train_idx = [np.random.choice(train_idx[train_bins==b],min_obs,False) 
 															for b in bins]
+		
 		#randomly split training blocks in half for each iteration
 		train_idx = np.stack(train_idx)[:,None,:]
 		split_arrays = []
@@ -832,7 +853,7 @@ class CTF(BDM):
 		else:
 			to_split = train_idx.shape[-1] -1 
 		split = to_split // 2
-		for i in range(self.nr_iter):
+		for i in range(nr_iter):
 			split_idx = np.random.permutation(train_idx.shape[-1])[:split*2]
 			splitted = np.split(train_idx[..., split_idx],[split],axis=-1)
 			split_arrays.append(np.concatenate(splitted, axis=1))
@@ -859,7 +880,8 @@ class CTF(BDM):
 					bin_cnt += 1
 			test_idx = test_idx[None,:,None,:]
 
-		test_idx = np.tile(test_idx, (self.nr_iter, 1, 1, 1))
+		#TODO: check whether test data needs to be split up in iterations
+		test_idx = np.tile(test_idx, (nr_iter, 1, 1, 1))
 
 		return train_idx, test_idx	
 
@@ -901,8 +923,8 @@ class CTF(BDM):
 			# take the 1st max_tr x nr_blocks trials for each position bin
 			for bin in range(self.nr_bins):
 				idx = np.where(shuf_bin == bin)[0] 	
-				idx = idx[:max_tr * self.nr_blocks] 
-				x = np.tile(np.arange(self.nr_blocks),(max_tr,1))
+				idx = idx[:max_tr * self.nr_folds] 
+				x = np.tile(np.arange(self.nr_folds),(max_tr,1))
 				shuf_blocks.flat[idx] = x	
 
 			# unshuffle block assignment and save to CTF
@@ -911,14 +933,14 @@ class CTF(BDM):
 		tr_per_block = int(sum(blocks == 0)/self.nr_bins)
 
 		# after block assignment split into train and test set
-		train_idx = np.zeros((self.nr_iter * self.nr_blocks, self.nr_bins,
-							 self.nr_blocks - 1, tr_per_block), dtype = int)									
-		test_idx = np.zeros((self.nr_iter * self.nr_blocks, self.nr_bins, 
+		train_idx = np.zeros((self.nr_iter * self.nr_folds, self.nr_bins,
+							 self.nr_folds - 1, tr_per_block), dtype = int)									
+		test_idx = np.zeros((self.nr_iter * self.nr_folds, self.nr_bins, 
 						  tr_per_block), dtype = int)
 
 		idx = 0	
 		for i in range(self.nr_iter):
-			for bl in range(self.nr_blocks):
+			for bl in range(self.nr_folds):
 				for bin in range(self.nr_bins):	
 					test_mask = (bl_assign[i] == bl) * (cnd_bins == bin)
 					test_idx[idx,bin] = trial_idx[test_mask]
@@ -926,8 +948,8 @@ class CTF(BDM):
 								 (bl_assign[i] != bl) * (cnd_bins == bin))
 					# split all train data into seperate train blocks
 					train = np.array_split(trial_idx[train_mask], 
-														self.nr_blocks - 1)
-					for j in range(self.nr_blocks - 1):
+														self.nr_folds - 1)
+					for j in range(self.nr_folds - 1):
 						train_idx[idx, bin, j] = train[j]
 				idx += 1
 
@@ -983,9 +1005,13 @@ class CTF(BDM):
 								window_oi_tr[0],window_oi_tr[1])
 		tois_te = get_time_slice(epochs_te.times,
 								window_oi_te[0],window_oi_te[1])
-
+		
+		avg_tr = True if not GAT else False
+		GAT = True
+			
 		ctf, info = {}, {}
 		freqs, nr_freqs = self.set_frequencies(freqs)
+		data_type = 'power' if freqs != ['raw'] else 'raw'
 
 		if type(te_cnds) == dict:
 			(cnd_header, test_cnds), = te_cnds.items()
@@ -1012,7 +1038,7 @@ class CTF(BDM):
 			(E_tr, 
 			T_tr) = self.tf_decomposition(epochs_tr.copy(),freqs[fr],
 									 tois_tr,downsample)	
-			nr_samp_tr = E_tr.shape[-1]
+			nr_samp_tr = 1 if avg_tr else E_tr.shape[-1]
 			(E_te, 
 			T_te) = self.tf_decomposition(epochs_te.copy(),freqs[fr],
 									 tois_te,downsample)	
@@ -1023,15 +1049,9 @@ class CTF(BDM):
 				print(f'Running localizer ctf for condition: {cnd} ')	
 
 				# preallocate arrays
-				if GAT:
-					C2_E = np.zeros((nr_perm,nr_freqs, nr_samp_tr, nr_samp_te,
+				C2_E = np.zeros((nr_perm,nr_freqs, nr_samp_tr, nr_samp_te,
 									self.nr_bins, self.nr_chans))
-					W_E = np.zeros((nr_perm,nr_freqs, nr_samp_tr, nr_samp_te,
-									self.nr_chans, nr_elec))	
-				else:
-					C2_E = np.zeros((nr_perm,nr_freqs,nr_samp_tr, 
-									self.nr_bins, self.nr_chans))
-					W_E = np.zeros((nr_perm,nr_freqs,nr_samp_tr, 
+				W_E = np.zeros((nr_perm,nr_freqs, nr_samp_tr, nr_samp_te,
 									self.nr_chans, nr_elec))												 
 				C2_T, W_T  = C2_E.copy(), W_E.copy()	
 
@@ -1045,20 +1065,24 @@ class CTF(BDM):
 
 					# get train and test indices
 					idx = np.arange(pos_bins_tr.size)
-					(train_idx,_) = self.train_test_cross(pos_bins_tr,idx,None)
+					(train_idx,_) = self.train_test_cross(pos_bins_tr,idx,
+					   									None, nr_itr)
 					idx = cnd == cnds
-					(_,test_idx) = self.train_test_cross(pos_bins_te,idx,idx)
+					(_,test_idx) = self.train_test_cross(pos_bins_te,idx,
+					  									idx,nr_itr)
 					test_bins = np.unique(pos_bins_te[test_idx])
 
 					info[cnd]['train_idx'] = train_idx
 					info[cnd]['test_idx'] = test_idx
 					if self.method == 'Foster':
-						C1 = np.empty((self.nr_bins, self.nr_chans)) * np.nan
+						C1 = np.empty((self.nr_bins * self.nr_folds, 
+		     						   self.nr_chans)) * np.nan
 					else:
 						C1 = self.basisset	
 
 				# TODO: insert permutation loop
 				p = 0
+				#TODO: make sure this works with iterations
 				train_idx = info[cnd]['train_idx'][0]
 
 				# initialize evoked and total power arrays
@@ -1068,7 +1092,8 @@ class CTF(BDM):
 					pass
 					#TODO: implement 
 				elif self.method == 'Foster':
-					bin_tr_E = np.zeros((self.nr_bins, nr_elec, nr_samp_tr)) 
+					nr_itr_tr = self.nr_bins * (self.nr_folds)
+					bin_tr_E = np.zeros((nr_itr_tr, nr_elec, nr_samp_tr)) 
 					bin_tr_T = bin_tr_E.copy()
 					
 				# position bin loop
@@ -1082,13 +1107,17 @@ class CTF(BDM):
 						bin_te_T[bin] = np.mean(T_te[test_idx], axis = 0)
 
 					if self.method == 'Foster':
-						evoked = abs(np.mean(E_tr[train_idx[bin][0]], 
-											axis = 0))**2
-						bin_tr_E[bin_cnt] = evoked
-						total = np.mean(T_tr[train_idx[bin][0]], axis = 0)
-						bin_tr_T[bin_cnt] = total
-						C1[bin_cnt] = self.basisset[bin]
-						bin_cnt += 1
+						for j in range(self.nr_folds):
+							evoked = abs(np.mean(E_tr[train_idx[bin][j]], 
+												axis = 0))**2
+							total = np.mean(T_tr[train_idx[bin][j]], axis = 0)
+							if avg_tr:
+								evoked = evoked.mean(axis = -1)[:, np.newaxis]
+								total = total.mean(axis = -1)[:, np.newaxis]
+							bin_tr_E[bin_cnt] = evoked
+							bin_tr_T[bin_cnt] = total
+							C1[bin_cnt] = self.basisset[bin]
+							bin_cnt += 1
 					elif self.method == 'k-fold':
 						pass
 						#TODO: implement
@@ -1101,6 +1130,16 @@ class CTF(BDM):
 														bin_te_E,
 														bin_tr_T, 
 														bin_te_T,C1,GAT)
+				
+		# take the average across model iterations
+		for cnd in test_cnds:
+
+			if freqs == ['raw']:
+				ctf[cnd]['C2_raw'] = ctf[cnd].pop('C2_E')
+				ctf[cnd]['W_raw'] = ctf[cnd].pop('W_E')
+				del ctf[cnd]['C2_T']
+				del ctf[cnd]['W_T']
+
 		# save output
 		with open(self.folder_tracker(['ctf',self.to_decode], 
 				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
@@ -1113,7 +1152,10 @@ class CTF(BDM):
 
 		if self.ctf_param:
 			print('get ctf tuning params')
-			ctf_param = self.get_ctf_tuning_params(ctf)
+			ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
+					  							data_type, GAT,
+												avg_ch=self.avg_ch)
+			
 			with open(self.folder_tracker(['ctf',self.to_decode], 
 					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
 				print('saving ctf params')
@@ -1319,7 +1361,8 @@ class CTF(BDM):
 		return params
 
 	def get_ctf_tuning_params(self,ctf:dict,params:str='slopes',
-			   				data_type:str='power',avg_ch:bool=True)->dict:
+			   				data_type:str='power',
+							GAT:bool=False,avg_ch:bool=True)->dict:
 		"""
 		Quantifies the ctfs as calulated by spatial_ctf and 
 		localizer_spatial_ctf by either only the slopes, or more fine 
@@ -1334,6 +1377,9 @@ class CTF(BDM):
 			Defaults to 'slopes'.
 			data_type (str, optional): Are ctfs calculated on 
 			time-frequency data or on raw eeg. Defaults to 'power'.
+			GAT (bool, optional): Specifies whether ctf is trained and 
+			tested on independent timepoints (i.e., generalization 
+			across time matrix).
 			avg_ch (bool, optional): Should the ctf be characterized
 			individually for each spatial channel (False) or averaged
 			across channels. Defaults to True.
@@ -1352,15 +1398,21 @@ class CTF(BDM):
 		     										for signal in signals]	
 		# initiate output dict
 		ctf_param = {}
-		data = ctf[list(ctf.keys())[0]]['C2_E']
-		if data.ndim == 5:
-			(nr_perm, nr_freq, nr_samples, _, _,) = data.shape
-			output = np.zeros((nr_perm,nr_freq,nr_samples,1))	
-		elif data.ndim == 6:
-			(nr_perm, nr_freq, nr_samples_tr, nr_samples_te, _,) = data.shape
+		data = ctf[list(ctf.keys())[0]]
+		if data_type == 'power':
+			data = data['C2_E']
+		else: 
+			data = data['C2_raw']
+
+		if GAT:
+			(nr_perm, nr_freq, 
+			nr_samples_tr, nr_samples_te) = list(data.shape)[:4]
 			output = np.zeros((nr_perm,nr_freq, nr_samples_tr,nr_samples_te))
 			nr_samples = (nr_samples_tr,nr_samples_te)
-	
+		else:
+			nr_perm, nr_freq, nr_samples = list(data.shape)[:3]
+			output = np.zeros((nr_perm,nr_freq,nr_samples,1))		
+
 		if not avg_ch:
 			output = output[..., np.newaxis] * np.zeros(self.nr_chans)
 

@@ -274,19 +274,27 @@ class FolderStructure(object):
 
         return bdm
 
-    def read_ctfs(self,ctf_folder_path:list,ctf_name:str,sjs:list='all')->list:
+    def read_ctfs(self,ctf_folder_path:list,output_type:str,
+                  ctf_name:str,sjs:list='all')->list:
 
         # set extension
         ext = ['ctf'] + ctf_folder_path
 
+        if output_type=='ctf':
+            output = 'ctfs'
+        elif output_type=='info':
+            output = 'ctf_info'
+        elif output_type=='param':
+            output = 'ctf_param'
+
         if sjs == 'all':
             files = sorted(glob.glob(self.folder_tracker(
                             ext = ext,
-                            fname = f'ctf_param_*_{ctf_name}.pickle')),
+                            fname = f'{output}_*_{ctf_name}.pickle')),
                             key = lambda s: int(re.search(r'\d+', s).group()))
         else:
             files = [self.folder_tracker(ext = ext,
-                    fname = f'ctf_param_{sj}_{ctf_name}.pickle')for sj in sjs]
+                    fname = f'{output}_{sj}_{ctf_name}.pickle')for sj in sjs]
 
         ctfs = [pickle.load(open(file, 'rb')) for file in files]
 

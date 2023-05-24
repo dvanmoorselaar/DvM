@@ -497,7 +497,9 @@ def select_electrodes(ch_names: Union[list, np.ndarray], elec_oi: Union[list, st
 		elif elec_oi == 'mid':
 			elec_oi  = ['T7','C5','C3','C1','Cz','C2','C4','C6','T8']	
 		elif elec_oi == 'eye':
-			elec_oi  = ['V_up','V_do','H_r', 'H_l']				
+			elec_oi  = ['V_up','V_do','H_r', 'H_l']	
+		elif elec_oi == 'tracker':
+			elec_oi  = ['x','y']		
 
 	picks = mne.pick_channels(ch_names, include = elec_oi)
 
