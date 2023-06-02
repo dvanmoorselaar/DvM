@@ -1436,7 +1436,6 @@ class ArtefactReject(object):
 
             #step 2a: manually check selected component
             if manual_correct:
-                embed()
                 ica = self.manual_check_ica(ica, sj, session)
                 if ica.exclude != exclude_prev:
                     report.remove(title='ICA blink cleaning')

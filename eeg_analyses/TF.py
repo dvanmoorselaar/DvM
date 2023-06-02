@@ -32,7 +32,7 @@ class TF(FolderStructure):
 	def __init__(self, sj: int, beh: pd.DataFrame, epochs: mne.Epochs, 
 				min_freq: int = 4, max_freq: int = 40, num_frex: int = 25,
 				cycle_range: tuple = (3,10), freq_scaling: str = 'log',
-				baseline: tuple = None, base_method: str = None,
+				baseline: tuple = None, base_method:str= None,
 				method: str = 'wavelet', downsample: int = 1, 
 				laplacian: bool = True):
 		"""
@@ -234,10 +234,10 @@ class TF(FolderStructure):
 		
 		return raw_conv
 
-	def baseline_tf(self, tf: dict, base: dict, method: str, 
-					elec_oi: str = 'all') -> dict:
+	def baseline_tf(self,tf:dict,base:dict,method:str,
+		 			elec_oi:str='all') -> dict:
 		"""
-		Apply baseline correction via decibel conversion
+		Apply baseline correction via decibel conversion. 
 
 		Args:
 			tf (dict): TF power per condition (epochs X nr_freq X nr_ch X 
@@ -255,8 +255,8 @@ class TF(FolderStructure):
 			tf (dict): normalized time frequency power
 		"""
 
-		tf_base = {}
 		cnds = list(tf['power'].keys())
+		
 		if method == 'cnd_avg':
 			cnd_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 
@@ -273,13 +273,13 @@ class TF(FolderStructure):
 				 	 ' if all stimuli of interest are presented right')
 				tf['power'][cnd], info = self.normalize_power(power, 
 															 list(elec_oi)) 
-				tf.update(dict(norm_info = info))
-			elif method is None:
-				pass
+				tf.update({'norm_info':info})
+			elif method is None or not base:
+				tf['power'][cnd] = power
 			else:
 				raise ValueError('Invalid method specified')
 
-			# power values can now safely be averaged
+			# # power values can now safely be averaged
 			# if method != 'norm':
 			# 	tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
 
@@ -340,10 +340,10 @@ class TF(FolderStructure):
 
 		return norm, norm_elec
 
-	def lateralized_tf(self,pos_labels, cnds: dict = None, 
-					   elec_oi: list = 'all',midline: dict = None, 
-					   topo_flip: dict = None, time_oi: tuple = None, 
-					   excl_factor: dict = None, name : str = 'main'):
+	def lateralized_tf(self,pos_labels:dict,cnds:dict=None, 
+					   elec_oi:list='all',midline:dict=None, 
+					   topo_flip:dict=None,time_oi:tuple=None, 
+					   excl_factor:dict=None,name:str='main'):
 		
 		# get data
 		beh, epochs = self.select_tf_data(excl_factor, topo_flip)
@@ -405,7 +405,7 @@ class TF(FolderStructure):
 			tf['power'][cnd] = abs(raw_conv[..., idx_2_save])**2
 
 		# baseline correction
-		tf = self.baseline_tf(tf, base, self.base_method, elec_oi)
+		tf = self.baseline_tf(tf,base,self.base_method,elec_oi)
 		
 		# save output
 		with open(self.folder_tracker(['tf',self.method],
