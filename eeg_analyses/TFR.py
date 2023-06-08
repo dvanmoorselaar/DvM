@@ -374,14 +374,14 @@ class TFR(FolderStructure):
 		return norm_power
 
 	@staticmethod
-	def lateralization_index(self,tfr:dict,elec_oi:list='all',
-		elec_pairs:dict=None) -> dict:	
+	def lateralization_index(tfr:dict,elec_oi:list='all',
+		elec_pairs:list=None) -> dict:	
 
 		"""
 		Computes lateralization index (LI) for each frequency band and 
 		sample per condition. It is assumed that all stimuli of interest 
 		are presented with the same lateralization (i.e., all left or 
-		all	right), ot this is set artificially set via topo_flip.
+		all	right), ot this is set artificially via topo_flip.
 
 		The lateralization index is computed as follows:
 
@@ -392,25 +392,29 @@ class TFR(FolderStructure):
 		electrodes.					 
 
 		Args:
-			tfr (dict): TF power per condition (n_ch, nr_freq, n_times)
+			tfr (dict): dictionary as returned by read_tfr with 
+	        time-frequencypower per condition (n_ch, nr_freq, n_times)
 			elec_oi (list): list of electrodes of interest
 			elec_pairs (dict): dictionary with ipsi- and contra-lateral		
-			electrode pairs. Within this dict each unique electrode of 
+			electrode pairs. Within this list, each unique electrode of 
 			interest needs to be coupled once to its mirror electrode in 
-			the other hemifield. In case, the analysis is run to create
-			topoplots, midline electrodes are unique and should be 
-			coupled to themselves (i.e., lx = 0). If not the function
-			will assume a biosemi64 configuration.
+			the other hemifield in a list. In case, the analysis is run 
+	        to create topoplots, midline electrodes are unique and 
+	        should be coupled to themselves (i.e., lx = 0). If not the 
+	        function will assume a biosemi64 configuration.
 
-			For example: {'Fp1':'Fp2'} will create a lateralization 
+			For example: [['Fp1':'Fp2']] will create a lateralization 
 			index based on the difference between Fp1 and Fp2, where Fp1
-			is assumed to be the contra-lateral electrode.
+			is assumed to be the contralateral electrode.
 
 
 		Returns:
 			tfr (dict): modified instance of tfr with normalized power 
 			values	
 		"""
+
+		# make a copy of the original tfr
+		tfr_ = copy.deepcopy(tfr)
 
 		# set function parameters
 		temp_tfr = list(tfr.values())[0]
@@ -420,75 +424,61 @@ class TFR(FolderStructure):
 		nr_times = temp_tfr[0].times.size
 
 		# set electrode pairs
-		duplicate = False
 		if elec_pairs is None:
-			duplicate = True
 			ch_pairs = [['Fp1','Fp2'],['AF7','AF8'],['AF3','AF4'],
 						['F7','F8'],['F5','F6'],['F3','F4'],
 						['F1','F2'],('FT7','FT8'),['FC5','FC6'],
-						['FC3','FC4'],[]'FC1','FC2'],['T7','T8'],
-						['C5','C6'],['C3','C4'],['C1','C2'],[]'TP7','TP8'],
+						['FC3','FC4'],['FC1','FC2'],['T7','T8'],
+						['C5','C6'],['C3','C4'],['C1','C2'],['TP7','TP8'],
 						['CP5','CP6'],['CP3','CP4'],['CP1','CP2'],
-						['P9','P10'],['P7','P8'],['P5','P6'),('P3','P4'],
+						['P9','P10'],['P7','P8'],['P5','P6'],['P3','P4'],
 						['P1','P2'],['PO7','PO8'],['PO3','PO4'],
 						['O1','O2'],('Fpz','Fpz'),['AFz','AFz'],
-						['Fz,Fz'],('FCz,FCz'),('Cz,Cz'],['CPz,CPz'],['Pz,Pz'],
-						['POz,POz'],('Oz,Oz'],('Iz,Iz']]
+						['Fz','Fz'],['FCz','FCz'],['Cz','Cz'],['CPz','CPz'],
+						['Pz','Pz'],['POz','POz'],['Oz','Oz'],['Iz','Iz']]
 	
-		if not duplicate:
+		if isinstance(elec_oi, list):
 			pair_idx = [i for i, p in enumerate(ch_pairs) if p[0] in elec_oi]
 			contra_idx = [channels.index(ch_pairs[idx][0]) for idx in pair_idx]
 			ipsi_idx = [channels.index(ch_pairs[idx][1]) for idx in pair_idx]
 			output = np.zeros((nr_sj,nr_freqs,nr_times))
 
 		# frequency and condition loop
-		for cnd in tfr.keys():
+		for cnd in tfr_.keys():
 			for f in range(nr_freqs):
-				X =	np.stack([t._data[:,f,:] for t in tfr[cnd]])
-				if not duplicate:
+				X =	np.stack([t._data[:,f,:] for t in tfr_[cnd]])
+				if elec_oi == 'all':
+					for ch in channels:
+						if len([p for p in ch_pairs if p[0] == ch]) == 1:
+							pair = [p for p in ch_pairs if p[0] == ch][0]
+						elif len([p for p in ch_pairs if p[1] == ch]) == 1:
+							pair = [p for p in ch_pairs if p[1] == ch][0][::-1]
+						else:
+							raise ValueError('Channel not found in ch_pairs.'
+											f'the following pairs {ch_pairs} '
+											' were found.')
+						
+						contra_idx = channels.index(pair[0])
+						ipsi_idx = channels.index(pair[1])
+			
+						# modify trf in place by looping over all sjs
+						for sj in range(nr_sj):
+							contra = tfr[cnd][sj]._data[contra_idx,f]
+							ipsi = tfr[cnd][sj]._data[ipsi_idx,f]
+							lx = (contra - ipsi) / (contra + ipsi)
+							tfr_[cnd][sj]._data[contra_idx,f] = lx
+
+				else:
 					contra = X[:,contra_idx].mean(axis = 1)
 					ipsi = X[:,ipsi_idx].mean(axis = 1)
 
 					lx = (contra - ipsi) / (contra + ipsi)
 					output[:,f,:] = lx
-				else:
-					for ch in channels:
-						if len([p for p in ch_pairs if p[0] == ch]) == 1:
-							pair = [p for p in ch_pairs if p[0] == ch]
-						elif len([p for p in ch_pairs if p[1] == ch]) == 1:
-							pair = [p for p in ch_pairs if p[1] == ch][::-1]
 
-							contra = X[:,channels.index(ch)].mean(axis = 1)
-						contra_idx	
-			
-			if not duplicate:
-				tfr[cnd] = output
+			if isinstance(elec_oi, list):
+				tfr_[cnd] = output
 
-
-
-
-		# ipsi_contra pairs
-
-
-		pair_idx =  [i for i, pair in enumerate(contra_ipsi_pair) 
-					if pair[0] in elec_oi]			
-		elec_pairs = np.array(contra_ipsi_pair)[pair_idx] 
-
-		# initiate array
-		norm = np.zeros((elec_pairs.shape[0], num_frex, nr_time))
-		norm_elec = []
-
-		# loop over contra_ipsi pairs
-		for i, (contra, ipsi) in enumerate(elec_pairs):
-			norm_elec.append((contra, ipsi))	
-			# get indices of electrode pair
-			contra_idx = elec_oi.index(contra)
-			ipsi_idx = elec_oi.index(ipsi)
-			subtr = power[:,contra_idx] - power[:,ipsi_idx]
-			add = power[:,contra_idx] + power[:,ipsi_idx]
-			norm[i] = subtr/add	
-
-		return norm, norm_elec
+		return tfr_
 
 	def lateralized_tf(self,pos_labels:dict,cnds:dict=None, 
 					   elec_oi:list='all',midline:dict=None, 

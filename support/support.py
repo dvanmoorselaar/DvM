@@ -152,8 +152,8 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		print('Eye exclusion info saved in preprocessing file (at session 1')
 		idx = (sj, 1)
 		df = pd.read_csv(preproc_file, index_col=[0,1],on_bad_lines='skip')
-		df.loc[idx,'% tracker'] = str(perc_tracker)
-		df.loc[idx,'% eog'] = str(perc_eog)
+		df.loc[idx,'% tracker'] = f'{perc_tracker}%' 
+		df.loc[idx,'% eog'] = f'{perc_eog}% (N = {nan_idx.size})'
 
 		# save datafile
 		df.to_csv(preproc_file)

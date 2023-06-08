@@ -273,6 +273,50 @@ class FolderStructure(object):
         bdm = [pickle.load(open(file, "rb")) for file in files]
 
         return bdm
+    
+    def read_tfr(self,tfr_folder_path:list,tfr_name:str,cnds:list=None,
+                sjs:list='all')->list:
+        """
+        Read in time-frequency data as created by TFR class.
+        Time-frequency data is returned within a dictionary.
+
+        Args:
+            tfr_folder_path (list): List of folders (as created by TFR)
+            within tfr folder pointing towards files of interest (e.g.,
+            ['wavelet'])
+            tfr_name (str): name assigned to tfr analysis
+            cnds (list, optional): conditions of interest. Defaults to None
+            sjs (list, optional): List of subjects. Defaults to 'all'.
+
+        Returns:
+            tfr (list): list with time-frequency data
+        """
+
+        if cnds is None:
+            cnds = ['all_data']
+
+        # initiate condtion dict
+        tfr = dict.fromkeys(cnds, 0)
+
+        # set extension
+        ext = ['tfr'] + tfr_folder_path
+
+        # loop over conditions
+        for cnd in cnds:
+            if sjs == 'all':
+                files = sorted(glob.glob(self.folder_tracker(
+                            ext = ext,
+                            fname = f'sj_*_{tfr_name}_{cnd}-tfr.h5')),
+                            key = lambda s: int(re.search(r'\d+', s).group()))
+            else:
+                files = [self.folder_tracker(ext = ext,
+                    fname = f'sj_{sj}_{tfr_name}_{cnd}-tfr.h5')for sj in sjs]
+
+            # read in actual data
+            tfr[cnd] = [mne.time_frequency.read_tfrs(file)[0] 
+                                                        for file in files]
+
+        return tfr
 
     def read_ctfs(self,ctf_folder_path:list,output_type:str,
                   ctf_name:str,sjs:list='all')->list:
