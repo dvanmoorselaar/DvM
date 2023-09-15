@@ -188,7 +188,7 @@ class TFR(FolderStructure):
 											comment = cnd)
 			
 			# save TFR object
-			f_name = self.folder_tracker(['tf',self.method],
+			f_name = self.folder_tracker(['tfr',self.method],
 									f'{tf_name}_{cnd}-tfr.h5')
 			tfr.save(f_name, overwrite = True)
 				

@@ -204,7 +204,7 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
                     idx += 1
 
         self.rename_channels(ch_mapping)
-        self.set_montage(montage=montage)
+        self.set_montage(montage=montage, on_missing='warn')
 
         print('Channels renamed to 10-20 system, and montage added')
         logging.info('Channels renamed to 10-20 system, and montage added')

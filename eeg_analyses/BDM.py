@@ -1562,7 +1562,8 @@ class BDM(FolderStructure):
 			conf_matrix = conf_matrix.mean(axis=0)
 
 		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
-
+		if not GAT:
+			conf_matrix = np.squeeze(conf_matrix)
 		return class_acc, weights, conf_matrix
 
 	def get_fake_confusion_matrix(self,y_true:np.array,

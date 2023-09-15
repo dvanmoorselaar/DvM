@@ -7,10 +7,27 @@ Copyright (c) 2018 DvM. All rights reserved.
 
 import numpy as np
 
+from typing import Optional, Generic, Union, Tuple, Any
 from math import sqrt
 from scipy.stats import ttest_rel, ttest_ind, wilcoxon, ttest_1samp
 from IPython import embed 
 
+def cluster_test_mask(X:Union[np.array,list],p_value:float=0.05,
+		      		test:str='within',**kwargs):
+
+	if test == 'within':
+		(t_obs,
+		clusters,
+		p_values,
+		H0) = mne.stats.permutation_cluster_1samp_test(X, **kwargs)
+
+	# create mask
+	mask = np.zeros_like(t_obs, dtype=int)
+	for c, p_val in enumerate(p_values):
+		if p_val <= p_value:
+			mask[clusters[c]] = 1
+	
+	return mask
 
 def bootstrap_SE(X:np.array,nr_iter:int=9999):
 	"""

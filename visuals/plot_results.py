@@ -45,7 +45,67 @@ def plot_time_course(x:np.array,y:np.array,
 	if show_SE:
 		kwargs.pop('label', None)
 		plt.fill_between(x,y+err,y-err,alpha=0.2,**kwargs)
+
+def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
+	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
+			nr_ticks_y:np.array=5,**kwargs):
+
+	if X.ndim > 2:
+		X = X.mean(axis=0)
+
+	# set extent
+	x_lim = [0,X.shape[-1]] if x_val is None else [x_val[0],x_val[-1]]
+	y_lim = [0,X.shape[-2]] if y_val is None else [y_val[0],y_val[-1]]
+	extent = [x_lim[0],x_lim[1],y_lim[0],y_lim[1]]
+
+	# do actuall plotting
+	plt.imshow(X,interpolation='nearest',aspect='auto',origin='lower',
+	    	extent=extent, **kwargs)
 	
+	# set ticks
+	if nr_ticks_x is not None:
+		plt.xticks(np.linspace(x_lim[0],x_lim[1],nr_ticks_x))
+	if nr_ticks_y is not None:
+		if nr_ticks_y < 2:
+			nr_ticks_y = 2
+		idx = np.linspace(0,y_val.size,nr_ticks_y).astype(int)
+		idx[-1] -= 1
+		ticks = y_val[idx].astype(int)
+		plt.yticks(ticks, ticks)
+
+	if colorbar:
+		plt.colorbar()
+
+	# plot the mask
+	if mask is not None:
+		plt.contour(mask,levels=[0],colors='black',linestyles='dashed',
+	      			linewidths=0.5,extent=extent)
+
+
+
+def plot_tfr(tfrs:list,times:np.array,elec_oi:list):
+
+	# get relevant params
+	channels = tfrs[0].ch_names
+	if isinstance(elec_oi[0],str):
+		elec_idx = [channels.index(elec) for elec in elec_oi]
+	else:
+		elec_idx = []
+		for elec in elec_oi:
+			elec_idx += [[channels.index(e) for e in elec]]
+
+	# extract data for the current tf plot
+	X = np.stack([tf._data for tf in tfrs])
+	if isinstance(elec_oi[0],str):
+		X = X[:,elec_idx].mean(axis=1)
+	else:
+		X = X[:,elec_idx[0]].mean(axis=1) - X[:,elec_idx[1]].mean(axis=1)
+
+	
+
+		
+
+
 def plot_erp_time_course(erps:Union[list,dict],times:np.array,elec_oi:list,
 						contra_ipsi:str=None,cnds:list=None,colors:list=None,
 						show_SE:bool=False,smooth:bool=False,window_oi:Tuple=None,
