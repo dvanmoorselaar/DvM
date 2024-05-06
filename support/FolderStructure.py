@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from typing import Optional, Generic, Union, Tuple, Any
-from support.support import exclude_eye
+from support.support import exclude_eye, match_epochs_times
 from IPython import embed
 
 def blockPrinting(func):
@@ -172,7 +172,8 @@ class FolderStructure(object):
 
         return beh, eeg
 
-    def read_raw_beh(self,sj:int=None,session:int=None,files:bool=False)->pd.DataFrame:
+    def read_raw_beh(self,sj:int=None,session:int=None,
+                    files:bool=False)->pd.DataFrame:
         """Reads in raw behavior data from csv file to link to
         epochs data.
 
@@ -190,7 +191,8 @@ class FolderStructure(object):
             files = sorted(glob.glob(self.folder_tracker(ext=[
                     'beh', 'raw'],
                     fname=f'subject-{sj}_session_{session}*.csv')))
-                    
+        if files == []:
+            return []
         # read in as dataframe
         beh = [pd.read_csv(file) for file in files]
         beh = pd.concat(beh)
@@ -203,18 +205,24 @@ class FolderStructure(object):
 
     #@blockPrinting
     def read_erps(self, erp_folder:str,erp_name:str,
-                cnds:list=None,sjs:list='all')->Tuple[dict,np.array]:
+                cnds:list=None,sjs:list='all',
+                match:str=False)->Tuple[dict,np.array]:
         """
-        Read in evoked files of a specific analysis. Evoked data is returned
-        in dictionary
+        Read in evoked files of a specific analysis. Evoked data is 
+        returned in dictionary
 
         Args:
-            erp_folder (str): name of folder within erp folder that contains
-            data of interest
+            erp_folder (str): name of folder within erp folder that 
+            contains data of interest
             erp_name (str): name assigned to erp analysis
-            cnds (list, optional): conditions of interest. Defaults to None
+            cnds (list, optional): conditions of interest. 
+            Defaults to None
             (i.e., no conditions).
             sjs (list, optional): List of subjects. Defaults to 'all'.
+            match (str, optional): If match is not False, it will be 
+            explicitly checked whether timing events match between
+            read in files. If not, samples will be removed until 
+            matching. Defaults to False.
 
         Returns:
             erps (dict): Dictionary with evoked data (with conditions as keys)
@@ -238,6 +246,13 @@ class FolderStructure(object):
 
             # read in actual data
             erps[cnd] = [mne.read_evokeds(file)[0] for file in files]
+            if match:
+                nr_samples = [erp.times.size for erp in erps[cnd]]
+                if len(set(nr_samples)) > 1:
+                    print('samples are artificilaly aligned. Please inspect ') 
+                    print('data carefully' )
+                    erps[cnd] = match_epochs_times(erps[cnd])
+        
         times = erps[cnd][0].times
 
         return erps, times

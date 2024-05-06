@@ -33,7 +33,7 @@ from autoreject import get_rejection_threshold
 from eeg_analyses.EYE import *
 from math import sqrt
 from IPython import embed
-from support.support import get_time_slice
+from support.support import get_time_slice, trial_exclusion
 from support.FolderStructure import *
 from scipy.stats.stats import pearsonr
 from mne.viz.epochs import plot_epochs_image
@@ -140,13 +140,13 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
 
         # rereference all EEG channels to reference channels
         self.set_eeg_reference(ref_channels=ref_channels)
-        to_remove += ref_channels
+
+        if ref_channels != 'average':
+            to_remove += ref_channels
         print('EEG data was rereferenced to channels {}'.format(ref_channels))
-        logging.info(
-            'EEG data was rereferenced to channels {}'.format(ref_channels))
 
         # select eog channels
-        eog = self.copy().pick_types(eeg=False, eog=True)
+        #eog = self.copy().pick_types(eeg=False, eog=True)
 
         # # rerefence EOG data (vertical and horizontal)
         # idx_v = [eog.ch_names.index(vert) for vert in vEOG]
@@ -169,6 +169,7 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
         # #self.add_channels([eog])
 
         # drop ref chans
+        to_remove = [ch for ch in to_remove if ch in self.ch_names]
         self.drop_channels(to_remove)
         print('Reference channels and empty channels removed')
         logging.info('Reference channels and empty channels removed')
@@ -209,33 +210,51 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
         print('Channels renamed to 10-20 system, and montage added')
         logging.info('Channels renamed to 10-20 system, and montage added')
 
-    def eventSelection(self, trigger, binary=0, consecutive=False, min_duration=0.003):
-        '''
-        Returns array of events necessary for epoching.
+    def select_events(self,event_id:list,stim_channel:str=None,binary:int=0, 
+                      consecutive:bool=False,
+                      min_duration:float=0.003)->np.array:
+        """Used mne.find_events to find events from raw file
 
-        Arguments
-        - - - - -
-        raw (object): raw mne eeg object
-        binary (int): is subtracted from stim channel to control for spoke triggers  (e.g. subtracts 3840)
+        Args:
+            event_id (list): list of relevant trigger values
+            stim_channel (str, optional): Name of the stim channel or 
+            all the stim channels affected by triggers. 
+            Defaults to None.
+            binary (int, optional): is subtracted from stim channel to 
+            control for spoke triggers (e.g. subtracts 3840). 
+            Defaults to 0.
+            consecutive (bool, optional): If False, report only 
+            instances where the value of the events channel changes 
+            from/to zero. Defaults to False.
+            min_duration (float, optional): The minimum duration of a 
+            change in the events channel required to consider it as an 
+            event (in seconds). Defaults to 0.003.
 
-        Returns
-        - - - -
-        events(array): numpy array with trigger events (first column contains the event time in samples and the third column contains the event id)
-        '''
+        Returns:
+            events: The array of events. The first column contains the
+            event time in samples, with first_samp included. 
+            The third column contains the event id.
+        """
 
-        self._data[-1, :] -= binary # Make universal
+        # control for spoke trigger values 
+        # (e.g. summation af arbitrary number to all trigger values)
+        self._data[-1, :] -= binary 
 
-        events = mne.find_events(self, stim_channel=None, consecutive=consecutive, min_duration=min_duration)
+        # find events using mne defaults
+        events = mne.find_events(self,stim_channel=stim_channel, 
+                                 consecutive=consecutive, 
+                                 min_duration=min_duration)
 
         # Check for consecutive
         if not consecutive:
             spoke_idx = []
             for i in range(events[:-1,2].size):
-                if events[i,2] == events[i + 1,2] and events[i,2] in trigger:
+                if events[i,2] == events[i + 1,2] and events[i,2] in event_id:
                     spoke_idx.append(i)
 
             events = np.delete(events,spoke_idx,0)
-            logging.info('{} spoke events removed from event file'.format(len(spoke_idx)))
+            nr_removed = len(spoke_idx)
+            print(f'{nr_removed} spoke events removed from event file')
 
         return events
 
@@ -370,8 +389,9 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
 
 
     def align_meta_data(self,events:np.array,trigger_header:str='trigger',
-                        headers:list=[],idx_remove:np.array=None,
-                        del_practice:bool=True):
+                        beh_oi:list=[],idx_remove:np.array=None,
+                        eye_inf:dict=None,del_practice:bool=True, 
+                        excl_factor:dict=None,):
         """
         Aligns epoched data with behavioral data as stored in a .csv file. The
         .csv file should contains all behavioral parameters organised in
@@ -391,14 +411,17 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             events (np.array): event info as returned by RAW.event_selection
             trigger_header (str, optional): Column in raw behavior that
             contains trigger values used for epoching. Defaults to 'trigger'.
-            headers (list, optional): List of headers (i.e., column names) that
+            beh_oi (list, optional): List of headers (i.e., column names) that
             should be linked to epochs. Defaults to [].
             idx_remove (np.array, optional): Indices of trigger events that
             need to be removed. Allows removal of spoke triggers (i.e., trigger
             events that should not be analysed)
+            eye_inf (dict, optional): Dictionary with eye tracking parameters
             del_practice (bool, optional): If True, practice trials are removed
             from the behavior file before epochs alignment (requires a column
             named practice with values 'yes' or 'no' in .csv file)
+            excl_factor (dict, optional): Dictionary with factors that should
+            be excluded from analysis. Defaults to None.
 
         Raises:
             ValueError: In case behavior and eeg data do not align
@@ -416,16 +439,18 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
 
         print('Linking behavior to epochs')
         report_str = ''
-
+  
         # read in data file and select param of interest
         beh = self.read_raw_beh(self.sj, self.session)
-        beh = beh[headers]
+        if len(beh) == 0:
+            return [], 'No behavior file found'
+        beh = beh[beh_oi]
 
         # get eeg triggers in epoched order
         bdf_triggers = events[self.selection, 2]
 
         # remove practice trials
-        if del_practice and 'practice' in headers:
+        if del_practice and 'practice' in beh_oi:
             nr_remove = beh[beh.practice == 'yes'].shape[0]
             # check whether bdf and practice triggers overlap
             practice_triggers = beh[trigger_header].values[:nr_remove]
@@ -461,8 +486,9 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         nr_miss = beh_triggers.size - bdf_triggers.size
         if nr_miss > 0:
             report_str += (f'Behavior has {nr_miss} more trials than detected '
-                          'events. The following trial numbers will be '
-                          'removed in an attempt to fix this: \n')
+                          'events. Trial numbers will be '
+                          'removed in an attempt to fix this (or see'
+                          'terminal output): \n')
 
             if 'nr_trials' not in beh.columns:
                 raise ValueError('Behavior file does not contain a column '
@@ -494,6 +520,8 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                                 'many eeg triggers received. Please pass '
                                 'indices of trials to be removed '
                                 'to subject_info dict with key bdf_remove')
+            
+        add_info = False if nr_miss > 10 else True
 
         while nr_miss > 0:
             stop = True
@@ -502,7 +530,10 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                 if tr != beh_triggers[i]: # remove trigger from beh_file
                     miss = beh['nr_trials'].iloc[i]
                     missing_trials.append(miss)
-                    report_str += f'{miss}, '
+                    if add_info:
+                        report_str += f'{miss}, '
+                    else: 
+                        print(f'removed trial {miss}')
                     beh.drop(beh.index[i], inplace=True)
                     beh_triggers = np.delete(beh_triggers, i, axis = 0)
                     nr_miss -= 1
@@ -526,14 +557,22 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         missing = np.array(missing_trials)
         beh.reset_index(inplace = True)
 
-        # add behavior to epochs object
-        self.metadata = beh
-
-        # log number of matches between beh and eeg
+        # log number of matches between beh and ee
         nr_matches = sum(beh[trigger_header].values == bdf_triggers)
         nr_epochs = bdf_triggers.size
         report_str += (f'\n {nr_matches} matches between beh and epoched '
-                      f'data out of {nr_epochs}')
+                      f'data out of {nr_epochs}. ')
+        
+        # link eye(tracker) data
+        beh['eye_bins'] = self.link_eye(eye_inf,missing,vEOG=eye_inf['eog'][:2],
+                      hEOG=eye_inf['eog'][2:])
+
+        # add behavior to epochs object
+        if excl_factor is not None:
+            beh, self = trial_exclusion(beh, self, excl_factor)
+            report_str += 'Excluded trials based on factors. '
+            report_str += 'Final set contains {} trials'.format(beh.shape[0])
+        self.metadata = beh
 
         return missing, report_str
 
@@ -696,7 +735,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                     raw signal of all electrodes)
             inspect {bool} -- If True gives the opportunity to overwrite selected components
         """
-        embed()
+
         # select data for artifact rejection
         sfreq = self.info['sfreq']
         self_copy = self.copy()
@@ -946,30 +985,35 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
 
         # if specified rereference external eog electrodes via subtraction
         # select eog channels
-        eog = self.copy().pick_types(eeg=False, eog=True)
+        vEOG = [ch for ch in vEOG if ch in self.ch_names]
+        hEOG = [ch for ch in hEOG if ch in self.ch_names]
+        if len(vEOG) == 0 and len(hEOG) == 0:
+            pass
+        else:
+            eog = self.copy().pick_types(eeg=False, eog=True)
 
-        # # rerefence EOG data (vertical and horizontal)
-        ch_names = eog.ch_names
-        idx_v = [ch_names.index(v) for v in vEOG] if vEOG is not None else []
-        idx_h = [ch_names.index(h) for h in hEOG] if hEOG is not None else []
+            # # rerefence EOG data (vertical and horizontal)
+            ch_names = eog.ch_names
+            idx_v = [ch_names.index(v) for v in vEOG] if vEOG is not None else []
+            idx_h = [ch_names.index(h) for h in hEOG] if hEOG is not None else []
 
-        eog_data, eog_ch = [], []
-        if len(idx_v) == 2:
-            VEOG = eog._data[:,idx_v[0]] - eog._data[:,idx_v[1]]
-            eog_data.append(VEOG)
-            eog_ch.append('VEOG')
-        if len(idx_h) == 2:
-            HEOG = eog._data[:,idx_h[0]] - eog._data[:,idx_h[1]]
-            eog_data.append(HEOG)
-            eog_ch.append('HEOG')
-        
-        if len(eog_data) > 0:
-            eog_data =  np.stack(eog_data).swapaxes(0,1)   
-            self.add_channel_data(eog_data, eog_ch, self.info['sfreq'],
-                                'eog', self.tmin)
-            print(
-            'EOG data (VEOG, HEOG) rereferenced with subtraction and '
-            'renamed EOG channels')
+            eog_data, eog_ch = [], []
+            if len(idx_v) == 2:
+                VEOG = eog._data[:,idx_v[0]] - eog._data[:,idx_v[1]]
+                eog_data.append(VEOG)
+                eog_ch.append('VEOG')
+            if len(idx_h) == 2:
+                HEOG = eog._data[:,idx_h[0]] - eog._data[:,idx_h[1]]
+                eog_data.append(HEOG)
+                eog_ch.append('HEOG')
+            
+            if len(eog_data) > 0:
+                eog_data =  np.stack(eog_data).swapaxes(0,1)   
+                self.add_channel_data(eog_data, eog_ch, self.info['sfreq'],
+                                    'eog', self.tmin)
+                print(
+                'EOG data (VEOG, HEOG) rereferenced with subtraction and '
+                'renamed EOG channels')
             
         # if eye tracker data exists align x, y eye tracker with eeg
         if eye_info is not None:
@@ -1010,6 +1054,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                 for i in range(1,len(trial_split)):
                     trial_split[i] += trial_split[i-1][-1]
                 trial_inf = np.hstack(trial_split)
+
             # check whether missing trials in trial_info
             drop_eye = False
             remove = np.intersect1d(missing, trial_inf)
@@ -1025,13 +1070,15 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             x = np.delete(x, idx, axis =0)
             y = np.delete(y, idx, axis = 0)              
 
-            self.metadata['eye_bins'] = bins
+            #self.metadata['eye_bins'] = bins
 
             # add x, y to epochs object
             data = np.stack((x,y,angles)).swapaxes(0,1)
             t_min  = eye_info['window_oi'][0]/1000
             self.add_channel_data(data, ['x','y','dev'], eye_info['sfreq'],
                                 'eog', t_min)
+            
+            return bins
 
     def add_channel_data(self, data, ch_names, sfreq, ch_type, t_min):
 
@@ -1407,21 +1454,26 @@ class ArtefactReject(object):
         (eog_epochs,
         eog_inds,
         eog_scores) = self.automated_ica_blink_selection(ica, raw, threshold)
-        ica.exclude = [eog_inds[0]]
-        exclude_prev = [eog_inds[0]]
+        ica.exclude = [eog_inds[0]] if len(eog_inds) > 0 else []
+        exclude_prev = [eog_inds[0]] if len(eog_inds) > 0 else []
         manual_correct = True
         cnt = 0
 
         while True:
             if report is not None:
-                pass
+                if eog_epochs is not None:
+                    eog_evoked = eog_epochs.average()
+                    scores = eog_scores[0]
+                else:
+                    eog_evoked = None
+                    scores =  None
                 report.add_ica(
                     ica=ica,
                     title='ICA blink cleaning',
                     picks=range(15),
                     inst=fit_inst,
-                    eog_evoked=eog_epochs.average(),
-                    eog_scores=eog_scores[0],
+                    eog_evoked=eog_evoked,
+                    eog_scores=scores,
                     )
                 report.save(report_path, overwrite = True)
 
@@ -1490,6 +1542,7 @@ class ArtefactReject(object):
         else:
             eog_epochs = None
             eog_inds = list()
+            eog_scores = None
             print('No EOG channel is present. Cannot automate IC detection '
                 'for EOG')
 

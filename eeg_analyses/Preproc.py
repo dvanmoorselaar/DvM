@@ -45,7 +45,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     EEG.setMontage(montage='biosemi64')
 
     # get epoch triggers
-    events = EEG.eventSelection(event_id, binary=binary, min_duration=0)
+    events = EEG.select_events(event_id,binary=binary, min_duration=0)
 
     #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
     if preproc_param['run_ica']:
@@ -78,7 +78,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
 
     # MATCH BEHAVIOR FILE
     idx_remove = sj_info['bdf_remove'] if 'bdf_remove' in sj_info.keys() else None
-    missing, report_str = epochs.align_meta_data(events, trigger_header = trigger_header, headers = beh_oi, idx_remove = idx_remove)
+    missing, report_str = epochs.align_meta_data(events, trigger_header = trigger_header, beh_oi = beh_oi, idx_remove = idx_remove)
     report.add_html(report_str, title = 'Linking events to behavior')
     report.save(report_file, overwrite = True)
 

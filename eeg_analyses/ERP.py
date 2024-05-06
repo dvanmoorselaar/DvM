@@ -29,7 +29,8 @@ from support.support import select_electrodes,trial_exclusion,create_cnd_loop,\
 class ERP(FolderStructure):
 
     def __init__(self, sj, epochs, beh, header, baseline, 
-                l_filter = None, h_filter = None,report=False):
+                l_filter = None, h_filter = None, downsample:int=None,
+                report=False):
 
         # if filters are specified, filter data before trial averaging  
         if l_filter is not None or h_filter is not None:
@@ -39,6 +40,11 @@ class ERP(FolderStructure):
         self.beh = beh
         self.header = header
         self.baseline = baseline
+        
+        if downsample is not None:
+            if downsample < int(epochs.info['sfreq']):
+                print('downsampling data')
+                self.epochs.resample(downsample)
         self.report = report
 
     def report_erps(self, evoked: mne.Evoked, erp_name: str):
@@ -138,8 +144,8 @@ class ERP(FolderStructure):
             evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1])
         if save: 
             evoked.save(self.folder_tracker(['erp', self.header],
-                                        f'{erp_name}-ave.fif'),
-                                        overwrite=True)
+                                        f'{erp_name}-ave.fif',
+                                        overwrite=True))
         else:
             return evoked
 

@@ -776,7 +776,7 @@ class CTF(BDM):
 		slide = 1+self.slide_wind	
 		nr_bins = self.nr_bins
 		_, nr_elec, nr_samples_tr = E_train.shape 
-		nr_samples_tr -= - self.slide_wind
+		nr_samples_tr -= self.slide_wind
 		if GAT:
 			nr_samples_te = E_test.shape[-1] - self.slide_wind
 		else:

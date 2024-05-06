@@ -14,6 +14,32 @@ from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
 
+def match_epochs_times(erps:list)->list:
+	"""Finds all objects where the number of samples exceed those of the
+	object with the lowest number of samples and truncates those objects
+	""
+
+	Args:
+		erps (list): list of evoked objects
+
+	Returns:
+		list: list of evoked objects with same time axis
+	"""
+
+	# get min nr of samples
+	min_samp_idx = np.argmin([e.times.size for e in erps])
+	base_epoch = erps[min_samp_idx]
+	min_samp = base_epoch.times.size
+	
+	# loop over all objects
+	for i, e in enumerate(erps):
+		if e.times.size > min_samp:
+			upd_epoch = base_epoch.copy()
+			upd_epoch._data = e._data[...,:min_samp]
+			erps[i] = upd_epoch
+
+	return erps
+
 def get_diff_pairs(montage:str, ch_names:list)->dict:
 	"""Returns a dictionary that allows for the creation of a 
 	contralateral vs. ipsilateral topography, where left 
@@ -258,6 +284,7 @@ def eog_filt(eog:np.array,sfreq:float,windowsize:int=200,
 	return eye_trials
 
 def trial_exclusion(beh, epochs, excl_factor):
+
 
 	mask = [(beh[key] == f).values for  key in excl_factor.keys() for f in excl_factor[key]]
 	for m in mask: 

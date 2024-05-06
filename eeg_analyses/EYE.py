@@ -93,7 +93,7 @@ class EYE(FolderStructure):
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
 		trial_info = np.array(trial_info[0]) if len(eye_files) == 1 else np.hstack(trial_info)
 		beh = self.read_raw_beh(files = beh_files)
-		beh = pd.concat([pd.read_csv(file) for file in beh_files])
+		#beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
 		# check whether each beh trial is logged within eye
 		nr_miss =  eye.shape[0] - beh.shape[0]
@@ -125,9 +125,11 @@ class EYE(FolderStructure):
 			trial_info = trial_info[:-nr_miss]
 
 		# remove practice trials from eye and beh data
-		eye = eye[np.array(beh['practice'] == 'no')]
-		trial_info = trial_info[np.array(beh['practice'] == 'no')]
-		beh = beh[beh['practice'] == 'no']
+
+		if 'practice' in beh.keys():
+			eye = eye[np.array(beh['practice'] == 'no')]
+			trial_info = trial_info[np.array(beh['practice'] == 'no')]
+			beh = beh[beh['practice'] == 'no']
 
 		return eye, beh, np.squeeze(np.array(trial_info))
 
@@ -138,8 +140,6 @@ class EYE(FolderStructure):
 		blinks = trial['events']['Eblk']
 		x = np.array(trial['x'])
 		y = np.array(trial['y'])
-		if not np.any(x):
-			return x, y	
 
 		#pad 100ms before and after blink
 		pad = int(100/(1000/self.sfreq))
@@ -148,6 +148,9 @@ class EYE(FolderStructure):
 			idx = slice(idx.start - pad, idx.stop + pad)
 			x[idx] = None
 			y[idx] = None
+
+		if np.isnan(x).any():
+			return x, y
 
 		# interpolate all blinks/missing data in x,y
 		no_blink_idx = (~np.isnan(x)).nonzero()[0]
@@ -195,7 +198,7 @@ class EYE(FolderStructure):
 						idx = get_time_slice(tr_times, start, end)
 
 						if interpolate_blinks:
-							x_, y_  = self.interp_trial(trial)
+								x_, y_  = self.interp_trial(trial)
 						else:
 							x_ = np.array(trial['x'])
 							y_ = np.array(trial['y'])
