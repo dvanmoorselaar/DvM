@@ -192,8 +192,8 @@ class BDM(FolderStructure):
 	def classify(self,cnds:dict=None,window_oi:tuple=None,
 				labels_oi:Union[str,list]='all',collapse:bool=False,
 				excl_factor:dict=None,nr_perm:int=0,GAT:bool=False, 
-				downscale:bool=False,save:bool=True,
-				bdm_name:str='main')->dict:
+				downscale:bool=False,split_fact:dict=None,
+				save:bool=True,bdm_name:str='main')->dict:
 		"""
 		Multivariate decoding across time of the classes specified upon 
 		class initialization. Decoding can either be condition specific,
@@ -218,11 +218,16 @@ class BDM(FolderStructure):
 			of the condition list. 
 
 			Example:
-			cnds = dict(condition = [['present'],'absent'])). 	
+			cnds = dict(condition = [['present'],'absent']))
 
 			In this case the model is trained using data from the 
 			present condition to predict data within the absent 
-			condition. Multiple training conditions can be specified.		
+			condition. Multiple testing conditions can also be 
+			specified. To use multiple training and testing conditions 
+			use the following syntax:
+
+			cnds = dict(condition = [['train_1','train_2'],
+										['test_1','test_2']))
 
 			window_oi (tuple, optional): time window of interest. 
 			Defaults to None --> use all samples in epochs
@@ -239,7 +244,7 @@ class BDM(FolderStructure):
 			pointed to the left and not to the right 
 			specify the following: 
 
-			excl_factor = dict('cue_direc': ['right']). 
+			excl_factor = dict(cue_direc = ['right']). 
 			
 			Mutiple column headers and multiple variables per header can 
 			be specified. Defaults to None (i.e., no trial exclusion).
@@ -279,13 +284,17 @@ class BDM(FolderStructure):
 					excl_factor = {self.to_decode:to_exclude}
 				else:
 					excl_factor[self.to_decode] = to_exclude
-		
+
+		headers = [cnd_head]
+		if split_fact is not None:
+			headers += list(split_fact.keys())
+
 		(X,
 		y,
 		beh, 
 		times) = self.select_bdm_data(self.epochs.copy(), self.beh.copy(),
-									window_oi, excl_factor, cnd_head)
-		
+									window_oi, excl_factor, headers)
+
 		(nr_labels,
 		tr_max, 
 		tr_cnds, 
@@ -301,10 +310,18 @@ class BDM(FolderStructure):
 		# set up dict to save decoding scores
 		bdm_params = {}
 
-		(bdm_scores, 
-		bdm_params, 
-		bdm_info) = self.classify_(X,y,beh,tr_cnds,te_cnds,cnd_head,tr_max,labels_oi,
-					collapse,GAT,nr_perm)
+		if split_fact is None:
+			(bdm_scores, 
+			bdm_params, 
+			bdm_info) = self.classify_(X,y,beh,tr_cnds,te_cnds,cnd_head,tr_max,
+										labels_oi, collapse,GAT,nr_perm)
+		else:
+			(bdm_scores, 
+			bdm_params, 
+			bdm_info) = self.iter_classify_(split_fact,X,y,beh,tr_cnds,te_cnds,
+								   			cnd_head,tr_max,labels_oi, 
+											collapse,GAT,nr_perm)	
+					
 		bdm_scores.update({'info':{'elec':self.elec_oi,'times':times}})
 	
 		# create report (specific to unpermuted data)
@@ -324,9 +341,50 @@ class BDM(FolderStructure):
 					pickle.dump(bdm_params, handle)				
 
 		return bdm_scores	
+	
+	def iter_classify_(self,split_fact:dict,X:np.array,y:np.array,
+					beh:pd.DataFrame,tr_cnds:list,te_cnds:list,cnd_head:str,
+					tr_max:list,labels_oi:Union[str,list],collapse:bool,
+					GAT:bool,nr_perm:int):
+		"""
+		helper function of classify that does decoding 
+		per condition in an iterative procedure such that decoding 
+		output reflects the mean of the seperate decoding regimes
+		"""
+
+		# split the selected data into subsets and apply decoding 
+		# within those subsets
+		dec_scores = []
+		for key, value in split_fact.items():
+			for v in value:
+				mask = beh[key] == v
+				X_ = X[mask]
+				y_ = y[mask].reset_index(drop = True)
+				beh_ = beh[mask].reset_index(drop = True)
+				# reset max trials for folding
+				tr_max = [self.selectMaxTrials(beh_,tr_cnds,labels_oi,
+								   			cnd_head)]
+				
+				(bdm_scores, 
+				bdm_params, 
+				bdm_info) = self.classify_(X_,y_,beh_,tr_cnds,te_cnds,cnd_head,
+							   			tr_max,labels_oi, collapse,GAT,nr_perm)
+				
+				dec_scores.append(bdm_scores)
+
+		# create averaged output dictionary
+		#TODO: update params and info
+		for key in (k for k in bdm_scores if k != 'bdm_info'):
+			output = np.mean([scores[key]['dec_scores'] for scores 
+						 							in dec_scores], axis = 0)
+			bdm_scores[key]['dec_scores'] = output
+
+		return bdm_scores, bdm_params, bdm_info
+
+
 
 	def classify_(self,X:np.array,y:np.array,beh:pd.DataFrame,tr_cnds:list,
-			   		te_cnds:list,cnd_head:str,max_tr:list,
+			   		te_cnds:list,cnd_head:str,tr_max:list,
 					labels_oi:Union[str,list],collapse:bool,GAT:bool,
 					nr_perm:int):
 		"""
@@ -350,8 +408,8 @@ class BDM(FolderStructure):
 				# get condition indices and labels
 				(beh, cnd_idx, 
 				cnd_labels, labels,
-				max_tr) = self.get_condition_labels(beh, cnd_head,tr_cnd,max_tr, 
-													labels_oi,collapse)
+				tr_max) = self.get_condition_labels(beh, cnd_head,tr_cnd,
+													tr_max, labels_oi,collapse)
 
 				# initiate decoding arrays for current condition
 				if GAT:
@@ -376,7 +434,7 @@ class BDM(FolderStructure):
 					if p > 0: # shuffle condition labels
 						np.random.shuffle(cnd_labels)
 				
-					for i, n in enumerate(max_tr):
+					for i, n in enumerate(tr_max):
 						if i > 0:
 							print(f'Minimum condition label downsampled to {n}')
 							bdm_info = {}
@@ -398,7 +456,7 @@ class BDM(FolderStructure):
 														cnd_labels, n, bdm_info) 
 								(Xtr, Xte, 
 								Ytr, Yte) = self.train_test_select(X, y,
-																train_tr, test_tr)
+																train_tr,test_tr)
 							
 							(class_acc[run, p], 
 							weights[run, p],
@@ -479,7 +537,7 @@ class BDM(FolderStructure):
 		beh_te, 
 		times_te) = self.select_bdm_data(self.epochs[1].copy(),
 										self.beh[1].copy(),te_window_oi,
-										te_excl_factor,cnd_header)
+										te_excl_factor,[cnd_header])
 
 		# check labels
 		if te_labels_oi == 'all':
@@ -653,7 +711,7 @@ class BDM(FolderStructure):
 
 	def select_bdm_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
 						window_oi:tuple,excl_factor:dict=None,
-						cnd_header:str=None)-> \
+						headers:list=None)-> \
 						Tuple[np.array, pd.DataFrame, np.array]:
 		"""
 		Selects bdm data and applies initial data transformation steps 
@@ -674,7 +732,7 @@ class BDM(FolderStructure):
 			window_oi (tuple): time window of interest
 			excl_factor (dict, optional): exclude specific conditions 
 			(see classify or localizer_classify)). Defaults to None.
-			cnd_header (str, optional): column that contains condition 
+			headers (list, optional): column that contains condition 
 			info. Makes sure that trial averaging is condition 
 			(and label) specific. Defaults to None.
 
@@ -693,7 +751,7 @@ class BDM(FolderStructure):
 
 		# average across trials
 		(epochs, 
-		beh) = self.average_trials(epochs,beh,[self.to_decode,cnd_header]) 
+		beh) = self.average_trials(epochs,beh,[self.to_decode] + headers) 
 		y = beh[self.to_decode]		
 
 		# apply filtering and downsampling (if specified)
@@ -1041,7 +1099,6 @@ class BDM(FolderStructure):
 			return epochs, beh
 
 		print(f'Averaging across {avg_trials} trials')
-
 		# initiate condition and label list
 		cnds, labels, X = [], [], []
 
@@ -1051,7 +1108,10 @@ class BDM(FolderStructure):
 			cnd_header = 'condition'
 			beh['condition'] = 'all_data'
 		else:
-			cnd_header = beh_headers[-1]	
+			cnd_header = beh_headers[1]	
+			if beh.shape[-1] == 3:
+				split_header = beh_headers[-1]
+				split = []
 
 		# loop over each label and condition pair
 		options = dict(beh.apply(lambda col: col.unique()))
@@ -1076,10 +1136,17 @@ class BDM(FolderStructure):
 			X += [epochs._data[idx].mean(axis = 0) for idx in avg_idx]
 			labels  += [var_combo[self.to_decode]] * len(avg_idx)
 			cnds += [var_combo[cnd_header]] * len(avg_idx)
+			if beh.shape[-1] == 3:
+				split += [var_combo[split_header]] * len(avg_idx)
 
 		# set data
 		epochs._data = np.stack(X)
-		beh = pd.DataFrame.from_dict({cnd_header:cnds, self.to_decode:labels})
+		if beh.shape[-1] == 3:
+			beh = pd.DataFrame.from_dict({cnd_header:cnds,
+								self.to_decode:labels, split_header:split})
+		else:
+			beh = pd.DataFrame.from_dict({cnd_header:cnds,
+								self.to_decode:labels})
 
 		return epochs, beh
 

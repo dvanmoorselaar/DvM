@@ -1071,7 +1071,6 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             y = np.delete(y, idx, axis = 0)              
 
             #self.metadata['eye_bins'] = bins
-
             # add x, y to epochs object
             data = np.stack((x,y,angles)).swapaxes(0,1)
             t_min  = eye_info['window_oi'][0]/1000
