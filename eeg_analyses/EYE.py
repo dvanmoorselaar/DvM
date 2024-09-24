@@ -92,6 +92,11 @@ class EYE(FolderStructure):
 			eye = [e[0] for e in eye]
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
 		trial_info = np.array(trial_info[0]) if len(eye_files) == 1 else np.hstack(trial_info)
+		# filthy hack to deal with missing events
+		if np.where(np.isnan(trial_info))[0] > 0:
+			for idx in np.where(np.isnan(trial_info))[0]:
+				trial_info[idx] = trial_info[np.array((idx-1,idx+1))].mean()
+
 		beh = self.read_raw_beh(files = beh_files)
 		#beh = pd.concat([pd.read_csv(file) for file in beh_files])
 
@@ -141,24 +146,28 @@ class EYE(FolderStructure):
 		x = np.array(trial['x'])
 		y = np.array(trial['y'])
 
-		#pad 100ms before and after blink
-		pad = int(100/(1000/self.sfreq))
+		if np.isnan(x).any():
+			return x, y
+
+		#pad 75ms before and after blink
+		pad = int(75/(1000/self.sfreq))
 		for blink in blinks:
 			idx = get_time_slice(trial['trackertime'], blink[0], blink[1])
 			idx = slice(idx.start - pad, idx.stop + pad)
 			x[idx] = None
 			y[idx] = None
 
-		if np.isnan(x).any():
-			return x, y
-
 		# interpolate all blinks/missing data in x,y
-		no_blink_idx = (~np.isnan(x)).nonzero()[0]
-		blink_idx  = np.isnan(x).nonzero()[0]
-		x_no_blink = x[~np.isnan(x)]
-		y_no_blink = y[~np.isnan(y)] 
-		x[np.isnan(x)] = np.interp(blink_idx , no_blink_idx, x_no_blink)
-		y[np.isnan(y)] = np.interp(blink_idx , no_blink_idx, y_no_blink)
+		if not np.isnan(x).all():
+			no_blink_idx = (~np.isnan(x)).nonzero()[0]
+			blink_idx  = np.isnan(x).nonzero()[0]
+			x_no_blink = x[~np.isnan(x)]
+			y_no_blink = y[~np.isnan(y)] 
+			x[np.isnan(x)] = np.interp(blink_idx , no_blink_idx, x_no_blink)
+			y[np.isnan(y)] = np.interp(blink_idx , no_blink_idx, y_no_blink)
+		else:
+			x = np.zeros(x.size)
+			y = np.zeros(y.size)
 
 		return x, y
 
@@ -188,6 +197,7 @@ class EYE(FolderStructure):
 		x = np.zeros((len(eye),times.size))
 		y = np.copy(x)
 		# look for start_event in all logged events
+
 		for i, trial in enumerate(eye):
 			for event in trial['events']['msg']:
 				if start_event in event[1]:
@@ -197,16 +207,18 @@ class EYE(FolderStructure):
 						tr_times = trial['trackertime'] - event[0]
 						idx = get_time_slice(tr_times, start, end)
 
-						if interpolate_blinks:
-								x_, y_  = self.interp_trial(trial)
+						if interpolate_blinks and tr_times[0] >= start:
+							x_, y_  = self.interp_trial(trial)
 						else:
 							x_ = np.array(trial['x'])
 							y_ = np.array(trial['y'])
 
 						# populate x,y with window of interest
+						# TODO: Fill from right
+						start_fill = x.shape[1]- x_[idx][:times.size].size
 						try:
-							x[i,:] = x_[idx][:times.size]
-							y[i,:] = y_[idx][:times.size]
+							x[i,start_fill:] = x_[idx][:times.size]
+							y[i,start_fill:] = y_[idx][:times.size]
 						except:
 							pass
 
@@ -263,6 +275,7 @@ class EYE(FolderStructure):
 				if not np.isnan(x_d).any():
 					nr_sac = SD.detectEvents(x_d, y_d)
 
+
 					if nr_sac == 0: 
 						x_ += (self.scr_res[0]/2) - x_d.mean()
 						y_ += (self.scr_res[1]/2) - y_d.mean()
@@ -284,11 +297,10 @@ class EYE(FolderStructure):
 
 	def link_eye_to_eeg(self, eye_file, beh_file, start_trial, stop_trial,window_oi, 
 						trigger_msg, drift_correct):
-
+		
 		# read in eye data (linked to behavior)
 		print('reading in eye tracker data')
 		eye, beh, trial_info = self.get_eye_data('', eye_file, beh_file, start_trial, trigger_msg,stop_trial)
-		embed()
 		# collect x, y data 
 		x, y, times = self.get_xy(eye, window_oi[0], window_oi[1], trigger_msg)	
 		# apply drift correction if specified
@@ -879,10 +891,14 @@ class SaccadeGlissadeDetection(object):
 		N = 2 											# order of poynomial
 		span = np.ceil(self.min_sac * self.sfreq)		# span of filter
 		F = int(2 * span - 1)							# window length
-
+		
 		# calculate the velocity and acceleration
-		x_ = savgol_filter(x, F, N, deriv = 0)
-		y_ = savgol_filter(y, F, N, deriv = 0)
+		try:
+			x_ = savgol_filter(x, F, N, deriv = 0)
+			y_ = savgol_filter(y, F, N, deriv = 0)
+		except:
+			return np.zeros(x.size), np.zeros(x.size)
+
 
 		V_x = savgol_filter(x, F, N, deriv = 1)
 		V_y = savgol_filter(y, F, N, deriv = 1)

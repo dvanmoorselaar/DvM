@@ -452,12 +452,15 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         # remove practice trials
         if del_practice and 'practice' in beh_oi:
             nr_remove = beh[beh.practice == 'yes'].shape[0]
+            nr_exp = beh[beh.practice == 'no'].shape[0]
             # check whether bdf and practice triggers overlap
             practice_triggers = beh[trigger_header].values[:nr_remove]
-            if all(practice_triggers == bdf_triggers[:nr_remove]):
+            if all(practice_triggers == bdf_triggers[:nr_remove]) and \
+                nr_exp -  bdf_triggers.size < 0:
                 self.drop(np.arange(nr_remove))    
-                report_str += (f'{nr_remove} practice events removed'
-                           ' based on automatic detection')
+                report_str += (f'{nr_remove} practice events removed '
+                           'from eeg based on automatic detection. '
+                           'Please inspect data carefully')
                 bdf_triggers = np.delete(bdf_triggers, np.arange(nr_remove))
             print(f'{nr_remove} practice trials removed from behavior')
             beh = beh[beh.practice == 'no']
@@ -487,7 +490,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         if nr_miss > 0:
             report_str += (f'Behavior has {nr_miss} more trials than detected '
                           'events. Trial numbers will be '
-                          'removed in an attempt to fix this (or see'
+                          'removed in an attempt to fix this (or see '
                           'terminal output): \n')
 
             if 'nr_trials' not in beh.columns:
@@ -519,7 +522,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                 raise ValueError('Behavior and eeg cannot be linked as too '
                                 'many eeg triggers received. Please pass '
                                 'indices of trials to be removed '
-                                'to subject_info dict with key bdf_remove')
+                                'to subject_info dict with key bdf_remove ')
             
         add_info = False if nr_miss > 10 else True
 
@@ -562,7 +565,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         nr_epochs = bdf_triggers.size
         report_str += (f'\n {nr_matches} matches between beh and epoched '
                       f'data out of {nr_epochs}. ')
-        
+
         # link eye(tracker) data
         beh['eye_bins'] = self.link_eye(eye_inf,missing,vEOG=eye_inf['eog'][:2],
                       hEOG=eye_inf['eog'][2:])
@@ -1045,7 +1048,8 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                             eye_info['stop'],eye_info['window_oi'], 
                             eye_info['trigger_msg'],
                             eye_info['drift_correct'])
-               
+
+
             # check alignment
             session_switch = np.diff(trial_inf) < 1
             if sum(session_switch) > 0:
@@ -1058,18 +1062,21 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             # check whether missing trials in trial_info
             drop_eye = False
             remove = np.intersect1d(missing, trial_inf)
+
             idx = []
+
+            # check whether additional trials need to be removed
             if remove.size > 0:
                 _,_,idx = np.intersect1d(remove,trial_inf,return_indices=True) 
-            elif self.metadata.shape[0] < trial_inf.size:
-                to_remove = trial_inf.size - self.metadata.shape[0]
-                idx = np.arange(trial_inf.size)[-to_remove:]
+            # elif self.metadata.shape[0] < trial_inf.size:
+            #     to_remove = trial_inf.size - self.metadata.shape[0]
+            #     idx = np.arange(trial_inf.size)[-to_remove:]
 
             bins = np.delete(bins,idx,axis = 0)
             angles = np.delete(angles, idx,axis = 0)
             x = np.delete(x, idx, axis =0)
-            y = np.delete(y, idx, axis = 0)              
-
+            y = np.delete(y, idx, axis = 0)    
+       
             #self.metadata['eye_bins'] = bins
             # add x, y to epochs object
             data = np.stack((x,y,angles)).swapaxes(0,1)
@@ -1928,6 +1935,7 @@ class ArtefactReject(object):
         if mask is not None:
             Z_n[mask] = X_z[:,mask].sum(axis = 0)/sqrt(nr_elec)
         if filter_z[0]:
+            print(Z_n.shape)
             Z_n = filter_data(Z_n, filter_z[1], None, 4, pad='reflect_limited')
 
         # adjust threshold (data driven)

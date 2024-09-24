@@ -47,14 +47,14 @@ class CTF(BDM):
 	'''
 
 	def __init__(self,sj:int,epochs:mne.Epochs,beh:pd.DataFrame, 
-				to_decode:str,nr_bins:int,nr_chans:int,nr_iter:int=10, 
-				nr_folds:int=3,elec_oi:Union[str,list]='all',
+				to_decode:str,nr_bins:int,nr_chans:int,shift_chans:int=0,
+				nr_iter:int=10,nr_folds:int=3,elec_oi:Union[str,list]='all',
 				sin_power = 7,delta:bool=False,method:str='Foster',
 				avg_ch:bool=True,ctf_param:Union[str,bool]='slope',
 				power:str='band',min_freq:int=4,max_freq:int=40,
 				num_frex:int=25,freq_scaling:str='log',slide_window:int=0,
 				laplacian:bool=False,pca_cmp:int=0,
-				baseline:Optional[tuple]=None):
+				baseline:Optional[tuple]=None,seed:Union[int, bool] = 42213):
 		''' 
 		
 		Arguments
@@ -85,6 +85,8 @@ class CTF(BDM):
 		self.avg_ch = avg_ch
 		self.cross = False
 		self.baseline = baseline
+		self.seed = seed
+		self.shift_chans = shift_chans
 
 		# specify model parameters
 		self.method = method
@@ -102,11 +104,11 @@ class CTF(BDM):
 		self.laplacian = laplacian
 		self.pca=pca_cmp
 		# hypothesized set tuning functions underlying power measured across electrodes
-		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans, 
-											  sin_power,delta)
+		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans,
+										   	self.shift_chans, sin_power,delta)
 		
-	def calculate_basis_set(self,nr_bins:int,nr_chans:int, 
-			 				sin_power:int,delta:bool)->np.array:
+	def calculate_basis_set(self,nr_bins:int,nr_chans:int,shift_chans:int=0, 
+			 				sin_power:int=7,delta:bool=False)->np.array:
 		"""
 		calculateBasisset returns a basisset that is used to reconstruct 
 		location-selective CTFs from the topographic distribution 
@@ -163,8 +165,8 @@ class CTF(BDM):
 			x = np.linspace(0, 2*pi - 2*pi/nr_bins, nr_bins) 
 			x += np.deg2rad(180/nr_bins)
 
-		c_centers = np.linspace(0, 2*pi - 2*pi/nr_chans, nr_chans)			
-		c_centers = np.rad2deg(c_centers)
+		# c_centers = np.linspace(0, 2*pi - 2*pi/nr_chans, nr_chans)			
+		# c_centers = np.rad2deg(c_centers)
 		
 		if delta:
 			pred = np.zeros(nr_bins)
@@ -181,13 +183,14 @@ class CTF(BDM):
 
 		basisset = np.zeros((nr_chans,nr_bins))
 		for c in range(nr_chans):
-			basisset[c,:] = np.roll(pred,c+1)
+			basisset[c,:] = np.roll(pred,c+1+shift_chans)
 	
 		return basisset	
 	
 	def spatial_ctf(self,pos_labels:dict ='all',cnds:dict=None, 
 					excl_factor:dict=None,window_oi:tuple=(None,None),
-					freqs:dict='main_param',downsample:int = 1,GAT:bool=False, 
+					freqs:dict='main_param',
+					downsample:int = 1,GAT:bool=False, 
 					nr_perm:int= 0,collapse:bool=False,name:int='main'):
 		"""
 		calculate spatially based channel tuning functions across 
@@ -243,6 +246,7 @@ class CTF(BDM):
 		nr_perm += 1
 		nr_elec = len(epochs.ch_names)
 		tois = get_time_slice(epochs.times, window_oi[0], window_oi[1])
+		times_oi = epochs.times[tois]
 		nr_samples = epochs.times[tois][::downsample].size
 		ctf, info = {}, {}
 		freqs, nr_freqs = self.set_frequencies(freqs)
@@ -395,8 +399,24 @@ class CTF(BDM):
 				ctf[cnd]['W_raw'] = ctf[cnd].pop('W_E')
 				del ctf[cnd]['C2_T']
 				del ctf[cnd]['W_T']
-				
+
 		# save output
+		times_oi = epochs.times[tois][::downsample]
+		if self.ctf_param:
+			print('get ctf tuning params')
+			ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
+					  							data_type, GAT,
+												avg_ch=self.avg_ch,
+												test_bins=test_bins)
+			
+			ctf_param.update({'info':{'times':times_oi}})
+
+			with open(self.folder_tracker(['ctf',self.to_decode], 
+					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
+				print('saving ctf params')
+				pickle.dump(ctf_param, handle)
+
+		ctf.update({'info':{'times':times_oi}})
 		with open(self.folder_tracker(['ctf',self.to_decode], 
 				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
 			print('saving ctfs')
@@ -404,19 +424,8 @@ class CTF(BDM):
 
 		with open(self.folder_tracker(['ctf',self.to_decode], 
 				fname = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
-			pickle.dump(info, handle)	
-
-		if self.ctf_param:
-			print('get ctf tuning params')
-			ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
-					  							data_type, GAT,
-												avg_ch=self.avg_ch)
-
-			with open(self.folder_tracker(['ctf',self.to_decode], 
-					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
-				print('saving ctf params')
-				pickle.dump(ctf_param, handle)
-
+			pickle.dump(info, handle)
+		
 	def select_ctf_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
 						elec_oi:Union[list, str]= 'all',
 						excl_factor: dict = None) -> Tuple[mne.Epochs,
@@ -737,9 +746,9 @@ class CTF(BDM):
 			idx_shift = abs(bins - bins[i]).argmin()
 			shift = idx_shift - nr_2_shift
 			if self.nr_bins % 2 == 0:							
-				C2s[i,:] = np.roll(C2[i,:], - shift)	
+				C2s[i,:] = np.roll(C2[i,:], - shift - self.shift_chans)	
 			else:
-				C2s[i,:] = np.roll(C2[i,:], - shift - 1)			
+				C2s[i,:] = np.roll(C2[i,:], - shift - 1 - self.shift_chans)			
 
 		return C2s, W 
 
@@ -837,6 +846,9 @@ class CTF(BDM):
 			bin labels balanced)
 		"""
 
+		if self.seed:
+			np.random.seed(self.seed) # set seed 
+
 		# select training data (ensure that number of bins is balanced)
 		train_bins = pos_bins[train_idx]
 		train_idx = np.arange(pos_bins.size)[train_idx]
@@ -903,6 +915,9 @@ class CTF(BDM):
 		- - - -
 		blocks(array): randomly assigned block indices
 		'''
+
+		if self.seed:
+			np.random.seed(self.seed) # set seed 
 		
 		# get trial count and condition indices
 		cnd_bins = pos_bins[cnd_idx]
@@ -1308,7 +1323,8 @@ class CTF(BDM):
 		return params
 
 	def summarize_ctfs(self,ctfs:dict,params:dict,nr_samples:Union[int,tuple],
-					   nr_freqs:int,nr_perm:int=1,avg_ch:bool=True)->dict:
+					   nr_freqs:int,nr_perm:int=1,avg_ch:bool=True,
+					   test_bins:np.array=None)->dict:
 		"""
 		
 		Args:
@@ -1327,6 +1343,8 @@ class CTF(BDM):
 			avg_ch (bool, optional): Should the ctf be characterized
 			individually for each spatial channel (False) or averaged
 			across channels. Defaults to True.
+			test_bins (np.array, optional): test bins actually used to 
+			fit ctf
 
 		Returns:
 			params (dict): output parameters
@@ -1337,11 +1355,15 @@ class CTF(BDM):
 	
 		# infer datatypes to extract
 		signals = np.unique([key.split('_')[0] for key in params.keys()])
+
 		for signal in signals:		
 			# get params for each permutation
 			for p in range(nr_perm):
 				signal_ctfs = ctfs[f'C2_{signal}'][p]
 				if avg_ch:
+					# check whether ctfs contains unfitted bins
+					if test_bins.size < self.nr_bins:
+						signal_ctfs = signal_ctfs[:,:,test_bins]
 					signal_ctfs = signal_ctfs.mean(axis = -2)
 					params = self.extract_ctf_params(signal_ctfs, params,
 					 								signal, p)
@@ -1361,8 +1383,8 @@ class CTF(BDM):
 		return params
 
 	def get_ctf_tuning_params(self,ctf:dict,params:str='slopes',
-			   				data_type:str='power',
-							GAT:bool=False,avg_ch:bool=True)->dict:
+			   				data_type:str='power',GAT:bool=False,
+							avg_ch:bool=True,test_bins:np.array=None)->dict:
 		"""
 		Quantifies the ctfs as calulated by spatial_ctf and 
 		localizer_spatial_ctf by either only the slopes, or more fine 
@@ -1389,6 +1411,8 @@ class CTF(BDM):
 		"""
 
 		# determine the output parameters
+		if test_bins is None:
+			test_bins = np.arange(self.nr_bins)
 		output_params = []
 		signals = ['T','E'] if data_type == 'power' else ['raw']
 		output_params += [f'{signal}_slopes' for signal in signals]
@@ -1426,7 +1450,7 @@ class CTF(BDM):
 			# get paramters
 			ctf_param[cnd] = self.summarize_ctfs(ctf[cnd],ctf_param[cnd],
 				     							nr_samples,nr_freq,nr_perm,
-												avg_ch)
+												avg_ch,test_bins)
 		
 			# get rid of unecessary dimensions
 			ctf_param[cnd] = {k: np.squeeze(v) 

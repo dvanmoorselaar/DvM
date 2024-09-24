@@ -1,3 +1,4 @@
+import mne
 import numpy as np
 import seaborn as sns
 import matplotlib
@@ -27,7 +28,6 @@ matplotlib.rcParams.update(params)
 meanlineprops = dict(linestyle='--', linewidth=1, color='black')
 medianlineprops = dict(linestyle='-', linewidth=1, color='black')
 
-
 def plot_time_course(x:np.array,y:np.array,
 					show_SE:bool=False,smooth:bool=False,**kwargs):
 
@@ -45,6 +45,149 @@ def plot_time_course(x:np.array,y:np.array,
 	if show_SE:
 		kwargs.pop('label', None)
 		plt.fill_between(x,y+err,y-err,alpha=0.2,**kwargs)
+
+def plot_significance(x:np.array,y:np.array,p_thresh:float=0.05,
+					  stats:str='perm',marker_y:float=0.48,**kwargs):
+
+	if stats == 'perm':
+		(t_obs, 
+		clusters, 
+		clust_pv, 
+		H0) = mne.stats.permutation_cluster_1samp_test(y)
+
+	for cl, p_val in zip(clusters, clust_pv):
+		if p_val <= p_thresh:
+			plt.plot(x[cl], marker_y * np.ones_like(x[cl]),**kwargs)
+
+def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
+						show_SE:bool=False,smooth:bool=False,
+						output:str='raw_slopes',stats:Union[str,bool]='perm',
+						onset_times:Union[list,bool]=[0],offset_axes:int=10,
+						show_legend:bool=True,**kwargs):
+	
+	times = ctfs[0]['info']['times']
+
+	if cnds is None:
+		cnds = [key for key in bdms[0] if 'info' not in key]
+
+	if isinstance(output, str):
+		output = [output]
+
+	if colors is None or len(colors) < len(cnds):
+		print('not enough colors specified. Using default colors')
+		colors = list(mcolors.TABLEAU_COLORS.values())
+
+	for c, cnd in enumerate(cnds):
+		color = colors[c] 
+		for o, out in enumerate(output):
+			# extract data
+			y = np.stack([ctf[cnd][out] for ctf in ctfs])
+			if len(output) > 1:
+				label = f'{cnd} - {out}'
+			else:
+				label = cnd
+			plot_time_course(times,y,show_SE,smooth,
+								label=label,color=color,ls=['-','--'][o])
+			if stats:
+				if c == 0:
+					y_ = np.stack([ctf[cnd][out] for cnd in cnds 
+															for ctf in ctfs])
+					y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
+					y_min = np.mean(y_, axis = 1).min()
+					y_max = np.mean(y_, axis = 1).max()
+					step = (y_max - y_min)/25
+
+				marker_y = y_min - np.abs(y_min * step*c)
+				plot_significance(times,y,stats=stats,
+								color=color,marker_y=marker_y,
+								ls=['-','--'][o])
+			
+	# fine tune plot	
+	if show_legend:
+		handles, labels = plt.gca().get_legend_handles_labels()
+		by_label = dict(zip(labels, handles))
+		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
+		prop={'size': 7},frameon=False)
+
+	if onset_times:
+		for t in onset_times:
+			plt.axvline(t,color = 'black',ls='--',lw=1)
+	
+	plt.xlabel('Time (ms)')
+	plt.ylabel(output)
+	plt.axhline(0, color = 'black', ls = '--', lw=1)
+
+	sns.despine(offset = offset_axes)
+
+
+def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,colors:list=None,
+						show_SE:bool=False,smooth:bool=False,method:str='auc',
+						chance_level:float=0.5,stats:Union[str,bool]='perm',
+						onset_times:Union[list,bool]=[0],offset_axes:int=10,
+						show_legend:bool=True,ls = '-',**kwargs):
+	
+	times = bdms[0]['info']['times']
+	
+	if cnds is None:
+		cnds = [key for key in bdms[0] if 'info' not in key]
+
+	if colors is None or len(colors) < len(cnds):
+		print('not enough colors specified. Using default colors')
+		colors = list(mcolors.TABLEAU_COLORS.values())
+
+	for c, cnd in enumerate(cnds):
+		# extract data
+		y = np.stack([bdm[cnd]['dec_scores'] for bdm in bdms])
+		color = colors[c] 
+		plot_time_course(times,y,show_SE,smooth,
+							label=cnd,color=color,ls=ls)
+		if stats:
+			if c == 0:
+				y_ = np.stack([bdm[cnd]['dec_scores'] for cnd in cnds 
+				   										for bdm in bdms])
+				y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
+				y_min = np.mean(y_, axis = 1).min()
+				y_max = np.mean(y_, axis = 1).max()
+				step = (y_max - y_min)/25
+
+			marker_y = y_min - np.abs(y_min * step*c)
+			plot_significance(times,y-chance_level,stats=stats,
+					 		 color=color,marker_y = marker_y)
+
+	# fine tune plot	
+	if show_legend:
+		handles, labels = plt.gca().get_legend_handles_labels()
+		by_label = dict(zip(labels, handles))
+		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
+		prop={'size': 7},frameon=False)
+
+	if onset_times:
+		for t in onset_times:
+			plt.axvline(t,color = 'black',ls='--',lw=1)
+	
+	plt.xlabel('Time (ms)')
+	plt.ylabel(method)
+	plt.axhline(chance_level, color = 'black', ls = '--', lw=1)
+
+	sns.despine(offset = offset_axes)
+
+def plot_tfr(tfrs:list,times:np.array,elec_oi:list):
+
+	# get relevant params
+	channels = tfrs[0].ch_names
+	if isinstance(elec_oi[0],str):
+		elec_idx = [channels.index(elec) for elec in elec_oi]
+	else:
+		elec_idx = []
+		for elec in elec_oi:
+			elec_idx += [[channels.index(e) for e in elec]]
+
+	# extract data for the current tf plot
+	X = np.stack([tf._data for tf in tfrs])
+	if isinstance(elec_oi[0],str):
+		X = X[:,elec_idx].mean(axis=1)
+	else:
+		X = X[:,elec_idx[0]].mean(axis=1) - X[:,elec_idx[1]].mean(axis=1)
 
 def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
 	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
@@ -81,36 +224,12 @@ def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
 		plt.contour(mask,levels=[0],colors='black',linestyles='dashed',
 	      			linewidths=0.5,extent=extent)
 
-
-
-def plot_tfr(tfrs:list,times:np.array,elec_oi:list):
-
-	# get relevant params
-	channels = tfrs[0].ch_names
-	if isinstance(elec_oi[0],str):
-		elec_idx = [channels.index(elec) for elec in elec_oi]
-	else:
-		elec_idx = []
-		for elec in elec_oi:
-			elec_idx += [[channels.index(e) for e in elec]]
-
-	# extract data for the current tf plot
-	X = np.stack([tf._data for tf in tfrs])
-	if isinstance(elec_oi[0],str):
-		X = X[:,elec_idx].mean(axis=1)
-	else:
-		X = X[:,elec_idx[0]].mean(axis=1) - X[:,elec_idx[1]].mean(axis=1)
-
-	
-
-		
-
-
 def plot_erp_time_course(erps:Union[list,dict],times:np.array,elec_oi:list,
 						contra_ipsi:str=None,cnds:list=None,colors:list=None,
-						show_SE:bool=False,smooth:bool=False,window_oi:Tuple=None,
-						offset_axes:int=10,onset_times:Union[list,bool]=[0],
-						show_legend:bool=True,ls = '-'):
+						show_SE:bool=False,smooth:bool=False,
+						window_oi:Tuple=None,offset_axes:int=10,
+						onset_times:Union[list,bool]=[0],
+						show_legend:bool=True,ls = '-',**kwargs):
 
 	if isinstance(erps, list):
 		erps = {'temp':erps}

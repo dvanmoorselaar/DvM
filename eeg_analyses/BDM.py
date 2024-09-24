@@ -449,7 +449,8 @@ class BDM(FolderStructure):
 								test_idx = np.where(beh[cnd_head] == te_cnd)[0]
 								(Xtr, Xte, 
 								Ytr, Yte) = self.train_test_cross(X, y, 
-																cnd_idx, test_idx)
+																cnd_idx,test_idx)
+								
 							else:
 								(train_tr, test_tr, 
 								bdm_info) = self.train_test_split(cnd_idx, 
@@ -502,6 +503,7 @@ class BDM(FolderStructure):
 						avg_window:bool=False,GAT:bool=False,nr_perm:int=0,
 						save:bool=True, bdm_name:str='loc_dec'):
 		
+		self.cross = True
 		# set parameters
 		bdm_params = {}
 		self.nr_folds = 1
@@ -538,6 +540,8 @@ class BDM(FolderStructure):
 		times_te) = self.select_bdm_data(self.epochs[1].copy(),
 										self.beh[1].copy(),te_window_oi,
 										te_excl_factor,[cnd_header])
+
+		max_tr = self.selectMaxTrials(beh_te,cnds,te_labels_oi,cnd_header)
 
 		# check labels
 		if te_labels_oi == 'all':
@@ -597,7 +601,7 @@ class BDM(FolderStructure):
 				if p > 0: # shuffle condition labels
 					np.random.shuffle(cnd_labels)
 			
-				for i, n in enumerate(max_tr):
+				for i, n in enumerate([1]):
 					if i > 0:
 						print(f'Minimum condition label downsampled to {n}')
 						bdm_info = {}
@@ -611,10 +615,12 @@ class BDM(FolderStructure):
 						# split independent training and test data
 						(Xtr, _, 
 						Ytr, _) = self.train_test_cross(X_tr, y_tr, 
-														cnd_idx_tr, False)						
+														cnd_idx_tr,False)
+												
 						(Xte, _, 
 						Yte, _) = self.train_test_cross(X_te, y_te, 
-														cnd_idx_te, False)
+														cnd_idx_te,False,
+														max_tr)
 						
 						(class_acc[run, p], 
 						weights[run, p],
@@ -693,8 +699,8 @@ class BDM(FolderStructure):
 		_,
 		beh, 
 		times) = self.select_bdm_data(self.epochs[0].copy(),self.beh[0].copy(),
-									window_oi, excl_factor)
-
+									window_oi, excl_factor, [])
+		
 		# limit to labels of interest
 		if labels_oi == 'all':
 			labels_oi = np.unique(beh[self.to_decode])		
@@ -856,7 +862,7 @@ class BDM(FolderStructure):
 			tr_max = [self.selectMaxTrials(beh,cnds,labels_oi,cnd_head)] 
 			if downscale:
 				tr_max = [(i+1)*self.nr_folds 
-							for i in range(int(max_tr[0]/self.nr_folds))][::-1]
+							for i in range(int(tr_max[0]/self.nr_folds))][::-1]
 			tr_cnds, te_cnds = cnds, None
 			
 		if isinstance(te_cnds, str):
@@ -1282,7 +1288,7 @@ class BDM(FolderStructure):
 		return train_tr, test_tr, bdm_info
 
 	def train_test_cross(self,X:np.array,y:np.array,train_idx:np.array, 
-				test_idx:Union[np.array,bool])-> \
+				test_idx:Union[np.array,bool],max_tr:int=None)-> \
 				Tuple[np.array, np.array, np.array, np.array]:
 		"""
 		Creates independent training and test sets (based on training 
@@ -1313,11 +1319,12 @@ class BDM(FolderStructure):
 		# make sure that train label counts is balanced
 		tr_labels = y[train_idx].values
 		labels, label_counts = np.unique(tr_labels, return_counts = True)
-		min_tr = min(label_counts)	
+		if not isinstance(max_tr, int):
+			max_tr = min(label_counts)	
 
 		# select train data and labels
 		tr_idx = np.hstack([random.sample(list(np.where(tr_labels == l)[0]),  
-									k = min_tr) for l in labels])
+									k = max_tr) for l in labels])
 		Xtr = X[train_idx[tr_idx]]
 		Ytr = tr_labels[tr_idx]
 		
@@ -1333,11 +1340,12 @@ class BDM(FolderStructure):
 			# make sure that test label counts is balanced
 			test_labels = y[test_idx].values
 			labels, label_counts = np.unique(test_labels, return_counts = True)
-			min_tr = min(label_counts)	
+			if not isinstance(max_tr, int):
+				max_tr = min(label_counts)	
 
 			# select test data and labels
 			te_idx = [random.sample(list(np.where(test_labels == l)[0]),  
-											k = min_tr) for l in labels]
+											k = max_tr) for l in labels]
 			te_idx = np.hstack(te_idx)
 			Xte = X[np.array(test_idx)[te_idx]]
 			Yte = test_labels[te_idx]
@@ -1653,6 +1661,8 @@ class BDM(FolderStructure):
 						conf_matrix[n,tr_t] = conf_m
 						if not self.pca_components[0]:
 							weights[n,tr_t] = clf.coef_[0]
+						#TODO: create interpretable weights	
+						#np.dot(np.cov(Xtr_, rowvar = False), clf.coef_[0])
 					else:
 						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
 						pairs = list(zip(Yte_, predict))	

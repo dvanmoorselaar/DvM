@@ -17,15 +17,21 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
                 preproc_param:dict,project_folder:str,sj_info:dict,
                 eye_info:dict,beh_oi:list,trigger_header:str='trigger', 
                 flt_pad:float=0.5,binary:int = 0,
-                preproc_name:str='main',nr_sjs:int=24):
+                preproc_name:str='main',nr_sjs:int=24,excl_factor:dict = None):
 
     # check subject specific parameters
-    sj_info = sj_info[str(sj)] if str(sj) in sj_info.keys() else {'bad_chs': []}
-    
+    if str(sj) in sj_info.keys():
+        sj_info = sj_info[str(sj)]
+    else:
+        sj_info = {'bad_chs': []}
+
     # initiate report
-    report_file = FS.folder_tracker(ext=['preprocessing', 'report', preproc_name], 
-                     fname=f'sj_{sj}_ses_{session}.html')
-    report = mne.Report(title='preprocessing overview', subject = f'{sj}_{session}')
+    report_name = f'sj_{sj}_ses_{session}.html'
+    report_file = FS.folder_tracker(ext=['preprocessing', 'report', 
+                                    preproc_name], 
+                                    fname=report_name)
+    report = mne.Report(title='preprocessing overview', 
+                        subject = f'{sj}_{session}')
 
     # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME 
     EEG = mne.concatenate_raws([RawEEG(FS.folder_tracker(ext=['raw_eeg'], 
@@ -63,32 +69,46 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
             tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, 
             reject_by_annotation = False) 
+    
+    # MATCH BEHAVIOR FILE
+    idx_remove = sj_info['bdf_remove'] if 'bdf_remove' \
+                                            in sj_info.keys() else None
+    missing, report_str = epochs.align_meta_data(events,trigger_header, 
+                                                beh_oi=beh_oi,
+                                                idx_remove=idx_remove,
+                                                eye_inf = eye_info,
+                                                del_practice=True,
+                                                excl_factor=excl_factor)
+
+
+    report.add_html(report_str, title = 'Linking events to behavior')
     report.add_epochs(epochs, title='initial epoch', psd = True)
     report.save(report_file, overwrite = True)
 
     # ICA
-    AR = ArtefactReject(z_thresh = 4, max_bad = 5, flt_pad = epochs.flt_pad, filter_z = True)
+    AR = ArtefactReject(z_thresh = 4, max_bad = 5, flt_pad = epochs.flt_pad, 
+                        filter_z = True)
     if preproc_param['run_ica']: 
         epochs_ica = Epochs(sj, session, EEG_ica, events, event_id=event_id,
-            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, reject_by_annotation = False) 
+                    tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, 
+                    reject_by_annotation = False) 
+        _, _ = epochs_ica.align_meta_data(events,trigger_header, 
+                                                beh_oi=beh_oi,
+                                                idx_remove=idx_remove,
+                                                eye_inf = eye_info,
+                                                del_practice=True,
+                                                excl_factor=excl_factor)   
         epochs = AR.run_blink_ICA(epochs_ica, EEG, epochs, sj, session, 
                                 method = 'picard', threshold = 0.9, 
                                 report  = report, report_path = report_file)
         del EEG_ica, epochs_ica
 
-    # MATCH BEHAVIOR FILE
-    idx_remove = sj_info['bdf_remove'] if 'bdf_remove' in sj_info.keys() else None
-    missing, report_str = epochs.align_meta_data(events, trigger_header = trigger_header, beh_oi = beh_oi, idx_remove = idx_remove)
-    report.add_html(report_str, title = 'Linking events to behavior')
-    report.save(report_file, overwrite = True)
-
-    # LINK EYE MOVEMENTS
-    epochs.link_eye(eye_info,missing,vEOG=eog[:2],hEOG=eog[2:])
-
     # START AUTOMATIC ARTEFACT REJECTION 
     if preproc_param['run_autoreject']:
-        drop_bads = preproc_param['drop_bads'] if 'drop_bads' in preproc_param.keys() else True
-        epochs,z_thresh,report = AR.auto_repair_noise(epochs,drop_bads,report=report)
+        drop_bads = preproc_param['drop_bads'] if 'drop_bads' in \
+                                                preproc_param.keys() else True
+        epochs,z_thresh,report = AR.auto_repair_noise(epochs,
+                                                      drop_bads,report=report)
         report.save(report_file, overwrite = True)
     else:
         z_thresh = 0

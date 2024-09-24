@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from typing import Optional, Generic, Union, Tuple, Any
-from support.support import exclude_eye, match_epochs_times
+from support.support import exclude_eye, match_epochs_times, trial_exclusion
 from IPython import embed
 
 def blockPrinting(func):
@@ -73,7 +73,8 @@ class FolderStructure(object):
         return path
 
     def load_processed_eeg(self,sj:int,fname:str,preproc_name:str,
-                        eye_dict:dict=None,beh_file:bool=True)->\
+                        eye_dict:dict=None,beh_file:bool=True,
+                        excl_factor:dict=None)->\
                         Tuple[pd.DataFrame,mne.Epochs]:
         """
         Reads in preprocessed eeg data (mne.Epochs object) and 
@@ -100,6 +101,17 @@ class FolderStructure(object):
             step algorhytm applied to eog channel as specified in eye_ch
             beh_file (bool, optional): Is epoch info stored in a 
             seperate file or within epochs data. Defaults to True.
+            excl_factor (dict, optional): This gives the option to 
+			exclude specific conditions from the data that is read in. 
+			
+			For example, to only include trials where the cue was 
+			pointed to the left and not to the right 
+			specify the following: 
+
+			excl_factor = dict(cue_direc = ['right']). 
+			
+			Mutiple column headers and multiple variables per header can 
+			be specified. Defaults to None (i.e., no trial exclusion).
 
         Returns:
             beh (pd.DataFrame): behavioral data alligned to eeg data
@@ -120,6 +132,13 @@ class FolderStructure(object):
                     fname = f'subject-{sj}_{fname}.csv'))
             else:
                 beh = pd.DataFrame({'condition': epochs.events[:,2]})
+
+        # remove a subset of trials 
+        if type(excl_factor) == dict: 
+            beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+
+        # reset index(to properly align beh and epochs)
+        beh.reset_index(inplace = True, drop = True)
 
         # exclude eye movements based on threshold criteria in eye_dict
         if eye_dict is not None:

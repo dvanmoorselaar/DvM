@@ -120,7 +120,13 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 	if 'eye_ch' not in eye_dict:
 		print('Eye channel is not specified in eyedict, using HEOG as default')
 		eye_dict['eye_ch'] = 'HEOG'
-	s, e = eye_dict['window_oi']
+
+	# specify window of interest
+	s, e = eye_dict['window_oi']	
+	if drift_correct:
+		if drift_correct[0] < s:
+			s = drift_correct[0]	
+
 	window_idx = get_time_slice(epochs.times,s,e)
 
 	# check whether selection should be based on eyetracker data
@@ -129,28 +135,33 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		perc_tracker = 'no tracker'
 	else:
 		if 'x' in epochs.ch_names:
-			x = epochs._data[:,epochs.ch_names.index('x')]
-			y = epochs._data[:,epochs.ch_names.index('y')]
-			times = epochs.times
+			x = epochs._data[:,epochs.ch_names.index('x'),window_idx]
+			y = epochs._data[:,epochs.ch_names.index('y'),window_idx]
+			times = epochs.times[window_idx]
 			from eeg_analyses.EYE import EYE, SaccadeGlissadeDetection
 			EO = EYE(sfreq = epochs.info['sfreq'],
 					viewing_dist = eye_dict['viewing_dist'],
 					screen_res = eye_dict['screen_res'],
 					screen_h = eye_dict['screen_h'])
+
 			angles = EO.angles_from_xy(x,y,times,drift_correct)
-			angles_oi = np.array(angles)[:,window_idx]
+			if eye_dict['window_oi'][0] > 2:
+				window_idx = get_time_slice(times,eye_dict['window_oi'][0],e)
+				angles_oi = np.array(angles)[:,:window_idx]
+			else:
+				angles_oi = np.array(angles)
 			min_samples = 40 * epochs.info['sfreq']/1000 # 40 ms
 			tracker_bins = bin_tracker_angles(angles_oi, eye_dict['angle_thresh'],
 							min_samples)
 			perc_tracker = np.round(sum(tracker_bins == 1)/ 
 					sum(tracker_bins < 2)*100,1)
 		# temp code for docky				
-		elif 'eye_bins' in beh:
-			tracker_bins = beh.eye_bins.values
-			tracker_bins[tracker_bins <= eye_dict['angle_thresh']] = 0
-			tracker_bins[tracker_bins > eye_dict['angle_thresh']] = 1
-			perc_tracker = np.round(sum(tracker_bins == 1)/ 
-					sum(tracker_bins < 2)*100,1)
+		# elif 'eye_bins' in beh:
+		# 	tracker_bins = beh.eye_bins.values
+		# 	tracker_bins[tracker_bins <= eye_dict['angle_thresh']] = 0
+		# 	tracker_bins[tracker_bins > eye_dict['angle_thresh']] = 1
+		# 	perc_tracker = np.round(sum(tracker_bins == 1)/ 
+		# 			sum(tracker_bins < 2)*100,1)
 		else:
 			perc_tracker = 'no tracker data found'
 			tracker_bins = np.full(beh.shape[0], np.nan)
@@ -217,7 +228,6 @@ def bin_tracker_angles(angles:np.array,thresh:float,min_samp:float)->np.array:
 
 	#TODO: how to deal with trials without data
 	tracker_bins = []
-
 	for i, angle in enumerate(angles):
 		# get data where deviation from fix is larger than thresh
 		binned = np.where(angle > thresh)[0]
