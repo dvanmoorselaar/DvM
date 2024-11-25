@@ -120,6 +120,8 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 	if 'eye_ch' not in eye_dict:
 		print('Eye channel is not specified in eyedict, using HEOG as default')
 		eye_dict['eye_ch'] = 'HEOG'
+	if 'use_eog' not in eye_dict:
+		eye_dict['use_eog'] = True
 
 	# specify window of interest
 	s, e = eye_dict['window_oi']	
@@ -144,7 +146,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 					screen_res = eye_dict['screen_res'],
 					screen_h = eye_dict['screen_h'])
 
-			angles = EO.angles_from_xy(x,y,times,drift_correct)
+			angles = EO.angles_from_xy(x.copy(),y.copy(),times,drift_correct)
 			if eye_dict['window_oi'][0] > 2:
 				window_idx = get_time_slice(times,eye_dict['window_oi'][0],e)
 				angles_oi = np.array(angles)[:,:window_idx]
@@ -168,7 +170,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 
 	# apply step algorhytm to trials with missing data
 	nan_idx = np.where(np.isnan(tracker_bins) > 0)[0]
-	if nan_idx.size > 0:
+	if nan_idx.size > 0 and eye_dict['use_eog']:
 		eye_ch = eye_dict['eye_ch']
 		eog = epochs._data[nan_idx,epochs.ch_names.index(eye_ch),window_idx]
 		if 'step_param' not in eye_dict:
@@ -180,10 +182,11 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		tracker_bins[nan_idx[idx_art]] = 2
 		perc_eog = np.round(sum(tracker_bins == 2)/ nan_idx.size*100,1)
 		print('{} trials missing eyetracking'.format(len(nan_idx)))
-		print('data (used eog instead')
+		print('data (used eog instead)')
 	else:
 		perc_eog = 'eog not used for exclusion'
 
+	perc_eye = np.round(sum(tracker_bins > 1)/ tracker_bins.size*100,1)
 	# if it exists update preprocessing information
 	if os.path.isfile(preproc_file):
 		print('Eye exclusion info saved in preprocessing file (at session 1')
@@ -191,6 +194,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		df = pd.read_csv(preproc_file, index_col=[0,1],on_bad_lines='skip')
 		df.loc[idx,'% tracker'] = f'{perc_tracker}%' 
 		df.loc[idx,'% eog'] = f'{perc_eog}% (N = {nan_idx.size})'
+		df.loc[idx,'eye_excl'] = f'{perc_eye}%' 
 
 		# save datafile
 		df.to_csv(preproc_file)

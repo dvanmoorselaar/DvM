@@ -426,14 +426,14 @@ class TFR(FolderStructure):
 			ch_pairs = [['Fp1','Fp2'],['AF7','AF8'],['AF3','AF4'],
 						['F7','F8'],['F5','F6'],['F3','F4'],
 						['F1','F2'],('FT7','FT8'),['FC5','FC6'],
-						['FC3','FC4'],[]'FC1','FC2'],['T7','T8'],
-						['C5','C6'],['C3','C4'],['C1','C2'],[]'TP7','TP8'],
+						['FC3','FC4'],['FC1','FC2'],['T7','T8'],
+						['C5','C6'],['C3','C4'],['C1','C2'],['TP7','TP8'],
 						['CP5','CP6'],['CP3','CP4'],['CP1','CP2'],
-						['P9','P10'],['P7','P8'],['P5','P6'),('P3','P4'],
+						['P9','P10'],['P7','P8'],['P5','P6'],['P3','P4'],
 						['P1','P2'],['PO7','PO8'],['PO3','PO4'],
-						['O1','O2'],('Fpz','Fpz'),['AFz','AFz'],
-						['Fz,Fz'],('FCz,FCz'),('Cz,Cz'],['CPz,CPz'],['Pz,Pz'],
-						['POz,POz'],('Oz,Oz'],('Iz,Iz']]
+						['O1','O2'],['Fpz','Fpz'],['AFz','AFz'],
+						['Fz,Fz'],['FCz,FCz'],['Cz,Cz'],['CPz,CPz'],['Pz,Pz'],
+						['POz,POz'],['Oz,Oz'],['Iz,Iz']]
 	
 		if not duplicate:
 			pair_idx = [i for i, p in enumerate(ch_pairs) if p[0] in elec_oi]

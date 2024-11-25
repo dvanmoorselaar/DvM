@@ -525,7 +525,6 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                                 'to subject_info dict with key bdf_remove ')
             
         add_info = False if nr_miss > 10 else True
-
         while nr_miss > 0:
             stop = True
             # continue to remove beh trials until data files are lined up

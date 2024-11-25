@@ -47,13 +47,13 @@ class CTF(BDM):
 	'''
 
 	def __init__(self,sj:int,epochs:mne.Epochs,beh:pd.DataFrame, 
-				to_decode:str,nr_bins:int,nr_chans:int,shift_chans:int=0,
+				to_decode:str,nr_bins:int,nr_chans:int,shift_bins:int=0,
 				nr_iter:int=10,nr_folds:int=3,elec_oi:Union[str,list]='all',
 				sin_power = 7,delta:bool=False,method:str='Foster',
 				avg_ch:bool=True,ctf_param:Union[str,bool]='slope',
 				power:str='band',min_freq:int=4,max_freq:int=40,
 				num_frex:int=25,freq_scaling:str='log',slide_window:int=0,
-				laplacian:bool=False,pca_cmp:int=0,
+				laplacian:bool=False,pca_cmp:int=0,avg_trials:int=1,
 				baseline:Optional[tuple]=None,seed:Union[int, bool] = 42213):
 		''' 
 		
@@ -86,7 +86,7 @@ class CTF(BDM):
 		self.cross = False
 		self.baseline = baseline
 		self.seed = seed
-		self.shift_chans = shift_chans
+		self.shift_bins = shift_bins
 
 		# specify model parameters
 		self.method = method
@@ -103,11 +103,12 @@ class CTF(BDM):
 		self.slide_wind = slide_window
 		self.laplacian = laplacian
 		self.pca=pca_cmp
+		self.avg_trials = avg_trials
 		# hypothesized set tuning functions underlying power measured across electrodes
 		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans,
-										   	self.shift_chans, sin_power,delta)
+													sin_power,delta)
 		
-	def calculate_basis_set(self,nr_bins:int,nr_chans:int,shift_chans:int=0, 
+	def calculate_basis_set(self,nr_bins:int,nr_chans:int, 
 			 				sin_power:int=7,delta:bool=False)->np.array:
 		"""
 		calculateBasisset returns a basisset that is used to reconstruct 
@@ -183,8 +184,8 @@ class CTF(BDM):
 
 		basisset = np.zeros((nr_chans,nr_bins))
 		for c in range(nr_chans):
-			basisset[c,:] = np.roll(pred,c+1+shift_chans)
-	
+			basisset[c,:] = np.roll(pred,c+1)
+		
 		return basisset	
 	
 	def spatial_ctf(self,pos_labels:dict ='all',cnds:dict=None, 
@@ -237,8 +238,15 @@ class CTF(BDM):
 		"""
  
 		# read in data
-		epochs, beh = self.select_ctf_data(self.epochs, self.beh,
-											self.elec_oi, excl_factor)
+		epochs = self.epochs.copy()
+		beh = self.beh.copy()
+		if cnds is None:
+			(cnd_head,_) = (None,['all_data'])
+		else:
+			(cnd_head,_), = cnds.items()
+		headers = [cnd_head]
+		epochs, beh = self.select_ctf_data(epochs, beh,self.elec_oi, 
+											headers, excl_factor)
 
 		# set params
 		nr_itr = self.nr_iter * self.nr_folds
@@ -402,6 +410,8 @@ class CTF(BDM):
 
 		# save output
 		times_oi = epochs.times[tois][::downsample]
+		if self.slide_wind > 0:
+			times_oi = times_oi[:-self.slide_wind]
 		if self.ctf_param:
 			print('get ctf tuning params')
 			ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
@@ -427,8 +437,8 @@ class CTF(BDM):
 			pickle.dump(info, handle)
 		
 	def select_ctf_data(self,epochs:mne.Epochs,beh:pd.DataFrame,
-						elec_oi:Union[list, str]= 'all',
-						excl_factor: dict = None) -> Tuple[mne.Epochs,
+						elec_oi:Union[list, str]= 'all',headers:list = [],
+						excl_factor:dict = None) -> Tuple[mne.Epochs,
 															pd.DataFrame]:
 		"""
 		Selects the data of interest by selecting epochs and electrodes
@@ -445,15 +455,19 @@ class CTF(BDM):
 			beh (pd.DataFrame): behavioral parameters
 		"""
 
-		# if not already done reset index (to properly align beh and epochs)
-		beh.reset_index(inplace = True, drop = True)
-
 		# if specified remove trials matching specified criteria
 		if excl_factor is not None:
 			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
 
+		# if not already done reset index (to properly align beh and epochs)
+		beh.reset_index(inplace = True, drop = True)
+
 		if self.laplacian:
 			epochs = mne.preprocessing.compute_current_source_density(epochs)
+
+		# if specified # average across trials
+		(epochs, 
+		beh) = self.average_trials(epochs,beh,[self.to_decode] + headers) 
 
 		# limit analysis to electrodes of interest
 		picks = select_electrodes(epochs.ch_names, elec_oi) 
@@ -746,9 +760,14 @@ class CTF(BDM):
 			idx_shift = abs(bins - bins[i]).argmin()
 			shift = idx_shift - nr_2_shift
 			if self.nr_bins % 2 == 0:							
-				C2s[i,:] = np.roll(C2[i,:], - shift - self.shift_chans)	
+				C2s[i,:] = np.roll(C2[i,:], - shift)	
 			else:
-				C2s[i,:] = np.roll(C2[i,:], - shift - 1 - self.shift_chans)			
+				C2s[i,:] = np.roll(C2[i,:], - shift - 1)
+
+		# shift the predicted channel responses
+		# to a common spatial reference frame
+		C2s = np.roll(C2s, shift = self.shift_bins, axis = 0)
+		W = np.roll(W, shift = self.shift_bins, axis = 0)
 
 		return C2s, W 
 

@@ -38,7 +38,7 @@ def plot_time_course(x:np.array,y:np.array,
 			y = y.mean(axis=0)
 
 	if smooth:
-		y = savgol_filter(y, 51, 3)
+		y = savgol_filter(y, 9, 1)
 
 	plt.plot(x,y,**kwargs)
 
@@ -63,12 +63,14 @@ def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 						show_SE:bool=False,smooth:bool=False,
 						output:str='raw_slopes',stats:Union[str,bool]='perm',
 						onset_times:Union[list,bool]=[0],offset_axes:int=10,
-						show_legend:bool=True,**kwargs):
+						show_legend:bool=True,avg_bins:bool=False,**kwargs):
 	
+	if isinstance(ctfs, dict):
+		ctfs = [ctfs]
 	times = ctfs[0]['info']['times']
 
 	if cnds is None:
-		cnds = [key for key in bdms[0] if 'info' not in key]
+		cnds = [key for key in ctfs[0] if 'info' not in key]
 
 	if isinstance(output, str):
 		output = [output]
@@ -86,12 +88,27 @@ def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 				label = f'{cnd} - {out}'
 			else:
 				label = cnd
-			plot_time_course(times,y,show_SE,smooth,
+
+			if y.ndim > 2 and avg_bins:
+				y = y[:,:,~np.all(y == 0, axis=(0,1))].mean(axis=-1)
+			if y.ndim > 2:
+				for b in range(y.shape[-1]):
+					y_ = y[:,:,b]
+					if not np.all(y_ == 0):
+						bin_label = f'{label} - bin_{b}'
+						plot_time_course(times,y_,show_SE,smooth,
+									label=bin_label,color=colors[b],
+									ls=['-','--'][o])
+			else:
+				plot_time_course(times,y,show_SE,smooth,
 								label=label,color=color,ls=['-','--'][o])
 			if stats:
 				if c == 0:
 					y_ = np.stack([ctf[cnd][out] for cnd in cnds 
 															for ctf in ctfs])
+					
+					if y_.ndim > 2 and avg_bins:
+						y_ = y_[:,:,~np.all(y_ == 0, axis=(0,1))].mean(axis=-1)				
 					y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
 					y_min = np.mean(y_, axis = 1).min()
 					y_max = np.mean(y_, axis = 1).max()
@@ -125,7 +142,9 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,colors:list=None,
 						chance_level:float=0.5,stats:Union[str,bool]='perm',
 						onset_times:Union[list,bool]=[0],offset_axes:int=10,
 						show_legend:bool=True,ls = '-',**kwargs):
-	
+
+	if isinstance(bdms, dict):
+		bdms = [bdms]	
 	times = bdms[0]['info']['times']
 	
 	if cnds is None:

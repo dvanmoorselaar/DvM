@@ -160,8 +160,8 @@ class BDM(FolderStructure):
 			baseline (Optional[tuple], optional): [description]. 
 			Defaults to None.
 			seed (Optional[int]): Sets a random seed such that 
-			cross-validation procedure can be repeated. In case of False, 
-			no seed is applied before cross validation. In case 
+			cross-validation procedure can be repeated. In case of False 
+			, no seed is applied before cross validation. In case 
 			avg_runs > 1, seed will be increased by 1 for each run.
 			Defaults to 42213 (A1Z26 cipher of DvM)
 		"""	
@@ -340,7 +340,7 @@ class BDM(FolderStructure):
 						f'{bdm_name}_params.pickle') ,'wb') as handle:
 					pickle.dump(bdm_params, handle)				
 
-		return bdm_scores	
+		return bdm_scores, bdm_params	
 	
 	def iter_classify_(self,split_fact:dict,X:np.array,y:np.array,
 					beh:pd.DataFrame,tr_cnds:list,te_cnds:list,cnd_head:str,
@@ -380,8 +380,6 @@ class BDM(FolderStructure):
 			bdm_scores[key]['dec_scores'] = output
 
 		return bdm_scores, bdm_params, bdm_info
-
-
 
 	def classify_(self,X:np.array,y:np.array,beh:pd.DataFrame,tr_cnds:list,
 			   		te_cnds:list,cnd_head:str,tr_max:list,
@@ -477,7 +475,7 @@ class BDM(FolderStructure):
 							cnd_inf = str(tr_cnd)
 							if te_cnd is not None:
 								cnd_inf += f'_{te_cnd}'
-							W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
+							#W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
 							bdm_scores.update({cnd_inf:{'dec_scores': 
 												copy.copy(mean_class[0])}, 
 												'bdm_info': bdm_info})
@@ -495,6 +493,127 @@ class BDM(FolderStructure):
 
 		return bdm_scores, bdm_params, bdm_info
 	
+	def localizer_classify_(self,X_tr:np.array,y_tr:np.array,X_te:np.array,
+						 	y_te:np.array,labels_oi_tr:list,labels_oi_te:list,
+							cnd_header_te:str,cnds_te:list,cnd_idx_tr:list,
+							beh_te:pd.DataFrame,max_tr:list,GAT:bool,
+							nr_perm:int):
+		"""
+		helper function of localizer_classify that does actual decoding
+		per condition
+		"""
+		
+		# set decoding parameters
+		nr_epochs_tr,nr_elec,nr_time_tr = X_tr.shape
+		nr_epochs_te,nr_elec,nr_time_te = X_te.shape
+
+		# set up dict to save decoding scores
+		bdm_scores = {'info': {'elec':self.elec_oi,
+					 'times_oi':(nr_time_tr,nr_time_te)}}
+		bdm_params = {}
+
+		_, label_counts = np.unique(y_te, return_counts = True)
+		nr_tests = min(label_counts) * np.unique(y_te).size
+
+		nr_elec = X_tr.shape[1]
+		
+		# first round of classification is always done on non-permuted labels
+		nr_perm += 1
+
+		for cnd in cnds_te:
+
+			# get condition indices and labels
+			(beh_te, cnd_idx_te, 
+			cnd_labels, labels,
+			max_tr) = self.get_condition_labels(beh_te,cnd_header_te,cnd,max_tr, 
+												labels_oi_te)
+
+			# initiate decoding arrays
+			if GAT:
+				class_acc = np.empty((self.avg_runs, nr_perm,
+								nr_time_tr, nr_time_te)) * np.nan
+				conf_matrix = np.empty((self.avg_runs, nr_perm, 
+								nr_time_tr, nr_time_te, 
+								len(labels_oi_te), len(labels_oi_tr))) * np.nan
+				weights = np.empty((self.avg_runs, nr_perm,
+									nr_time_tr, nr_time_te, 
+									nr_elec)) * np.nan
+			else:	
+				#TODO: check whether time assignment works
+				class_acc = np.empty((self.avg_runs,nr_perm,
+								nr_time_te)) * np.nan	
+				conf_matrix = np.empty((self.avg_runs, nr_perm, 
+								nr_time_tr, len(labels_oi_te), 
+								len(labels_oi_tr))) * np.nan
+				weights = np.empty((self.avg_runs, nr_perm,
+									nr_time_te, nr_elec)) * np.nan
+
+			# permutation loop (if perm is 1, train labels are not shuffled)
+			for p in range(nr_perm):
+
+				if p > 0: # shuffle condition labels
+					np.random.shuffle(cnd_labels)
+			
+				for i, n in enumerate([1]):
+					if i > 0:
+						print(f'Minimum condition label downsampled to {n}')
+						bdm_info = {}
+
+					# select train and test trials
+					self.run_info = 1
+					for run in range(self.avg_runs):
+						#bdm_info.update({'run_' +str(self.run_info): {}})
+						# TODO2: make sure that bdm_info is saved 
+
+						# split independent training and test data
+						(Xtr, _, 
+						Ytr, _) = self.train_test_cross(X_tr, y_tr, 
+														cnd_idx_tr,False)
+												
+						(Xte, _, 
+						Yte, _) = self.train_test_cross(X_te, y_te, 
+														cnd_idx_te,False,
+														max_tr)
+
+						(class_acc[run, p], 
+						weights[run, p],
+						conf_matrix[run,p]) = self.cross_time_decoding(Xtr,Xte, 
+																Ytr, Yte, 
+																(labels_oi_tr,
+		 														labels_oi_te),
+																GAT, Xtr)
+												
+						self.seed += 1 # update seed used for cross validation
+						self.run_info += 1
+
+					mean_class = class_acc.mean(axis = 0)
+					conf_M = conf_matrix.mean(axis = 0)
+					W = weights.mean(axis = 0)[0]
+
+					if i == 0:
+						# get standard dec scores
+						#W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
+						bdm_scores.update({cnd:{'dec_scores': 
+										copy.copy(np.squeeze(mean_class[0]))}})
+						if self.output_params:
+							bdm_params.update({cnd:{'W':W, 
+											'conf_matrix':copy.copy(conf_M[0])
+											}})
+
+					else:
+						bdm_scores[cnd]['{}-nrlabels'.format(n)] = \
+										copy.copy(mean_class[0])
+
+				# bdm_scores.update({cnd:{'dec_scores': 
+				# 						copy.copy(np.squeeze(mean_class[0]))},
+				# 						'label_inf':copy.copy(label_inf)})
+
+				bdm_scores.update({cnd:{'dec_scores': 
+										copy.copy(np.squeeze(mean_class[0]))}})
+				
+		return bdm_scores, bdm_params
+
+	
 	def localizer_classify(self,te_cnds:dict=None,tr_window_oi:tuple=None,
 						te_window_oi:tuple=None,tr_excl_factor:dict=None,
 						te_excl_factor:dict=None,
@@ -503,11 +622,18 @@ class BDM(FolderStructure):
 						avg_window:bool=False,GAT:bool=False,nr_perm:int=0,
 						save:bool=True, bdm_name:str='loc_dec'):
 		
-		self.cross = True
+		# set bdm name
+		bdm_name = f'sj_{self.sj}_{bdm_name}'
+
 		# set parameters
-		bdm_params = {}
-		self.nr_folds = 1
+		self.cross = True
+		if self.nr_folds != 1:
+			print('Nr folds is reset: ')
+			print('Cross decoding is always done on a single fold')
+			self.nr_folds = 1
 		max_tr = [1]
+
+		# select condition specific data
 		if te_cnds is None:
 			# TODO: Make sure that trial averaging also works without condition info
 			cnds = ['all_data']
@@ -547,116 +673,11 @@ class BDM(FolderStructure):
 		if te_labels_oi == 'all':
 			te_labels_oi = np.unique(y_te)
 
-		# # and test data
-		# mask_te = np.in1d(y_te, labels_oi_te)
-		# y_te = y_te[mask_te]
-		# X_te = X_te[mask_te]
-
-		_, label_counts = np.unique(y_te, return_counts = True)
-		nr_tests = min(label_counts) * np.unique(y_te).size
-
-		nr_elec = X_tr.shape[1]
-		
-		# first round of classification is always done on non-permuted labels
-		nr_perm += 1
-
-		# set up dict to save decoding scores
-		bdm_scores = {'info': {'elec':self.elec_oi,
-					 'times_oi':(times_tr,times_te)}}
-
-		# set bdm name
-		bdm_name = f'sj_{self.sj}_{bdm_name}'
-
-		for cnd in cnds:
-
-			# get condition indices and labels
-			(beh_te, cnd_idx_te, 
-			cnd_labels, labels,
-			max_tr) = self.get_condition_labels(beh_te,cnd_header,cnd,max_tr, 
-												te_labels_oi)
-
-			# initiate decoding arrays
-			if GAT:
-				class_acc = np.empty((self.avg_runs, nr_perm,
-								times_tr.size, times_te.size)) * np.nan
-				conf_matrix = np.empty((self.avg_runs, nr_perm, 
-								times_tr.size, times_te.size, 
-								len(te_labels_oi), len(tr_labels_oi))) * np.nan
-				weights = np.empty((self.avg_runs, nr_perm,
-									times_tr.size, times_te.size, 
-									nr_elec)) * np.nan
-			else:	
-				#TODO: check whether time assignment works
-				class_acc = np.empty((self.avg_runs,nr_perm,
-								times_te.size)) * np.nan	
-				conf_matrix = np.empty((self.avg_runs, nr_perm, 
-								times_tr.size, len(te_labels_oi), 
-								len(tr_labels_oi))) * np.nan
-				weights = np.empty((self.avg_runs, nr_perm,
-									times_te.size, nr_elec)) * np.nan
-
-			# permutation loop (if perm is 1, train labels are not shuffled)
-			for p in range(nr_perm):
-
-				if p > 0: # shuffle condition labels
-					np.random.shuffle(cnd_labels)
-			
-				for i, n in enumerate([1]):
-					if i > 0:
-						print(f'Minimum condition label downsampled to {n}')
-						bdm_info = {}
-
-					# select train and test trials
-					self.run_info = 1
-					for run in range(self.avg_runs):
-						#bdm_info.update({'run_' +str(self.run_info): {}})
-						# TODO2: make sure that bdm_info is saved 
-
-						# split independent training and test data
-						(Xtr, _, 
-						Ytr, _) = self.train_test_cross(X_tr, y_tr, 
-														cnd_idx_tr,False)
-												
-						(Xte, _, 
-						Yte, _) = self.train_test_cross(X_te, y_te, 
-														cnd_idx_te,False,
-														max_tr)
-						
-						(class_acc[run, p], 
-						weights[run, p],
-						conf_matrix[run,p]) = self.cross_time_decoding(Xtr,Xte, 
-																Ytr, Yte, 
-																(tr_labels_oi,
-		 														te_labels_oi),
-																GAT, Xtr)
-												
-						self.seed += 1 # update seed used for cross validation
-						self.run_info += 1
-
-					mean_class = class_acc.mean(axis = 0)
-					conf_M = conf_matrix.mean(axis = 0)
-					W = weights.mean(axis = 0)[0]
-
-					if i == 0:
-						# get standard dec scores
-						#W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
-						bdm_scores.update({cnd:{'dec_scores': 
-										copy.copy(np.squeeze(mean_class[0]))}})
-						if self.output_params:
-							bdm_params.update({cnd:{'W':W, 
-											'conf_matrix':copy.copy(conf_M[0])
-											}})
-
-					else:
-						bdm_scores[cnd]['{}-nrlabels'.format(n)] = \
-										copy.copy(mean_class[0])
-
-				# bdm_scores.update({cnd:{'dec_scores': 
-				# 						copy.copy(np.squeeze(mean_class[0]))},
-				# 						'label_inf':copy.copy(label_inf)})
-
-				bdm_scores.update({cnd:{'dec_scores': 
-										copy.copy(np.squeeze(mean_class[0]))}})
+		(bdm_scores, 
+   		bdm_params) = self.localizer_classify_(X_tr,y_tr,X_te,y_te,
+												tr_labels_oi,te_labels_oi,
+												cnd_header,cnds,cnd_idx_tr,
+												beh_te,max_tr,GAT,nr_perm)
 
 		# store classification dict	
 		if save: 
@@ -671,6 +692,37 @@ class BDM(FolderStructure):
 					pickle.dump(bdm_params, handle)	
 
 		return bdm_scores	
+	
+	def sliding_window_base(self,epochs:mne.Epochs,
+						window_size:int=100)->mne.Epochs:
+		"""applies a sliding window baseline procedure to the data,
+		where the activity at each time point in the window of interest 
+		is demeaned by the average activity in the preceding window. 
+		Operates in place
+
+		Args:
+			epochs (mne.Epochs): epochs object
+			window_size (int, optional): size of the widnow in ms.
+			  Defaults to 100.
+		"""
+
+		# get data
+		raw_data = epochs._data.copy()
+
+		# get time points
+		window_size /= 1000
+		times = epochs.times
+
+		# find index of time point that can be demeaned
+		start_idx = np.argmin(abs(times - (times[0] + window_size)))
+
+		# loop over time points
+		for i in range(start_idx, raw_data.shape[-1]):
+			# get sliding window index
+			idx = get_time_slice(times, times[i]-window_size, times[i])
+			epochs._data[:,:,i] -= raw_data[:,:,idx].mean(axis = -1)
+
+		return epochs
 
 	def get_train_X(self,window_oi:tuple,excl_factor:dict,
 				 	labels_oi:Union[str,list],avg_window:bool)->Tuple[np.array, 
@@ -782,7 +834,10 @@ class BDM(FolderStructure):
 			epochs._data = abs(np.stack(power)[0])**2
 
 		# apply baseline correction
-		epochs.apply_baseline(baseline = self.baseline)
+		if isinstance(self.baseline, tuple):
+			epochs.apply_baseline(baseline = self.baseline)
+		else:
+			epochs.apply_baseline()
 
 		if self.downsample < int(epochs.info['sfreq']):
 			if self.window_size[0] == 1:
@@ -1660,9 +1715,10 @@ class BDM(FolderStructure):
 						class_acc[n,tr_t] = class_perf # 
 						conf_matrix[n,tr_t] = conf_m
 						if not self.pca_components[0]:
-							weights[n,tr_t] = clf.coef_[0]
+							weights[n,tr_t] = np.dot(np.cov(Xtr_, 
+									   			rowvar = False), clf.coef_[0])
 						#TODO: create interpretable weights	
-						#np.dot(np.cov(Xtr_, rowvar = False), clf.coef_[0])
+						#
 					else:
 						#class_acc[n,tr_t, te_t] = sum(predict == Yte_)/float(Yte_.size)
 						pairs = list(zip(Yte_, predict))	
@@ -1672,7 +1728,7 @@ class BDM(FolderStructure):
 						if not self.pca_components[0]:
 							weights[n,tr_t,te_t] = clf.coef_[0]
 
-		if self.pca_components[0]:
+		if not self.pca_components[0]:
 			weights = np.squeeze(np.mean(weights, axis = 0))
 		else:
 			weights = None

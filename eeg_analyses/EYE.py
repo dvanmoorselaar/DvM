@@ -130,7 +130,6 @@ class EYE(FolderStructure):
 			trial_info = trial_info[:-nr_miss]
 
 		# remove practice trials from eye and beh data
-
 		if 'practice' in beh.keys():
 			eye = eye[np.array(beh['practice'] == 'no')]
 			trial_info = trial_info[np.array(beh['practice'] == 'no')]
