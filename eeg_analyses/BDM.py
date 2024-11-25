@@ -354,7 +354,7 @@ class BDM(FolderStructure):
 
 		# split the selected data into subsets and apply decoding 
 		# within those subsets
-		dec_scores = []
+		dec_scores, dec_params = [],[]
 		for key, value in split_fact.items():
 			for v in value:
 				mask = beh[key] == v
@@ -371,13 +371,16 @@ class BDM(FolderStructure):
 							   			tr_max,labels_oi, collapse,GAT,nr_perm)
 				
 				dec_scores.append(bdm_scores)
+				dec_params.append(bdm_params)
 
 		# create averaged output dictionary
-		#TODO: update params and info
+		#TODO: 
 		for key in (k for k in bdm_scores if k != 'bdm_info'):
 			output = np.mean([scores[key]['dec_scores'] for scores 
 						 							in dec_scores], axis = 0)
+			W = np.mean([params[key]['W'] for params in dec_params], axis = 0)
 			bdm_scores[key]['dec_scores'] = output
+			bdm_params[key]['W'] = W
 
 		return bdm_scores, bdm_params, bdm_info
 
