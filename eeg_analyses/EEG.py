@@ -188,7 +188,7 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
 
         Returns
         - - - -
-        self(object): raw object with changed channel names following biosemi 64 naming scheme (10 - 20 system)
+        self(object): raw object with changed channel names following  64 naming scheme (10 - 20 system)
         '''
 
         # drop channels and get montage
@@ -487,6 +487,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
+        embed()
         if nr_miss > 0:
             report_str += (f'Behavior has {nr_miss} more trials than detected '
                           'events. Trial numbers will be '
@@ -512,7 +513,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                 # continue to remove bdf triggers until data files are lined up
                 for i, tr in enumerate(beh_triggers):
                     if tr != bdf_triggers[i]: # remove trigger from eeg_file
-                        bdf_triggers = np.delete(bdf_triggers, i, axis = 0)
+                        #bdf_triggers = np.delete(bdf_triggers, i, axis = 0)
                         nr_miss += 1
 
             self.drop(idx_remove)
@@ -566,8 +567,9 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                       f'data out of {nr_epochs}. ')
 
         # link eye(tracker) data
-        beh['eye_bins'] = self.link_eye(eye_inf,missing,vEOG=eye_inf['eog'][:2],
-                      hEOG=eye_inf['eog'][2:])
+        beh['eye_bins'] = self.link_eye(eye_inf,missing,nr_epochs,
+                                        vEOG=eye_inf['eog'][:2],
+                                        hEOG=eye_inf['eog'][2:])
 
         # add behavior to epochs object
         if excl_factor is not None:
@@ -982,7 +984,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
 
         return data
 
-    def link_eye(self, eye_info: dict, missing: np.array,
+    def link_eye(self,eye_info:dict,missing: np.array,nr_epochs:int,
                 vEOG: list = None, hEOG: list = None):
 
         # if specified rereference external eog electrodes via subtraction
@@ -1063,13 +1065,17 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             remove = np.intersect1d(missing, trial_inf)
 
             idx = []
-
             # check whether additional trials need to be removed
             if remove.size > 0:
                 _,_,idx = np.intersect1d(remove,trial_inf,return_indices=True) 
-            # elif self.metadata.shape[0] < trial_inf.size:
-            #     to_remove = trial_inf.size - self.metadata.shape[0]
-            #     idx = np.arange(trial_inf.size)[-to_remove:]
+            if nr_epochs < trial_inf.size:
+                if len(idx) > 0:
+                    trial_inf = np.delete(trial_inf,idx)
+                to_remove = trial_inf.size - nr_epochs
+                if to_remove > 0:
+                    idx = np.hstack((idx, 
+                                    np.arange(trial_inf.size)[-to_remove:]))
+                    idx = np.array(idx,dtype = int)
 
             bins = np.delete(bins,idx,axis = 0)
             angles = np.delete(angles, idx,axis = 0)

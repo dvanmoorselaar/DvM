@@ -13,7 +13,7 @@ from support.support import log_preproc
 from IPython import embed
 
 def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
-                ref:list,t_min:float,t_max:float,event_id:list,
+                ref:list,t_min:float,t_max:float,event_id:list,montage:str,
                 preproc_param:dict,project_folder:str,sj_info:dict,
                 eye_info:dict,beh_oi:list,trigger_header:str='trigger', 
                 flt_pad:float=0.5,binary:int = 0,
@@ -48,7 +48,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
                     :2], hEOG=eog[2:], changevoltage=False, 
                     to_remove = to_remove)
 
-    EEG.setMontage(montage='biosemi64')
+    EEG.setMontage(montage=montage)
 
     # get epoch triggers
     events = EEG.select_events(event_id,binary=binary, min_duration=0)

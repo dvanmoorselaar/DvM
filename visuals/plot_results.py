@@ -112,9 +112,10 @@ def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 					y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
 					y_min = np.mean(y_, axis = 1).min()
 					y_max = np.mean(y_, axis = 1).max()
-					step = (y_max - y_min)/25
+					step = (y_max - y_min)/20
 
-				marker_y = y_min - np.abs(y_min * step*c)
+				
+				marker_y = y_min + np.abs(step*c)
 				plot_significance(times,y,stats=stats,
 								color=color,marker_y=marker_y,
 								ls=['-','--'][o])

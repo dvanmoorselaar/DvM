@@ -215,6 +215,7 @@ class FolderStructure(object):
         # read in as dataframe
         beh = [pd.read_csv(file) for file in files]
         beh = pd.concat(beh)
+        beh.reset_index(inplace = True, drop = True)
 
         # control for duplicate trial numbers
         if len(files) > 1 and 'nr_trials' in beh:

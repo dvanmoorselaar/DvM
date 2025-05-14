@@ -54,7 +54,7 @@ def bootstrap_SE(X:np.array,nr_iter:int=9999):
 		bootstr[b,:] = np.mean(X[idx,:],axis = 0)
 
 	# calculate standard error of the mean
-	SE = np.std(bootstr,ddof=1,axis = 0)/sqrt(nr_obs)
+	SE = np.std(bootstr,ddof=1,axis = 0)
 	avg_X = X.mean(axis = 0)
 
 	return SE, avg_X

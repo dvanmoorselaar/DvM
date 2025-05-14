@@ -93,7 +93,7 @@ class EYE(FolderStructure):
 		eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
 		trial_info = np.array(trial_info[0]) if len(eye_files) == 1 else np.hstack(trial_info)
 		# filthy hack to deal with missing events
-		if np.where(np.isnan(trial_info))[0] > 0:
+		if np.where(np.isnan(trial_info))[0].size > 0:
 			for idx in np.where(np.isnan(trial_info))[0]:
 				trial_info[idx] = trial_info[np.array((idx-1,idx+1))].mean()
 

@@ -270,12 +270,13 @@ class CTF(BDM):
 			#conditions += ['all_trials']
 	
 		if type(cnds) == dict:
-			train_cnds, test_cnd = self.check_cnds_input(cnds)
-			if test_cnd is not None:
+			train_cnds, test_cnds = self.check_cnds_input(cnds)
+			if test_cnds is not None:
 				self.cross = True
 				nr_itr = self.nr_iter
 		else:
 			train_cnds = ['all_data']
+			test_cnds = None
 			
 		# based on conditions get position bins
 		(pos_bins, 
@@ -289,6 +290,7 @@ class CTF(BDM):
 				'recommended')
 			
 		# Frequency loop (ensures that data is only filtered once)
+		cnd_combos = []
 		for fr in range(nr_freqs):
 			print('Frequency {} out of {}'.format(str(fr + 1), str(nr_freqs)))
 
@@ -297,108 +299,115 @@ class CTF(BDM):
 
 			# Loop over conditions
 			for c, cnd in enumerate(train_cnds):
-				print(f'Running ctf for {cnd} condition')
-
-				# preallocate arrays
-				if GAT:
-					C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-									nr_samples-self.slide_wind,
-									nr_samples-self.slide_wind,self.nr_bins, 
-									self.nr_chans))
-					W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-									nr_samples-self.slide_wind, 
-									nr_samples-self.slide_wind,
-									self.nr_chans, 
-									nr_elec))						
-				else:
-					C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-									nr_samples-self.slide_wind,self.nr_bins, 
-									self.nr_chans))
-					W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
-									nr_samples-self.slide_wind, self.nr_chans, 
-									nr_elec))							 
-				C2_T, W_T  = C2_E.copy(), W_E.copy()				 
-	
-				# partition data into training and testing sets
-				# is done once to ensure each frequency has the same sets
-				if fr == 0:
-					# update ctf dicts to keep track of output	
-					info.update({cnd:{}})
-					ctf.update({cnd:{'C2_E':C2_E,'C2_T':C2_T,
-									'W_E':W_E,'W_T':W_T}})
-					# get condition indices
-					cnd_idx = cnds == cnd
+				for te_cnd in (test_cnds if test_cnds is not None else [None]):
+					# set condition info
+					cnd_inf = str(cnd)
 					if self.cross:
-						test_idx = cnds == test_cnd
-						test_bins = np.unique(pos_bins[test_idx])
-						(train_idx, 
-						test_idx) = self.train_test_cross(pos_bins, cnd_idx,
-														test_idx, self.nr_iter)
+						cnd_inf += f'_{te_cnd}'
+					cnd_combos.append(cnd_inf)
+					print(f'Running ctf for {cnd_inf} condition')
+
+					# preallocate arrays
+					if GAT:
+						C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+										nr_samples-self.slide_wind,
+										nr_samples-self.slide_wind,self.nr_bins, 
+										self.nr_chans))
+						W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+										nr_samples-self.slide_wind, 
+										nr_samples-self.slide_wind,
+										self.nr_chans, 
+										nr_elec))						
 					else:
-						(train_idx, 
-						test_idx) = self.train_test_split(pos_bins,
-														cnd_idx,max_tr)
-						test_bins = np.unique(pos_bins)
+						C2_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+										nr_samples-self.slide_wind,self.nr_bins, 
+										self.nr_chans))
+						W_E = np.zeros((nr_perm,nr_freqs, nr_itr,
+										nr_samples-self.slide_wind, self.nr_chans, 
+										nr_elec))							 
+					C2_T, W_T  = C2_E.copy(), W_E.copy()				 
+	
+					# partition data into training and testing sets
+					# is done once to ensure each frequency has the same sets
+					if fr == 0:
+						# update ctf dicts to keep track of output	
+						info.update({cnd_inf:{}})
+						ctf.update({cnd_inf:{'C2_E':C2_E,'C2_T':C2_T,
+										'W_E':W_E,'W_T':W_T}})
+						# get condition indices
+						cnd_idx = cnds == cnd
+						if self.cross:
+							test_idx = cnds == te_cnd
+							test_bins = np.unique(pos_bins[test_idx])
+							(train_idx, 
+							test_idx) = self.train_test_cross(pos_bins, cnd_idx,
+															test_idx, self.nr_iter)
+						else:
+							(train_idx, 
+							test_idx) = self.train_test_split(pos_bins,
+															cnd_idx,max_tr)
+							test_bins = np.unique(pos_bins)
 
-					info[cnd]['train_idx'] = train_idx
-					info[cnd]['test_idx'] = test_idx
-					if self.method == 'Foster':
-						C1 = np.empty((self.nr_bins * (self.nr_folds - 1), 
-										self.nr_chans)) * np.nan
-					else:
-						C1 = self.basisset
-
-				# iteration loop
-				for itr in range(nr_itr):
-
-					# TODO: insert permutation loop
-					p = 0
-					train_idx = info[cnd]['train_idx'][itr]
-
-					# initialize evoked and total power arrays
-					bin_te_E = np.zeros((self.nr_bins, nr_elec, nr_samples)) 
-					bin_te_T = bin_te_E.copy()
-					if self.method == 'k-fold':
-						pass
-						#TODO: implement 
-					elif self.method == 'Foster':
-						nr_itr_tr = self.nr_bins * (self.nr_folds - 1)
-						bin_tr_E = np.zeros((nr_itr_tr, nr_elec, nr_samples)) 
-						bin_tr_T = bin_tr_E.copy()
-						
-					# position bin loop
-					bin_cnt = 0
-					for bin in range(self.nr_bins):
-						if bin in test_bins:
-							test_idx=np.squeeze(info[cnd]['test_idx'][itr][bin])
-							bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
-							bin_te_E[bin] = self.extract_power(np.mean(\
-											E[test_idx], axis = 0),freqs[fr])
-
+						info[cnd_inf]['train_idx'] = train_idx
+						info[cnd_inf]['test_idx'] = test_idx
 						if self.method == 'Foster':
-							for j in range(self.nr_folds - 1):
-								evoked = self.extract_power(np.mean(\
-											E[train_idx[bin][j]], axis = 0),
-											freqs[fr])
-								bin_tr_E[bin_cnt] = evoked
-								total = np.mean(T[train_idx[bin][j]], axis = 0)
-								bin_tr_T[bin_cnt] = total
-								C1[bin_cnt] = self.basisset[bin]
-								bin_cnt += 1
-						elif self.method == 'k-fold':
+							C1 = np.empty((self.nr_bins * (self.nr_folds - 1), 
+											self.nr_chans)) * np.nan
+						else:
+							C1 = self.basisset
+
+					# iteration loop
+					for itr in range(nr_itr):
+
+						# TODO: insert permutation loop
+						p = 0
+						train_idx = info[cnd_inf]['train_idx'][itr]
+
+						# initialize evoked and total power arrays
+						bin_te_E = np.zeros((self.nr_bins, nr_elec, nr_samples)) 
+						bin_te_T = bin_te_E.copy()
+						if self.method == 'k-fold':
 							pass
-							#TODO: implement
-					
-					(ctf[cnd]['C2_E'][p,fr,itr], 
-					ctf[cnd]['W_E'][p,fr,itr],
-					ctf[cnd]['C2_T'][p,fr,itr],
-					ctf[cnd]['W_T'][p,fr,itr]) = self.forward_model_loop(
-															bin_tr_E, 
-															bin_te_E,
-															bin_tr_T, 
-															bin_te_T,C1,GAT)
+							#TODO: implement 
+						elif self.method == 'Foster':
+							nr_itr_tr = self.nr_bins * (self.nr_folds - 1)
+							bin_tr_E = np.zeros((nr_itr_tr, nr_elec, nr_samples)) 
+							bin_tr_T = bin_tr_E.copy()
+							
+						# position bin loop
+						bin_cnt = 0
+						for bin in range(self.nr_bins):
+							if bin in test_bins:
+								test_idx=np.squeeze(info[cnd_inf]['test_idx'][itr][bin])
+								bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
+								bin_te_E[bin] = self.extract_power(np.mean(\
+												E[test_idx], axis = 0),freqs[fr])
+
+							if self.method == 'Foster':
+								for j in range(self.nr_folds - 1):
+									evoked = self.extract_power(np.mean(\
+												E[train_idx[bin][j]], axis = 0),
+												freqs[fr])
+									bin_tr_E[bin_cnt] = evoked
+									total = np.mean(T[train_idx[bin][j]], axis = 0)
+									bin_tr_T[bin_cnt] = total
+									C1[bin_cnt] = self.basisset[bin]
+									bin_cnt += 1
+							elif self.method == 'k-fold':
+								pass
+								#TODO: implement
+						
+						(ctf[cnd_inf]['C2_E'][p,fr,itr], 
+						ctf[cnd_inf]['W_E'][p,fr,itr],
+						ctf[cnd_inf]['C2_T'][p,fr,itr],
+						ctf[cnd_inf]['W_T'][p,fr,itr]) = self.forward_model_loop(
+																bin_tr_E, 
+																bin_te_E,
+																bin_tr_T, 
+																bin_te_T,C1,GAT)
+		
 		# take the average across model iterations
-		for cnd in train_cnds:
+		for cnd in np.unique(cnd_combos):
 			for key in ['C2_E','C2_T','W_E','W_T']:
 				ctf[cnd][key] = ctf[cnd][key].mean(axis = 2)
 
@@ -492,11 +501,11 @@ class CTF(BDM):
 		
 		(_, cnds_oi), = cnds.items()
 		if type(cnds_oi[0]) == list:
-			train_cnds, test_cnd = cnds_oi
+			train_cnds, test_cnds = cnds_oi
 		else:
-			train_cnds, test_cnd = cnds_oi, None
+			train_cnds, test_cnds = cnds_oi, None
 
-		return train_cnds, test_cnd
+		return train_cnds, test_cnds
 
 	def select_ctf_labels(self, epochs: mne.Epochs, beh: pd.DataFrame, 
 						pos_labels: dict, cnds: dict) -> Tuple[np.array, 
@@ -830,7 +839,6 @@ class CTF(BDM):
 				c2_t, w_t = self.forward_model(T_train[...,tr_t:tr_t+slide], 
 												T_test[...,te_t:te_t+slide], 
 												C1)
-				
 				if not GAT:
 					te_t = 0
 				C2_E[tr_t,te_t] = c2_e

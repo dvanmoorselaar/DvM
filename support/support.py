@@ -156,7 +156,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 			tracker_bins = bin_tracker_angles(angles_oi, eye_dict['angle_thresh'],
 							min_samples)
 			perc_tracker = np.round(sum(tracker_bins == 1)/ 
-					sum(tracker_bins < 2)*100,1)
+					tracker_bins.size*100,1)
 		# temp code for docky				
 		# elif 'eye_bins' in beh:
 		# 	tracker_bins = beh.eye_bins.values
@@ -180,13 +180,13 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		idx_art = eog_filt(eog,sfreq = epochs.info['sfreq'], windowsize = size, 
 								windowstep = step, thresh = thresh)
 		tracker_bins[nan_idx[idx_art]] = 2
-		perc_eog = np.round(sum(tracker_bins == 2)/ nan_idx.size*100,1)
+		perc_eog = np.round(sum(tracker_bins == 2)/ tracker_bins.size*100,1)
 		print('{} trials missing eyetracking'.format(len(nan_idx)))
 		print('data (used eog instead)')
 	else:
 		perc_eog = 'eog not used for exclusion'
 
-	perc_eye = np.round(sum(tracker_bins > 1)/ tracker_bins.size*100,1)
+	perc_eye = np.round(sum(tracker_bins >= 1)/ tracker_bins.size*100,1)
 	# if it exists update preprocessing information
 	if os.path.isfile(preproc_file):
 		print('Eye exclusion info saved in preprocessing file (at session 1')

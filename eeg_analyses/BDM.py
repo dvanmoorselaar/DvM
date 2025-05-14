@@ -378,10 +378,14 @@ class BDM(FolderStructure):
 		for key in (k for k in bdm_scores if k != 'bdm_info'):
 			output = np.mean([scores[key]['dec_scores'] for scores 
 						 							in dec_scores], axis = 0)
-			W = np.mean([params[key]['W'] for params in dec_params], axis = 0)
 			bdm_scores[key]['dec_scores'] = output
-			bdm_params[key]['W'] = W
-
+			#filtyhy hack for now
+			if dec_params[0] != {}:
+				W = np.mean([params[key]['W'] for params in dec_params], axis = 0)
+				bdm_params[key]['W'] = W
+			else:
+				bdm_params = {key: {}}
+			
 		return bdm_scores, bdm_params, bdm_info
 
 	def classify_(self,X:np.array,y:np.array,beh:pd.DataFrame,tr_cnds:list,
