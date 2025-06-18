@@ -14,6 +14,35 @@ from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
 
+def baseline_correction(X:np.array,times:np.array,baseline:tuple) -> np.array:
+	"""
+	Perform baseline correction on 3D EEG data (epochs x electrodes x time).
+
+	Parameters:
+		data (np.ndarray): Input data of shape (epochs, electrodes, time).
+		baseline_indices (tuple): Start and end indices for the baseline period.
+
+	Returns:
+		np.ndarray: Baseline-corrected data.
+	"""
+	# Check if the input data is 3D
+	if X.ndim != 3:	
+		raise ValueError("Input data must be 3D (epochs x electrodes x time).")
+	
+	# find indices of baseline period
+	base_idx = get_time_slice(times, baseline[0], baseline[1])
+
+	# Extract the baseline period
+	baseline_data = X[:,:,base_idx]
+
+	# Compute the mean over the baseline period (axis=-1 is time)
+	baseline_mean = np.mean(baseline_data, axis=-1, keepdims=True)
+
+	# Subtract the baseline mean from the entire data
+	corrected_data = X - baseline_mean
+
+	return corrected_data
+
 def match_epochs_times(erps:list)->list:
 	"""Finds all objects where the number of samples exceed those of the
 	object with the lowest number of samples and truncates those objects

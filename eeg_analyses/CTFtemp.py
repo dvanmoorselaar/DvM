@@ -33,7 +33,8 @@ from scipy.optimize import curve_fit
 from scipy.stats import norm
 from scipy.ndimage.measurements import label
 
-from support.support import select_electrodes, trial_exclusion, get_time_slice
+from support.support import select_electrodes, trial_exclusion, \
+							get_time_slice,baseline_correction
 from IPython import embed 
 
 
@@ -54,6 +55,7 @@ class CTF(BDM):
 				power:str='band',min_freq:int=4,max_freq:int=40,
 				num_frex:int=25,freq_scaling:str='log',slide_window:int=0,
 				laplacian:bool=False,pca_cmp:int=0,avg_trials:int=1,
+				VEP:bool=False,
 				baseline:Optional[tuple]=None,seed:Union[int, bool] = 42213):
 		''' 
 		
@@ -96,6 +98,7 @@ class CTF(BDM):
 		self.nr_folds = nr_folds												# nr blocks to split up training and test data with leave one out test procedure
 		self.sfreq = 512														# shift of channel position
 		self.power = power
+		self.VEP = VEP
 		self.min_freq = min_freq
 		self.max_freq = max_freq
 		self.num_frex = num_frex
@@ -681,6 +684,12 @@ class CTF(BDM):
 				epochs.apply_hilbert()
 				E = epochs._data
 				T = self.extract_power(E,band)
+				if self.VEP:
+					# apply baseline correction to total power
+					T = baseline_correction(T,epochs.times,self.baseline)
+					# CHECK WHETHER THE EVOKED LOGIC IS CORRECT
+					E = baseline_correction(E,epochs.times,self.baseline)
+
 			elif self.power == 'wavelet':
 				print('Method not yet implemented')
 				pass 

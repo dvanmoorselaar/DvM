@@ -59,6 +59,147 @@ def plot_significance(x:np.array,y:np.array,p_thresh:float=0.05,
 		if p_val <= p_thresh:
 			plt.plot(x[cl], marker_y * np.ones_like(x[cl]),**kwargs)
 
+def plot_erp_time_course(
+	erps: Union[list, dict], 
+	times: np.array, 
+	elec_oi: list, 
+	lateralized: bool = False, 
+	cnds: list = None, 
+	colors: list = None, 
+	show_SE: bool = False, 
+	smooth: bool = False, 
+	window_oi: Tuple = None, 
+	offset_axes: int = 10, 
+	onset_times: Union[list, bool] = [0], 
+	show_legend: bool = True, 
+	ls: str = '-', 
+	**kwargs
+):
+	"""
+	Plots the ERP time course for specified conditions and 
+	electrodes.
+
+	This function visualizes ERP time courses for selected 
+	conditions and electrodes, optionally showing contralateral vs. 
+	ipsilateral waveforms or difference waveforms. 
+	It supports customization of colors, smoothing, 
+	statistical output, and highlighting specific time windows.
+
+	Args:
+		erps (Union[list, dict]): ERP data to plot. Can be a list of 
+			evoked objects (mne.Evoked) or a dictionary where keys 
+			are condition names and values are lists of evoked 
+			objects.
+		times (np.array): Array of time points corresponding to the 
+			ERP data.
+		elec_oi (list): Electrodes of interest. If plotting 
+			contralateral vs. ipsilateral waveforms, specify a list 
+			of lists (e.g., `[['O1'], ['O2']]`).
+		lateralized (bool, optional): Specifies whether to plot 
+			difference waveforms. If True, plots the difference between
+			the contralateral and ipsilateral waveforms as specified in
+			elec_oi. If False, plots the average of the specicified 
+			electrodes, which can be single list or a list of lists 
+			for contralateral and ipsilateral waveforms
+			Defaults to False.
+		cnds (list, optional): List of conditions to include in the
+			plot. If None, all conditions are plotted. 
+			Defaults to None.
+		colors (list, optional): List of colors for the conditions. 
+			If not enough colors are specified, default Tableau 
+			colors are used. Defaults to None.
+		show_SE (bool, optional): If True, plots the standard error 
+			of the mean (SEM) for the ERP data. Defaults to False.
+		smooth (bool, optional): If True, applies smoothing to the 
+			ERP time course. Defaults to False.
+		window_oi (Tuple, optional): Time window of interest 
+			(start, end, polarity). The tuple specifies the start and 
+			end times of the window in seconds, and optionally the 
+			polarity (`'pos'` or `'neg'`). If the polarity is not 
+			provided, the window is highlighted without adjusting ymin 
+			or ymax. Defaults to None.
+		offset_axes (int, optional): Offset for the axes when using 
+			seaborn's `despine` function. Defaults to 10.
+		onset_times (Union[list, bool], optional): List of onset 
+			times to mark with vertical lines on the plot. If False, 
+			no onset times are marked. Defaults to `[0]`.
+		show_legend (bool, optional): If True, displays a legend for 
+			the plot. Defaults to True.
+		ls (str, optional): Line style for the ERP time course. 
+			Defaults to `'-'`.
+		**kwargs: Additional keyword arguments passed to the 
+			`plot_time_course` function.
+
+	Returns:
+		None: The function generates a plot but does not return 
+		any value.
+	"""
+
+	if isinstance(erps, list):
+		erps = {'temp':erps}
+
+	if cnds is not None:
+		erps = {key:value for (key,value) in erps.items() if key in cnds}
+	
+	if colors is None or len(colors) < len(erps):
+		print('not enough colors specified. Using default colors')
+		colors = list(mcolors.TABLEAU_COLORS.values())
+
+	if isinstance(elec_oi[0],str): 
+		elec_oi = [elec_oi]
+	
+	for cnd in erps.keys():
+		# extract all time courses for the current condition
+		y = []
+		for c, elec in enumerate(elec_oi):
+			y_,_ = ERP.group_erp(erps[cnd],elec_oi = elec)
+			y.append(y_)
+				
+		# set up timecourses to plot	
+		if lateralized:
+			y = [y[0] - y[1]]
+		labels = [cnd] if len(y) == 1 else ['contra','ipsi']
+
+		#do actual plotting
+		for i, y_ in enumerate(y):
+			color = colors.pop() 
+			plot_time_course(times,y_,show_SE,smooth,
+							label=labels[i],color=color,ls=ls,**kwargs)
+
+	# clarify plot
+	if window_oi is not None:
+		_, _, ymin, ymax = plt.axis()
+		if len(window_oi) == 3:
+			ymin, ymax = (0, ymax) if window_oi[-1] == 'pos' else (ymin, 0)
+
+		# Add a small margin to ymin and ymax to ensure visibility
+		margin = 0.05 * (ymax - ymin)  # Adjust the margin as needed (5% of height)
+		ymin += margin
+		ymax -= margin
+		# Add dashed grey outline for the time window of interest
+		rect = plt.Rectangle(
+			(window_oi[0], ymin),  
+			window_oi[1] - window_oi[0],  
+			ymax - ymin, 
+			edgecolor='black',  
+			facecolor='none', 
+			linestyle='--')  
+		plt.gca().add_patch(rect)
+
+	if show_legend:
+		handles, labels = plt.gca().get_legend_handles_labels()
+		by_label = dict(zip(labels, handles))
+		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
+		prop={'size': 7},frameon=False)
+	plt.xlabel('Time (ms)')
+	plt.ylabel('\u03BC' + 'V')
+	plt.axhline(0, color = 'black', ls = '--', lw=1)
+	if onset_times:
+		for t in onset_times:
+			plt.axvline(t,color = 'black',ls='--',lw=1)
+
+	sns.despine(offset = offset_axes)
+
 def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 						show_SE:bool=False,smooth:bool=False,
 						output:str='raw_slopes',stats:Union[str,bool]='perm',
@@ -243,72 +384,7 @@ def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
 	if mask is not None:
 		plt.contour(mask,levels=[0],colors='black',linestyles='dashed',
 	      			linewidths=0.5,extent=extent)
-
-def plot_erp_time_course(erps:Union[list,dict],times:np.array,elec_oi:list,
-						contra_ipsi:str=None,cnds:list=None,colors:list=None,
-						show_SE:bool=False,smooth:bool=False,
-						window_oi:Tuple=None,offset_axes:int=10,
-						onset_times:Union[list,bool]=[0],
-						show_legend:bool=True,ls = '-',**kwargs):
-
-	if isinstance(erps, list):
-		erps = {'temp':erps}
-
-	if cnds is not None:
-		erps = {key:value for (key,value) in erps.items() if key in cnds}
-	
-	if colors is None or len(colors) < len(erps):
-		print('not enough colors specified. Using default colors')
-		colors = list(mcolors.TABLEAU_COLORS.values())
-
-	if isinstance(elec_oi[0],str): 
-		elec_oi = [elec_oi]
-	
-	for cnd in erps.keys():
-		# extract all time courses for the current condition
-		y = []
-		for c, elec in enumerate(elec_oi):
-			y_,_ = ERP.group_erp(erps[cnd],elec_oi = elec)
-			y.append(y_)
-				
-		# set up timecourses to plot	
-		if contra_ipsi == 'd_wave':
-			y = [y[0] - y[1]]
-		labels = [cnd] if len(y) == 1 else ['contra','ipsi']
-
-		#do actual plotting
-		for i, y_ in enumerate(y):
-			color = colors.pop() 
-			plot_time_course(times,y_,show_SE,smooth,
-							label=labels[i],color=color,ls=ls)
-
-	# clarify plot
-	if window_oi is not None:
-		_, _, ymin, ymax = plt.axis()
-		if len(window_oi) == 3:
-			if window_oi[-1] == 'pos':
-				ymin= 0
-				color = 'red'
-			elif window_oi[-1] == 'neg':
-				ymax = 0
-				color = 'blue'
-		idx = get_time_slice(times, window_oi[0],window_oi[1])
-		plt.fill_between(times[idx], ymin, ymax, color = color, alpha = 0.2)
-
-	if show_legend:
-		handles, labels = plt.gca().get_legend_handles_labels()
-		by_label = dict(zip(labels, handles))
-		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
-		prop={'size': 7},frameon=False)
-	plt.xlabel('Time (ms)')
-	plt.ylabel('\u03BC' + 'V')
-	plt.axhline(0, color = 'black', ls = '--', lw=1)
-	if onset_times:
-		for t in onset_times:
-			plt.axvline(t,color = 'black',ls='--',lw=1)
-
-	sns.despine(offset = offset_axes)
-			
+		
 def plot_erp_topography(erps:Union[list,dict],times:np.array,
 						window_oi:tuple=None,cnds:list=None,
 						topo:str='raw',montage:str='biosemi64',**kwargs):

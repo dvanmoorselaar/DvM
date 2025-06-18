@@ -439,7 +439,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
 
         print('Linking behavior to epochs')
         report_str = ''
-  
+
         # read in data file and select param of interest
         beh = self.read_raw_beh(self.sj, self.session)
         if len(beh) == 0:
@@ -487,7 +487,6 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
-        embed()
         if nr_miss > 0:
             report_str += (f'Behavior has {nr_miss} more trials than detected '
                           'events. Trial numbers will be '
@@ -1459,7 +1458,7 @@ class ArtefactReject(object):
         if str(type(fit_inst))[-3] == 's':
             reject = get_rejection_threshold(fit_inst, ch_types = 'eeg')
             fit_inst.drop_bad(reject)
-        ica = self.fit_ICA(fit_inst, method = 'picard')
+        ica = self.fit_ICA(fit_inst, method = method)
 
         # step 2: select the blink component (assumed to be component 1)
         (eog_epochs,

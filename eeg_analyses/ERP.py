@@ -27,18 +27,65 @@ from support.support import select_electrodes,trial_exclusion,create_cnd_loop,\
                             get_time_slice
 
 class ERP(FolderStructure):
+    """
+    The ERP class supports functionality for event-related potential 
+    (ERP) analysis on EEG data. This class relies on the MNE-Python 
+    functionality to handle evoked data. It provides methods for ....
+    TODO: UPDATE DOCSTRING!!!!!
 
-    def __init__(self, sj, epochs, beh, header, baseline, 
-                l_filter = None, h_filter = None, downsample:int=None,
-                report=False):
+    This class inherits from FolderStructure, which provides 
+    functionality for managing file paths and saving outputs. 
+
+    Args:
+        sj (int): Subject number.
+        epochs (mne.Epochs): Preprocessed EEG data segmented into 
+        epochs.
+        df (pd.DataFrame): Behavioral data associated with 
+        the EEG epochs.
+        baseline (Tuple[float, float]): Time range (start, end) in 
+        seconds for baseline correction.
+        l_filter (Optional[float]): Low cutoff frequency for filtering. 
+        Defaults to None.
+        h_filter (Optional[float]): High cutoff frequency for filtering. 
+        Defaults to None.
+        downsample (Optional[int]): Target sampling frequency for 
+        downsampling. Defaults to None.
+        report (bool): Whether to generate ERP reports. 
+        Defaults to False.
+
+    Attributes:
+        sj (int): Subject number.
+        epochs (mne.Epochs): Preprocessed EEG data segmented into 
+        epochs.
+        df (pd.DataFrame): Behavioral data associated with the EEG 
+        epochs.
+        baseline (Tuple[float, float]): Time range (start, end) in 
+        seconds for baseline correction.
+        report (bool): Whether to generate ERP reports.
+
+    Methods:
+
+    """
+
+    def __init__(
+        self, 
+        sj: int, 
+        epochs: mne.Epochs, 
+        df: pd.DataFrame, 
+        baseline: Tuple[float, float], 
+        l_filter: Optional[float] = None, 
+        h_filter: Optional[float] = None, 
+        downsample: Optional[int] = None, 
+        report: bool = False
+    ):
+        """class constructor"""
 
         # if filters are specified, filter data before trial averaging  
         if l_filter is not None or h_filter is not None:
             epochs.filter(l_freq = l_filter, h_freq = h_filter)
         self.sj = sj
         self.epochs = epochs
-        self.beh = beh
-        self.header = header
+        self.df = df
         self.baseline = baseline
         
         if downsample is not None:
@@ -47,173 +94,321 @@ class ERP(FolderStructure):
                 self.epochs.resample(downsample)
         self.report = report
 
-    def report_erps(self, evoked: mne.Evoked, erp_name: str):
-
-        # set report and condition name
-        name_info = erp_name.split('_')
-        report_name = name_info[-1]
-        report_name = self.folder_tracker(['erp', self.header],
-                                        f'report_{report_name}.h5')
-        cnd_name = '_'.join(map(str, name_info[:-1]))
-
-        # check whether report exists
-        if os.path.isfile(report_name):
-            with mne.open_report(report_name) as report:
-                # if section exists delete it first
-                report.remove(title=cnd_name)
-                report.add_evokeds(evokeds=evoked,titles=cnd_name,	
-                                   n_time_points=21)
-            report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
-                        overwrite = True)
-        else:
-            report = mne.Report(title='Single subject evoked overview')
-            report.add_evokeds(evokeds=evoked,titles=cnd_name,	
-                                 n_time_points=21)
-            report.save(report_name)
-            report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
-
     def select_erp_data(self,excl_factor:dict=None,
                         topo_flip:dict=None)->Tuple[pd.DataFrame, 
                                                             mne.Epochs]:
         """
-        Selects the data of interest by excluding a subset of trials
+        Selects the data of interest by excluding a subset of trials and 
+        optionally flipping the topography of certain trials.
+
+        This function filters the behavioral and EEG data based on 
+        specified exclusion criteria and adjusts the topography for 
+        lateralized designs, ensuring that all stimuli of interest are 
+        treated as if presented on the right hemifield.
 
         Args:
-            excl_factor (dict, optional): If specified, a subset of trials that 
-            matches the specified criteria is excluded from further analysis
-            (e.g., dict(target_color = ['red']) will exclude all trials 
-            where the target color is red). Defaults to None.
-            topo_flip (dict, optional): If specified a subset of trials is 
-            flipped such that it is as if all stimuli of interest are 
-            presented right (see lateralized_erp). 
+            excl_factor (Optional[dict]): A dictionary specifying 
+                criteria for excluding trials from the analysis. 
+                For example, `dict(target_color=['red'])` excludes all 
+                trials where the target color is red. Defaults to None.
+            topo_flip (Optional[dict]): A dictionary specifying criteria 
+                for flipping the topography of certain trials. The key 
+                should be the column name in the behavioral data, and 
+                the value should be a list of labels indicating trials 
+                to flip. For example, dict(cue_loc=[2, 3]) flips trials 
+                where the cue location is 2 or 3. Defaults to None.
 
         Returns:
-            beh: pandas Dataframe
-            epochs: epochs data of interest
+            Tuple[pd.DataFrame, mne.Epochs]: 
+                - `df`: A pandas DataFrame containing the filtered 
+                    behavioral data.
+                - `epochs`: An mne.Epochs object containing the filtered 
+                    EEG data.
         """
 
-        beh = self.beh.copy()
+        df = self.df.copy()
         epochs = self.epochs.copy()
 
         # if not already done reset index (to properly align beh and epochs)
-        beh.reset_index(inplace = True, drop = True)
+        df.reset_index(inplace = True, drop = True)
 
         # if specified remove trials matching specified criteria
         if excl_factor is not None:
-            beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+            df, epochs = trial_exclusion(df, epochs, excl_factor)
 
         # check whether left stimuli should be 
         # artificially transferred to left hemifield
         if topo_flip is not None:
             (header, left), = topo_flip.items()
-            epochs = self.flip_topography(epochs, beh,  left,  header)
+            epochs = self.flip_topography(epochs, df, left, header)
         else:
             print('No topography info specified. In case of a lateralized '
                 'design. It is assumed as if all stimuli of interest are '
                 'presented right (i.e., left  hemifield')
 
-        return beh, epochs
-
-    def create_erps(self,epochs:mne.Epochs,beh:pd.DataFrame,idx:np.array=None, 
-                    time_oi:tuple=None,erp_name:str = 'all',
-                    RT_split:bool=False,save:bool=True):
+        return df, epochs
+    
+    def create_erps(
+        self, 
+        epochs: mne.Epochs, 
+        df: pd.DataFrame, 
+        idx: Optional[np.array] = None, 
+        time_oi: Optional[tuple] = None, 
+        erp_name: str = 'all', 
+        RT_split: bool = False, 
+        save: bool = True
+    ) -> mne.Evoked:
         """
-        Creates evoked objects using mne functionality
+        Creates evoked objects using MNE functionality and optionally 
+        saves them to disk.
+
+        This function averages EEG epochs to create evoked objects, 
+        applies baseline correction, and optionally crops the evoked 
+        objects to a specified time window. It can also split 
+        trials into fast and slow groups based on median reaction time 
+        (RT) and generate separate evoked objects for each group.
 
         Args:
-            epochs (mne.Epochs): mne epochs object
-            beh (pd.DataFrame): behavioral parameters linked to behavior
-            idx (np.array, optional): indices used for trial averaging. 
-            time_oi (tuple, optional): If specified, evoked objects are cropped
-            to this time window. Defaults to None.
-            erp_name (str, optional): filename to save evoked object. 
-            Defaults to 'all'.
-            RT_split (bool, optional): If True data will also be analyzed 
-            seperately for fast and slow trials. Defaults to False.
-            save (bool, optional): If False, rather than saving the 
-            evoked instance is returned 
+            epochs (mne.Epochs): Preprocessed EEG data segmented into 
+                epochs.
+            df (pd.DataFrame): Behavioral data associated with the 
+                EEG epochs.
+            idx (Optional[np.array]): Indices used for trial averaging. 
+                If None, all trials are used. Defaults to None.
+            time_oi (Optional[tuple]): Time window of interest 
+                (start, end) in seconds. If specified, evoked objects 
+                are cropped to this window. Defaults to None.
+            erp_name (str): Filename to save the evoked object. 
+                Defaults to 'all'.
+            RT_split (bool): If True, data is analyzed separately for 
+                fast and slow trials based on median RT. Requires that 
+                the DataFrame contains a column RT. Defaults to False.
+            save (bool): If True, the evoked object is saved to disk. 
+                If False, the evoked object is returned instead. 
+                Defaults to True.
+
+        Returns:
+            mne.Evoked: The evoked object created from the averaged EEG 
+            epochs.
         """
 
-        beh = beh.iloc[idx].copy()
+        df = df.iloc[idx].copy()
         epochs = epochs[idx]
 
         # create evoked objects using mne functionality and save file
         evoked = epochs.average().apply_baseline(baseline = self.baseline)
+
         # if specified select time window of interest
         if time_oi is not None:
             evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1])
         if save: 
-            evoked.save(self.folder_tracker(['erp', self.header],
-                                        f'{erp_name}-ave.fif',
-                                        overwrite=True))
-        else:
-            return evoked
-
-        # update report
-        if self.report:
-            self.report_erps(evoked, erp_name)
-
+            evoked.save(self.folder_tracker(['erp','evoked'],
+                                        f'{erp_name}-ave.fif'),
+                                        overwrite=True)
+            
         # split trials in fast and slow trials based on median RT
         if RT_split:
-            median_rt = np.median(beh.RT)
-            beh.loc[beh.RT < median_rt, 'RT_split'] = 'fast'
-            beh.loc[beh.RT > median_rt, 'RT_split'] = 'slow'
+            median_rt = np.median(df.RT)
+            df.loc[df.RT < median_rt, 'RT_split'] = 'fast'
+            df.loc[df.RT > median_rt, 'RT_split'] = 'slow'
             for rt in ['fast', 'slow']:
-                mask = beh['RT_split'] == rt
+                mask = df['RT_split'] == rt
                 # create evoked objects using mne functionality and save file
-                evoked = epochs[mask].average().apply_baseline(baseline = 
+                evoked_split = epochs[mask].average().apply_baseline(baseline = 
                                                             self.baseline)
                 # if specified select time window of interest
                 if time_oi is not None:
-                    evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1]) 															
-                evoked.save(self.folder_tracker(['erp', self.header],
+                    evoked_split = evoked_splot.crop(tmin = time_oi[0],
+                                                     tmax = time_oi[1]) 															
+                evoked_split.save(self.folder_tracker(['erp', 'evoked'],
                                                 f'{erp_name}_{rt}-ave.fif'))
+        return evoked
+                
+    def generate_erp_report(self,evokeds:dict, report_name: str):
 
-    @staticmethod
-    def flip_topography(epochs:mne.Epochs,beh: pd.DataFrame,left:list, 
-                        header:str,flip_dict:dict=None,
-                        heog:str='HEOG') -> mne.Epochs:
+
+        report_name = self.folder_tracker(['erp', 'report'],
+                                        f'{report_name}.h5')
+        
+        report = mne.Report(title='Single subject evoked overview')
+        for cnd in evokeds.keys():
+            report.add_evokeds(evokeds=evokeds[cnd],titles=cnd)
+        
+        report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
+                        
+    def lateralized_erp(
+        self, 
+        pos_labels: np.array, 
+        cnds: Optional[dict] = None, 
+        midline: Optional[dict] = None, 
+        topo_flip: Optional[dict] = None, 
+        time_oi: Optional[tuple] = None, 
+        excl_factor: Optional[dict] = None, 
+        RT_split: bool = False, 
+        name: str = 'main'
+    ):
         """
-        Flips the topography of trials where the stimuli of interest was 
-        presented on the left (i.e. right hemifield). After running this 
-        function it is as if all stimuli are presented right 
-        (i.e. the left hemifield is contralateral relative to the 
-        stimulus of interest).
+        Creates lateralized event-related potentials (ERPs) for 
+        specified conditions.
 
-        By default flipping is done on the basis of a Biosemi 
-        64 spatial layout 
+        This function selects trials of interest based on lateralized 
+        stimuli and generates condition-specific ERPs. It optionally 
+        applies exclusion criteria, flips the topography for lateralized 
+        designs, and crops the time window of interest. ERPs can also be 
+        split into fast and slow trials based on median reaction time 
+        (RT).
 
         Args:
-            epochs (mne.Epochs): preprocessed epochs object
-            beh (pd.DataFrame): linked behavioral parameters
-            left (list): position labels of trials where the 
-            topography will be flipped to the other hemifield
-            header (str): column in behavior that contains position 
-            labels to be flipped
-            flip_dict(dict, optional): Dictionary used to flip 
-            topography. Data corresponding to all key value pairs will 
-            be flipped (e.g., flip_dict = dict(FP1 = 'Fp2') will copy 
-            the data from Fp1 into Fp2 and vice versa)
-            heog (str, optional): Channel should represent the 
-            diff score between right and left heog. if this channel name 
-            is present in epochs object, sign of all left trials will be 
-            flipped
-            
+            pos_labels (dict): A dictionary specifying the position 
+                labels for lateralized stimuli. The key should be the 
+                column in the corresponding behavioral DataFrame that 
+                contains position labels, and the value should be a list 
+                of lateralized position labels to be used in the 
+                analysis.
+                For example, `dict(target_loc=[2,6])` selects trials
+                where the target is presented on positions 2 and 6 
+                (e.g., left and right hemifield).
+            cnds (Optional[dict]): Dictionary specifying conditions for 
+                ERP creation. The key should be the column name in the 
+                behavioral data, and the value should be a list of 
+                condition labels. 
+                For example, `dict(target_cnd=['red','green'])` 
+                creates seperate ERPs for trials where the target was
+                green and red.  Defaults to None, which creates ERPs 
+                collapsed across all data.
+            midline (Optional[dict]): Dictionary specifying trials where 
+                another stimulus of interest is presented on the 
+                vertical midline. The key should be the column name, 
+                and the value should be a list of labels (see pos_labels 
+                and cnds for example logic). Defaults to None.
+            topo_flip (Optional[dict]): Dictionary specifying criteria 
+                for flipping the topography of certain trials. 
+                The key should be the column name in the behavioral 
+                data, and the value should be a list of labels 
+                indicating trials to flip. (see pos_labels 
+                and cnds for example logic). Defaults to None.
+            time_oi (Optional[tuple]): Time window of interest 
+                (start, end) in seconds. If specified, 
+                evoked objects are cropped to this window. 
+                Defaults to None.
+            excl_factor (Optional[dict]): Dictionary specifying criteria 
+                for excluding trials from the analysis. 
+                For example, `dict(dist_color=['red'])` excludes all 
+                trials where the distractor color is red. 
+                Defaults to None.
+            RT_split (bool): If True, data is analyzed separately 
+                for fast and slow trials based on median RT. Requires
+                that the DataFrame contains a column 'RT'.
+                Defaults to False.
+            name (str): Name used for saving the ERP files. 
+            Defaults to 'main'.
+
         Returns:
-            epochs: epochs with flipped topography for specified trials
+            None: The function saves the generated ERPs to disk.
+        """
+
+
+
+        # get data
+        df, epochs = self.select_erp_data(excl_factor,topo_flip)
+    
+        # select trials of interest (i.e., lateralized stimuli)
+        idx = self.select_lateralization_idx(df,pos_labels,midline)
+
+        # loop over all conditions
+        if cnds is None:
+            cnds = ['all_data']
+        else:
+            (cnd_header, cnds), = cnds.items()
+
+        # create evoked dictionary based on conditions
+        evokeds = {key: [] for key in cnds} 
+
+        for cnd in cnds:
+            # set erp name
+            erp_name = f'sj_{self.sj}_{cnd}_{name}'	
+
+            # slice condition trials
+            if cnd == 'all_data':
+                idx_c = idx
+            else:
+                idx_c = np.where(df[cnd_header] == cnd)[0]
+                idx_c = np.intersect1d(idx, idx_c)
+
+            if idx_c.size == 0:
+                print('no data found for {}'.format(cnd))
+                continue
+
+            evokeds[cnd] = self.create_erps(epochs, df, idx_c, time_oi, 
+                                            erp_name, RT_split)
+        
+        if self.report:
+            self.generate_erp_report(evokeds,f'sj_{self.sj}_{name}'	)
+
+    @staticmethod
+    def flip_topography(
+        epochs: mne.Epochs, 
+        df: pd.DataFrame, 
+        left: list, 
+        header: str, 
+        flip_dict: Optional[dict] = None, 
+        heog: str = 'HEOG'
+    ) -> mne.Epochs:
+        """
+        Flips the topography of trials where the stimuli of interest 
+        were presented on the left.
+
+        This function adjusts the EEG data so that trials where the 
+        stimuli of interest were presented on the left 
+        (i.e., right hemifield) are flipped as if they were presented on 
+        the right (i.e., left hemifield). After running this function, 
+        all stimuli are treated as if presented on the right hemifield 
+        (contralateral relative to the stimulus of interest).
+
+        By default, flipping is performed based on the Biosemi 
+        64 spatial layout. The function also supports flipping 
+        the horizontal electrooculogram (HEOG) channel if specified.
+
+        Args:
+            epochs (mne.Epochs): Preprocessed EEG epochs object.
+            df (pd.DataFrame): Behavioral DataFrame containing 
+                trial-specific parameters.
+            left (list): Position labels of trials where the topography 
+                will be flipped to the other hemifield.
+            header (str): Column name in the behavioral DataFrame that 
+            contains position labels to be flipped.
+            flip_dict (Optional[dict]): Dictionary specifying electrode 
+                pairs for flipping. The key-value pairs represent 
+                electrodes to swap (e.g., `{'Fp1': 'Fp2'}`). 
+                Defaults to None, in which case the flip dict is 
+                generated based on electrode layout in epochs.
+            heog (str, optional): Name of the HEOG channel. If this 
+                channel is present in the epochs object, the sign of all 
+                left trials will be flipped. Defaults to 'HEOG'.
+
+        Returns:
+            mne.Epochs: The epochs object with flipped topography for 
+                specified trials.
         """
 
         picks = mne.pick_types(epochs.info, eeg=True, csd = True)   
         # dictionary to flip topographic layout
         if flip_dict is None:
-            flip_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8',
-                        'F5':'F6','F3':'F4','F1':'F2','FT7':'FT8','FC5':'FC6',
-                        'FC3':'FC4','FC1':'FC2','T7':'T8','C5':'C6','C3':'C4',
-                        'C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',
-                        'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4',
-                        'P1':'P2','PO7':'PO8','PO3':'PO4','O1':'O2'}
+            # create flip dictionary based electrodes in layout
+            print('No flip dictionary specified. Creating flip ' \
+            'based on epochs layout. Assumes that odd electrodes are' \
+            ' left and even electrodes are right')
+            flip_dict = {}
+            for elec in epochs.ch_names:
+                if elec[-1].isdigit():  
+                    base_name = elec[:-1] 
+                    number = int(elec[-1])  
+                    if number % 2 == 1: 
+                        mirror_elec = f"{base_name}{number + 1}"  
+                        if mirror_elec in epochs.ch_names:  
+                            flip_dict[elec] = mirror_elec
 
-        idx_l = np.hstack([np.where(beh[header] == l)[0] for l in left])
+        idx_l = np.hstack([np.where(df[header] == l)[0] for l in left])
 
         # left stimuli are flipped as if presented right
         pre_flip = np.copy(epochs._data[idx_l][:,picks])
@@ -232,50 +427,394 @@ class ERP(FolderStructure):
         return epochs
 
     @staticmethod
-    def select_lateralization_idx(beh:pd.DataFrame,pos_labels:dict, 
-                                  midline:dict)->np.array:
+    def select_lateralization_idx(
+        df: pd.DataFrame, 
+        pos_labels: dict, 
+        midline: Optional[dict] = None
+    ) -> np.array:
         """
-        Based on position labels selects only those trial indices where 
-        the stimuli of interest are presented left or right from the 
-        vertical midline. If specified trial selection can be limited
-        to those trials where another stimulus of interest is presented 
-        on the vertical midline. 
+        Selects trial indices based on lateralized position labels 
+        and optionally limits selection to trials where another stimulus 
+        is presented on the vertical midline.
 
-        Function can also be used to select non-lateralized trials as 
-        the key,value pair of pos_labels determins which trials 
-        are ultimately selected 
+        This function identifies trials where the stimuli of interest 
+        are presented left or right of the vertical midline based on 
+        position labels. If specified, trial selection can be further 
+        restricted to those where another stimulus is concurrently 
+        presented on the midline. It can also be used to select 
+        non-lateralized trials based on the provided position labels.
 
         Args:
-            beh (pd.DataFrame): DataFrame with behavioral parameters 
-            per linked epoch
-            pos_labels (dict): Dictionary key specifies the column with 
-            position labels in the beh DataFrame. Values should be a 
-            list of all labels that are included in the analysis 
-            (e.g., dict(target_loc = [2,6])) 
-            midline (dict): If specified, selected trials are limited to 
-            trials where another stimuli of interest is concurrently 
-            presented on the vertical midline 
-            (e.g., dict(dist_loc = [0,2])). Key again specifies the 
-            column of interest. Multiple keys can be specified
+            df (pd.DataFrame): Behavioral DataFrame containing 
+                trial-specific parameters linked to EEG epochs.
+            pos_labels (dict): Dictionary specifying the column with 
+                position labels in the `df` DataFrame and the values to 
+                include in the analysis. 
+                For example, `dict(target_loc=[2, 6])` selects trials
+                where the target is presented at positions 2 or 6.
+            midline (Optional[dict]): Dictionary specifying the column 
+                and values for trials where another stimulus is 
+                presented on the vertical midline. 
+                For example, `dict(dist_loc=[0, 2])` limits selection to 
+                trials where the distractor is presented at positions 
+                0 or 2. Defaults to None.
 
         Returns:
-            idx (np.array): selected trial indices
+            np.array: Array of selected trial indices.
         """
 
         # select all lateralized trials	
         (header, labels), = pos_labels.items()
-        idx = np.hstack([np.where(beh[header] == l)[0] for l in labels])
+        idx = np.hstack([np.where(df[header] == l)[0] for l in labels])
 
         # limit to midline trials
         if  midline is not  None:
             idx_m = []
             for key in midline.keys():
-                idx_m.append(np.hstack([np.where(beh[key] == m)[0] 
+                idx_m.append(np.hstack([np.where(df[key] == m)[0] 
                                         for m in midline[key]]))
             idx_m = np.hstack(idx_m)
             idx = np.intersect1d(idx, idx_m)
 
         return idx
+    
+    @staticmethod
+    def select_erp_window(
+        erps: Union[dict, list], 
+        elec_oi: list, 
+        method: str = 'cnd_avg', 
+        window_oi: Optional[tuple] = None, 
+        polarity: str = 'pos', 
+        window_size: float = 0.05
+    ) -> Union[tuple, dict]:
+        """
+        Determines an ERP time window using peak detection, based either 
+        on grand averaged data or condition-specific data.
+
+        This function identifies the peak within the specified 
+        electrodes and time window and returns the ERP window centered 
+        on the detected peak. The window can be based on either the 
+        grand average waveform across all conditions, condition-specific 
+        waveforms. Window selection can be based on a set of electrodes
+        of interest (elec_oi), which can be a single list of electrodes
+        or a lateralized difference waveform 
+        (e.g., contralateral - ipsilateral; see Args).
+
+        Args:
+            erps (Union[dict, list]): Either a dictionary, as generated 
+                by e.g., lateralized_erp, where keys are condition names 
+                and values are lists of evoked objects (mne.Evoked), 
+                or a list of evoked objects for grand averaging.
+            elec_oi (list): Electrodes of interest. If the data of 
+                interestis a difference waveform (e.g., contralateral 
+                vs. ipsilateral), specify a list of lists, where the 
+                first list contains contralateral electrodes and the 
+                second list contains ipsilateral electrodes 
+                For example elec_oi = `[['O1'],['O2']]` selects the 
+                window of interest based on the difference between 
+                O1 and O2.
+            method (str, optional): Specifies whether the window is 
+                based on the grand averaged data (`'cnd_avg'`) or 
+                condition-specific data (`'cnd_spc'`).
+                Defaults to `'cnd_avg'`.
+            window_oi (Optional[tuple]): Time window of interest 
+                (start, end) in seconds. If specified, peak detection is 
+                restricted to this window. Defaults to None, 
+                which uses the full time range.
+            polarity (str, optional): Specifies whether the peak is 
+                positive (`'pos'`) or negative (`'neg'`). 
+                Defaults to `'pos'`.
+            window_size (float, optional): Size of the ERP window in 
+                seconds, centered on the detected peak. 
+                Defaults to 0.05.
+
+        Returns:
+            Union[tuple, dict]: 
+                - If `method='cnd_avg'`, returns a tuple representing 
+                the selected time window (start, end).
+                - If `method='cnd_spc'`, returns a dictionary where keys 
+                are condition names and values are tuples representing 
+                condition-specific time windows.
+        """
+
+        # set params
+        channels, times = ERP.get_erp_params(erps)
+
+        if isinstance(elec_oi[0], str):
+            elec_oi_idx = np.array([channels.index(elec) 
+                                            for elec in elec_oi])
+        else:
+            contra_idx = np.array([channels.index(elec) 
+                                            for elec in elec_oi[0]])
+            ipsi_idx = np.array([channels.index(elec) 
+                                            for elec in elec_oi[1]])
+
+        # get window of interest
+        if window_oi is None:
+            window_oi = (times[0], times[-1])
+        window_idx = get_time_slice(times, window_oi[0], window_oi[1])
+
+        if method == 'cnd_avg':
+            # find peak in grand average waveform
+            # step 1: create condition averaged waveform
+            grand_mean = mne.combine_evoked(
+                        [mne.combine_evoked(v,weights='equal') 
+                                        for (k,v) in erps.items()]
+                                ,weights = 'equal')
+
+            # step 2: limit data to electrodes of interest
+            if isinstance(elec_oi[0], str):
+                X = grand_mean._data[elec_oi_idx]
+            else:
+                X = grand_mean._data[contra_idx] - grand_mean._data[ipsi_idx]
+
+            # average over electrodes
+            X = X.mean(axis = 0)
+            # step 3: get time window based on peak detection
+            if polarity == 'pos':
+                idx_peak = np.argmax(X[window_idx])
+            elif polarity == 'neg':
+                idx_peak = np.argmin(X[window_idx])
+            
+            erp_window = (times[window_idx][idx_peak] - window_size/2, 
+                         times[window_idx][idx_peak] + window_size/2)
+        
+        elif method == 'cnd_spc':
+            erp_window = {}
+            # loop over conditins
+            for cnd in list(erps.keys()):
+                cnd_mean = mne.combine_evoked(erps[cnd], weights = 'equal')
+
+                if isinstance(elec_oi[0], str):
+                    X = cnd_mean._data[elec_oi_idx]
+                else:
+                    X = cnd_mean._data[contra_idx] - cnd_mean._data[ipsi_idx]
+                
+                # average over electrodes
+                X = X.mean(axis = 0)
+                if polarity == 'pos':
+                    idx_peak = np.argmax(X[window_idx])
+                elif polarity == 'neg':
+                    idx_peak = np.argmin(X[window_idx])
+                
+                erp_window[cnd] = (times[window_idx][idx_peak] - window_size/2, 
+                                   times[window_idx][idx_peak] + window_size/2)
+
+        return erp_window
+    
+    @staticmethod
+    def get_erp_params(erps:Union[dict,list])->Tuple[list,np.array]:
+        """
+        Extracts EEG channel names and sample times from ERP data.
+
+        This function retrieves the channel names and time points 
+        from the provided ERP data, which can be either a dictionary 
+        (with condition names as keys and lists of evoked objects as 
+        values) or a list of evoked objects.
+
+        Args:
+            erps (Union[dict, list]): ERP data to extract 
+                parameters from. 
+                If a dictionary, the keys represent condition names and 
+                the values are lists of evoked objects (mne.Evoked). 
+                If a list, it contains evoked objects directly.
+
+        Returns:
+            Tuple[list, np.array]: 
+                - `channels` (list): List of EEG channel names.
+                - `times` (np.array): Array of sample times in the 
+                    evoked data.
+        """
+
+        # set params
+        if type(erps) == dict:
+            channels = list(erps.items())[0][1][0].ch_names
+            times = list(erps.items())[0][1][0].times
+        else:
+            channels= erps[0].ch_names
+            times = erps[0].times
+
+        return channels, times
+
+    @staticmethod
+    def export_erp_metrics_to_csv(
+        erps: Union[dict, list], 
+        window_oi: Union[tuple, dict], 
+        elec_oi: list, 
+        cnds: list = None, 
+        method: str = 'mean_amp', 
+        name: str = 'main'
+    ):
+        """
+        Exports ERP metrics (e.g., mean amplitude, area under the curve) 
+        to a CSV file.
+
+        This function calculates ERP metrics for specified conditions 
+        and electrodes and saves the results to a CSV file. The file is 
+        stored in the subfolder `erp/stats` in the main project folder. 
+        It supports lateralized difference waveforms and 
+        condition-specific time windows.
+
+        Args:
+            erps (Union[dict, list]): ERP data to process. Can be a list 
+                of evoked objects (mne.Evoked) or a dictionary where 
+                keys are condition names and values are lists of evoked 
+                objects.
+            window_oi (Union[tuple, dict]): Time window of interest for 
+                calculating metrics. If a tuple, the same window is 
+                applied to all conditions. If a dictionary, 
+                condition-specific windows are used 
+                (keys correspond to condition names).
+            elec_oi (list): Electrodes of interest. For lateralized 
+                difference waveforms, specify a list of lists, where the 
+                first list contains contralateral electrodes 
+                and the second list contains ipsilateral electrodes.
+            cnds (list, optional): List of conditions to include in the 
+                export. If None, all conditions are processed. 
+                Defaults to None.
+            method (str, optional): Metric calculation method 
+                (e.g., `'mean_amp'`, `'auc'`). Defaults to `'mean_amp'`.
+            name (str, optional): Name of the output CSV file. 
+                Defaults to `'main'`.
+
+        Returns:
+            None: The function saves the calculated metrics to a 
+                CSV file.
+        """
+
+        if not isinstance(erps, (dict, list)):
+            raise ValueError("erps must be a dictionary or a list of " \
+                            "evoked objects.")
+        if not isinstance(window_oi, (tuple, dict)):
+            raise ValueError("window_oi must be a tuple or a dictionary.")
+
+        # initialize output list and set parameters
+        X, headers = [], []
+        if isinstance(erps, list):
+            erps = {'data': erps}
+            cnds = ['data']
+        elif cnds is None:
+            cnds = list(erps.keys())
+        
+        # get channels and times
+        channels, times = ERP.get_erp_params(erps)
+
+        if isinstance(window_oi, tuple):
+            idx = get_time_slice(times, window_oi[0], window_oi[1])
+
+        # extract condition specific data
+        for cnd in cnds:
+            if isinstance(window_oi, dict):
+                idx = get_time_slice(times,window_oi[cnd][0],window_oi[cnd][1])
+
+            # check whether output needs to be lateralized
+            if isinstance(elec_oi[0], str):
+                evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi)
+                y = ERP.extract_erp_features(evoked_X[:,idx],times[idx],method)
+                X.append(y)
+                headers.append(cnd)
+            else:
+                d_wave = []
+                for h, hemi in enumerate(['contra','ipsi']):
+                    evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi[h])
+                    d_wave.append(evoked_X)
+                    y = ERP.extract_erp_features(evoked_X[:,idx],
+                                                 times[idx],method)
+                    X.append(y)
+                    headers.append(f'{cnd}_{hemi}')
+
+                # add contra vs hemi difference
+                d_wave = d_wave[0] - d_wave[1]
+                y = ERP.extract_erp_features(d_wave[:,idx],times[idx],method)
+                X.append(y)
+                headers.append(f'{cnd}_diff')
+
+        # save data
+        np.savetxt(ERP.folder_tracker(['erp','stats'], 
+               fname = f'{name}.csv'),np.stack(X).T, 
+               delimiter = "," ,header = ",".join(headers),comments='')
+        
+    @staticmethod
+    def group_erp(
+        erp: list, 
+        elec_oi: list = 'all'
+    ) -> Tuple[np.array, mne.Evoked]:
+        """
+        Combines all individual data at the group level.
+
+        Args:
+            erp (list): List of evoked items (mne.Evoked).
+            elec_oi (list): Electrodes of interest. If 'all', all 
+                electrodes are included.
+
+        Returns:
+            Tuple[np.array, mne.Evoked]: 
+                - `evoked_X`: Stacked individual ERP data for the 
+                    specified electrodes.
+                - `evoked`: Group-level evoked object created by 
+                    averaging individual evoked items.
+        """
+
+        # Compute group-level evoked object
+        evoked = mne.combine_evoked(erp, weights='equal')
+        channels = evoked.ch_names
+
+        # Handle electrodes of interest
+        if elec_oi == 'all':
+            elec_oi = channels
+        elec_oi_idx = np.array([channels.index(elec) for elec in elec_oi])
+        
+        # Stack individual ERP data for the specified electrodes
+        evoked_X = np.stack([e._data[elec_oi_idx] for e in erp])
+        evoked_X = evoked_X.mean(axis = 1)
+        
+        return evoked_X, evoked
+    
+    @staticmethod
+    def extract_erp_features(
+        X: np.ndarray, 
+        times: np.ndarray, 
+        method: str
+    ) -> list:
+        """
+        Calculates metrics for ERP data, such as mean amplitude 
+        or area under the curve (AUC).
+
+        This function computes specific metrics for ERP data based on 
+        the provided method. Currently supported methods include:
+            - `'mean_amp'`: Calculates the mean amplitude of 
+                the ERP data.
+            - `'auc_pos'`: Calculates the area under the curve (AUC) 
+                for positive values only.
+            - `'auc_neg'`: Calculates the AUC for negative values only.
+            - `'auc'`: Calculates the AUC for all values.
+
+        Future functionality may include additional metrics, such as 
+        onset latency.
+
+        Args:
+            X (np.ndarray): ERP data (trials x timepoints).
+            times (np.ndarray): Array of time points corresponding to 
+                the ERP data.
+            method (str): Specifies the metric to calculate. 
+                Supported values are `'mean_amp'`, `'auc'`, `'auc_pos'`, 
+                and `'auc_neg'`.
+
+        Returns:
+            np.ndarray: A NumPy array containing the calculated metrics 
+                for each trial.
+        """
+
+        if method == 'mean_amp':
+            output = X.mean(axis = -1)
+        if 'auc' in method:
+            if 'pos' in method:
+                X[X<0] = 0
+            elif 'neg' in method:
+                X[X>0] = 0
+            output = np.array([auc(times, x) for x in X])
+
+        return output
 
     def condition_erp(self, cnds:dict=None,time_oi:tuple=None,
                     excl_factor:dict=None,RT_split:bool=False, 
@@ -376,39 +915,7 @@ class ERP(FolderStructure):
         ipsi = epochs._data[idx, idx_ipsi].mean(axis = (0,1))
         contra = epochs._data[idx, idx_contra].mean(axis = (0,1))
 
-    def lateralized_erp(self,pos_labels:np.array,cnds:dict=None,
-                        midline:dict=None,topo_flip:dict=None,
-                        time_oi:tuple=None,excl_factor:dict=None,
-                        RT_split:bool=False,name:str='main'):
 
-        # get data
-        beh, epochs = self.select_erp_data(excl_factor,topo_flip)
-    
-        # select trials of interest (i.e., lateralized stimuli)
-        idx = self.select_lateralization_idx(beh,pos_labels,midline)
-
-        # loop over all conditions
-        if cnds is None:
-            cnds = ['all_data']
-        else:
-            (cnd_header, cnds), = cnds.items()
-
-        for cnd in cnds:
-            # set erp name
-            erp_name = f'sj_{self.sj}_{cnd}_{name}'	
-
-            # slice condition trials
-            if cnd == 'all_data':
-                idx_c = idx
-            else:
-                idx_c = np.where(beh[cnd_header] == cnd)[0]
-                idx_c = np.intersect1d(idx, idx_c)
-
-            if idx_c.size == 0:
-                print('no data found for {}'.format(cnd))
-                continue
-
-            self.create_erps(epochs, beh, idx_c, time_oi, erp_name, RT_split)
 
     @staticmethod
     def lateralized_erp_idx(erp:list,elec_oi_c:list,
@@ -437,37 +944,7 @@ class ERP(FolderStructure):
 
         return contra_idx, ipsi_idx
 
-    @staticmethod
-    def group_erp(erp:list,elec_oi:list='all',
-                 set_mean:bool=False)->Tuple[np.array,mne.Evoked]:
-        """
-        Combines all individual data at the group level
 
-        Args:
-            erp (list): list with evoked items (mne)
-            elec_oi (list): electrodes of interest
-            set_mean (bool, optional): If True, returns array with averaged 
-            data. Otherwise data from individual datasets is stacked in the
-            first dimension. Defaults to False.
-
-        Returns:
-            Tuple[np.array,mne.Evoked]: _description_
-        """
-
-        # get mean and individual data
-        evoked = mne.combine_evoked(erp, weights = 'equal')
-        channels = evoked.ch_names
-        if elec_oi == 'all':
-            elec_oi = channels
-        elec_oi_idx = np.array([channels.index(elec) for elec in elec_oi])
-        evoked_X = np.stack([e._data[elec_oi_idx] for e in erp])
-
-        evoked_X = evoked_X.mean(axis = 1)
-
-        if set_mean:
-            evoked_X = np.mean(evoked_X, axis = 0)
-        
-        return evoked_X, evoked
 
     @staticmethod
     def group_lateralized_erp(erp:list,elec_oi_c:list,
@@ -532,217 +1009,13 @@ class ERP(FolderStructure):
 
         return diff, evoked
 
-    @staticmethod
-    def measure_erp(X, times, method):
 
-        if method == 'mean_amp':
-            output = X.mean(axis = -1)
-        if 'auc' in method:
-            if 'pos' in method:
-                X[X<0] = 0
-            elif 'neg' in method:
-                X[X>0] = 0
-            output = [auc(times, x) for x in X]
 
-        return output
 
-    @staticmethod
-    def erp_to_csv(erps:Union[dict,list],window_oi:Union[tuple,dict],
-                  elec_oi:list,cnds:list=None,method:str='mean_amp',
-                  name:str='main'):
-        ## TODO: add different methods (peak, onset latency)
-        """
-        Outputs ERP metrics (e.g., mean activity) to a csv file. The csv file
-        is stored in the subfolder erp/stats in the main project folder.
 
-        Note that this function also allows one to output lateralized 
-        difference waveforms (see elec_oi)
 
-        Args:
-            erps ([dict,list]): Either a list with evoked items (mne) or a 
-            dictionary where key, value pairs are condition names and a list
-            with conditin specific evoked data, respectively
-            window_oi ([tuple,dict]): time window used to calculate the 
-            dependent measure of interest (see methods)
-            elec_oi (list): electrodes of interest. In case, the data of 
-            interest is a difference waveform (i.e., contra - ipsi), specify a 
-            list of lists, where the first list contains contralateral 
-            electrodes and the second list ipsilateral electrodes. 
-            cnds (list, optional): If specified allows to limit export
-            to a subset of conditions as specified in the erps dictionary. 
-            Defaults to None.
-            method (str, optional): 
-            name (str, optional): Name ofoutput file. Defaults to 'main'.
-        """
 
-        # initialize output list and set parameters
-        X, headers = [], []
-        if cnds is None and type(erps) == dict:
-            cnds = list(erps.keys())
-        if type(erps) == list:
-            erps = {'data':erps}
-            cnds = ['data']
-        
-        channels, times = ERP.get_erp_params(erps)
 
-        if type(window_oi) == tuple:
-            idx = get_time_slice(times, window_oi[0], window_oi[1])
-
-        # extract condition specific data
-        for cnd in cnds:
-            if type(window_oi) == dict:
-                idx = get_time_slice(times,window_oi[cnd][0],window_oi[cnd][1])
-
-            # check whether output needs to be lateralized
-            if isinstance(elec_oi[0], str):
-                evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi)
-                y = ERP.measure_erp(evoked_X[:,idx],times[idx],method)
-                X.append(y)
-                #X.append(evoked_X[:,idx].mean(axis = 1))
-                headers.append(cnd)
-            else:
-                d_wave = []
-                for h, hemi in enumerate(['contra','ipsi']):
-                    evoked_X, _ = ERP.group_erp(erps[cnd],elec_oi[h])
-                    d_wave.append(evoked_X)
-                    y = ERP.measure_erp(evoked_X[:,idx],times[idx],method)
-                    X.append(y)
-                    #X.append(evoked_X[:,idx].mean(axis = 1))
-                    headers.append(f'{cnd}_{hemi}')
-
-                # add contra vs hemi difference
-                d_wave = d_wave[0] - d_wave[1]
-                y = ERP.measure_erp(d_wave[:,idx],times[idx],method)
-                X.append(y)
-                #X.append(X[-2] - X[-1])
-                headers.append(f'{cnd}_diff')
-
-        # save data
-        np.savetxt(ERP.folder_tracker(['erp','stats'], 
-               fname = f'{name}.csv'),np.stack(X).T, 
-               delimiter = ",",header = ",".join(headers),comments='')
-
-    @staticmethod
-    def get_erp_params(erps:Union[dict,list])->Tuple[list,np.array]:
-        """
-        Extracts relevant parameters (i.e., times and channels)
-        out of condition dict with evoked data or list with evoked data
-
-        Args:
-            erps (Union[dict,list]): _description_
-
-        Returns:
-            channels (list): eeg channel names
-            times (np.array): sample times in evoked data
-        """
-
-        # set params
-        if type(erps) == dict:
-            channels = list(erps.items())[0][1][0].ch_names
-            times = list(erps.items())[0][1][0].times
-        else:
-            channels= erps[0].ch_names
-            times = erps[0].times
-
-        return channels, times
-
-    @staticmethod
-    def find_erp_window(erps:Union[dict,list],elec_oi:list,
-                        method:str='cnd_avg',window_oi:tuple=None,
-                        polarity:str='pos',window_size:int=0.05) \
-                        -> Union[tuple, dict]:
-        """
-        Uses peak detection to determine an ERP window, based either on grand 
-        averaged data or conditionspecific data.
-
-        Args:
-            erps ([dict,list]): Either a list with evoked items (mne) or a 
-            dictionary where key, value pairs are condition names and a list
-            with conditin specific evoked data, respectively
-            elec_oi (list): electrodes of interest. In case, the data of 
-            interest is a difference waveform (i.e., contra - ipsi), specify a 
-            list of lists, where the first list contains contralateral 
-            electrodes and the second list ipsilateral electrodes. 
-            method (str, optional): Is the window based on the grand averaged 
-            ('cnd_avg') or condition specific data ('cnd_spc'). 
-            Defaults to 'cnd_avg'.
-            window_oi (tuple, optional): If specified peak detection is 
-            restricted to this time window. Defaults to None.
-            polarity (str, optional): Is the peak positive ('pos') 
-            or negative ('neg'). Defaults to 'pos'.
-            window_size (int, optional): Size in seconds of the erp window, 
-            which is centered on the detected peak. Defaults to 0.05.
-
-        Returns:
-            erp_window([tuple,dict]): Tuple with selected window or, in case of 
-            condition specific windows, a dict where key value pairs are 
-            condition names and condition specific windows, respectively
-        """
-
-        # set params
-        channels, times = ERP.get_erp_params(erps)
-
-        if isinstance(elec_oi[0], str):
-            elec_oi_idx = np.array([channels.index(elec) 
-                                            for elec in elec_oi])
-        else:
-            contra_idx = np.array([channels.index(elec) 
-                                            for elec in elec_oi[0]])
-            ipsi_idx = np.array([channels.index(elec) 
-                                            for elec in elec_oi[1]])
-
-        # get window of interest
-        if window_oi is None:
-            window_oi = (times[0], times[-1])
-        window_idx = get_time_slice(times, window_oi[0], window_oi[1])
-
-        if method == 'cnd_avg':
-            # find peak in grand average waveform
-            # step 1: create condition averaged waveform
-            grand_mean = mne.combine_evoked(
-                        [mne.combine_evoked(v,weights='equal') 
-                                        for (k,v) in erps.items()]
-                                ,weights = 'equal')
-
-            # step 2: limit data to electrodes of interest
-            if isinstance(elec_oi[0], str):
-                X = grand_mean._data[elec_oi_idx]
-            else:
-                X = grand_mean._data[contra_idx] - grand_mean._data[ipsi_idx]
-
-            # average over electrodes
-            X = X.mean(axis = 0)
-            # step 3: get time window based on peak detection
-            if polarity == 'pos':
-                idx_peak = np.argmax(X[window_idx])
-            elif polarity == 'neg':
-                idx_peak = np.argmin(X[window_idx])
-            
-            erp_window = (times[window_idx][idx_peak] - window_size/2, 
-                         times[window_idx][idx_peak] + window_size/2)
-        
-        elif method == 'cnd_spc':
-            erp_window = {}
-            # loop over conditins
-            for cnd in list(erps.keys()):
-                cnd_mean = mne.combine_evoked(erps[cnd], weights = 'equal')
-
-                if isinstance(elec_oi[0], str):
-                    X = cnd_mean._data[elec_oi_idx]
-                else:
-                    X = cnd_mean._data[contra_idx] - cnd_mean._data[ipsi_idx]
-                
-                # average over electrodes
-                X = X.mean(axis = 0)
-                if polarity == 'pos':
-                    idx_peak = np.argmax(X[window_idx])
-                elif polarity == 'neg':
-                    idx_peak = np.argmin(X[window_idx])
-                
-                erp_window[cnd] = (times[window_idx][idx_peak] - window_size/2, 
-                                   times[window_idx][idx_peak] + window_size/2)
-
-        return erp_window
 
     @staticmethod
     def select_waveform(erps:list, elec_oi:list):
