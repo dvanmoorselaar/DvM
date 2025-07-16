@@ -487,6 +487,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             
         missing_trials = []
         nr_miss = beh_triggers.size - bdf_triggers.size
+ 
         if nr_miss > 0:
             report_str += (f'Behavior has {nr_miss} more trials than detected '
                           'events. Trial numbers will be '
@@ -576,6 +577,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
             report_str += 'Excluded trials based on factors. '
             report_str += 'Final set contains {} trials'.format(beh.shape[0])
         self.metadata = beh
+
 
         return missing, report_str
 

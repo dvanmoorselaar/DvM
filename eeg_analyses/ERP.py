@@ -203,8 +203,8 @@ class ERP(FolderStructure):
             evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1])
         if save: 
             evoked.save(self.folder_tracker(['erp','evoked'],
-                                        f'{erp_name}-ave.fif'),
-                                        overwrite=True)
+                                        f'{erp_name}-ave.fif',
+                                        overwrite=True))
             
         # split trials in fast and slow trials based on median RT
         if RT_split:

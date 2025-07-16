@@ -250,7 +250,7 @@ class FolderStructure(object):
 
         # initiate condtion dict
         erps = dict.fromkeys(cnds, 0)
-
+        
         # loop over conditions
         for cnd in cnds:
             if sjs == 'all':
