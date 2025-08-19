@@ -162,7 +162,7 @@ def plot_erp_time_course(
 
 		#do actual plotting
 		for i, y_ in enumerate(y):
-			color = colors.pop() 
+			color = colors.pop(0) 
 			plot_time_course(times,y_,show_SE,smooth,
 							label=labels[i],color=color,ls=ls,**kwargs)
 

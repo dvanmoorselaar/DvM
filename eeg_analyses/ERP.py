@@ -865,6 +865,48 @@ class ERP(FolderStructure):
         ipsi_idx = np.array([channels.index(ch) for ch in elec_oi_i])
 
         return contra_idx, ipsi_idx
+    
+    @staticmethod
+    def select_waveform(erps:list, elec_oi:list):
+        """
+        Extracts and averages ERP waveforms for specified electrodes 
+        from a list of evoked objects.
+
+        This function selects the data from the provided electrodes of 
+        interest (`elec_oi`) across all evoked objects in `erps`. 
+        If `elec_oi` is a list of electrode names (strings),
+        it extracts and averages the data for those electrodes. 
+        If `elec_oi` is a list of two lists 
+        (e.g., for lateralized analysis), it computes the difference
+        between the contralateral and
+        ipsilateral electrodes for each evoked object, 
+        then averages across electrodes.
+
+        Args:
+            erps (list): List of mne.Evoked objects containing ERP data.
+            elec_oi (list): Electrodes of interest. Can be a list of 
+                electrode names (strings),or a list of two lists for 
+                lateralized analysis (e.g., [['O1'], ['O2']]).
+
+        Returns:
+            np.ndarray: Array of averaged ERP waveforms for each evoked 
+            object,shape (n_evoked, n_times).
+        """
+
+        channels, times = ERP.get_erp_params(erps)
+        if type(elec_oi[0]) == str:
+            ch_idx = [channels.index(elec) for elec in elec_oi]
+            x = np.stack([evoked._data[ch_idx] for evoked in erps])
+        elif type(elec_oi[0]) == list:
+            contra_idx = [channels.index(elec) for elec in elec_oi[0]]
+            contra = np.stack([evoked._data[contra_idx] for evoked in erps])
+            ipsi_idx = [channels.index(elec) for elec in elec_oi[1]]
+            ipsi = np.stack([evoked._data[ipsi_idx] for evoked in erps])
+            x = (contra - ipsi)
+
+        x = x.mean(axis = 1)
+
+        return x
 
     @staticmethod
     def compare_latencies(
