@@ -809,7 +809,7 @@ class BDM(FolderStructure):
 
 		# remove a subset of trials 
 		if type(excl_factor) == dict: 
-			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+			beh, epochs,_ = trial_exclusion(beh, epochs, excl_factor)
 
 		# reset index(to properly align beh and epochs)
 		beh.reset_index(inplace = True, drop = True)

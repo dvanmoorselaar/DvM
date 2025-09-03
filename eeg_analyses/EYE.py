@@ -307,7 +307,7 @@ class EYE(FolderStructure):
 			x, y = self.set_xy(x,y, times, drift_correct)
 		bins, angles = self.createAngleBins(x,y, 0,3,0.25, 40)
 
-		return x, y, bins, angles, trial_info
+		return x, y, times, bins, angles, trial_info
 
 
 	def saccadeVector(self, sj, start = -300, end = 800):

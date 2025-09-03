@@ -276,38 +276,6 @@ class FolderStructure(object):
         times = erps[cnd][0].times
 
         return erps, times
-
-    def read_bdm(self,bdm_folder_path:list,bdm_name:str,sjs:list='all')->list:
-        """
-        Read in classification data as created by BDM class.
-        Decoding scores are returned within a dictionary.
-
-        Args:
-            bdm_folder_path (list): List of folders (as created by BDM) within
-            bdm folder pointing towards files of interest (e.g.,
-            ['target_loc', 'all_elecs', 'cross'])
-            bdm_name (str): name assigned to bdm analysis
-            sjs (list, optional): List of subjects. Defaults to 'all'.
-
-        Returns:
-            bdm (list): list with decoding data
-        """
-
-        # set extension
-        ext = ['bdm'] + bdm_folder_path
-
-        if sjs == 'all':
-            files = sorted(glob.glob(self.folder_tracker(
-                            ext = ext,
-                            fname = f'sj_*_{bdm_name}.pickle')),
-                            key = lambda s: int(re.search(r'\d+', s).group()))
-        else:
-            files = [self.folder_tracker(ext = ext,
-                    fname = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
-
-        bdm = [pickle.load(open(file, "rb")) for file in files]
-
-        return bdm
     
     def read_tfr(self,tfr_folder_path:list,tfr_name:str,cnds:list=None,
                 sjs:list='all')->list:
@@ -352,6 +320,40 @@ class FolderStructure(object):
                                                         for file in files]
 
         return tfr
+
+    def read_bdm(self,bdm_folder_path:list,bdm_name:str,sjs:list='all')->list:
+        """
+        Read in classification data as created by BDM class.
+        Decoding scores are returned within a dictionary.
+
+        Args:
+            bdm_folder_path (list): List of folders (as created by BDM) within
+            bdm folder pointing towards files of interest (e.g.,
+            ['target_loc', 'all_elecs', 'cross'])
+            bdm_name (str): name assigned to bdm analysis
+            sjs (list, optional): List of subjects. Defaults to 'all'.
+
+        Returns:
+            bdm (list): list with decoding data
+        """
+
+        # set extension
+        ext = ['bdm'] + bdm_folder_path
+
+        if sjs == 'all':
+            files = sorted(glob.glob(self.folder_tracker(
+                            ext = ext,
+                            fname = f'sj_*_{bdm_name}.pickle')),
+                            key = lambda s: int(re.search(r'\d+', s).group()))
+        else:
+            files = [self.folder_tracker(ext = ext,
+                    fname = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
+
+        bdm = [pickle.load(open(file, "rb")) for file in files]
+
+        return bdm
+    
+
 
     def read_ctfs(self,ctf_folder_path:list,output_type:str,
                   ctf_name:str,sjs:list='all')->list:

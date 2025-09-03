@@ -12,6 +12,7 @@ from math import sqrt
 from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
+from support.FolderStructure import *
 
 
 def baseline_correction(X:np.array,times:np.array,baseline:tuple) -> np.array:
@@ -158,38 +159,30 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		if drift_correct[0] < s:
 			s = drift_correct[0]	
 
-	
+	window_idx = get_time_slice(epochs.times,s,e)
 
 	# check whether selection should be based on eyetracker data
 	if 'use_tracker' not in eye_dict or not eye_dict['use_tracker']:
 		tracker_bins = np.full(beh.shape[0], np.nan)
 		perc_tracker = 'no tracker'
 	else:
-		from .FolderStructure import FolderStructure
-		session = 1
 		file = FolderStructure().folder_tracker(ext=['eye','processed'],
-				fname=f'sj_{sj}_ses_{session}_xy_eye.npz')
+				fname=f'sj_{self.sj}_ses_{self.session}_xy_eye.npz')
 		if os.path.isfile(file) or ('x' in epochs.ch_names):
 			if os.path.isfile(file):
 				eye = np.load(file)
 				x, y, times = eye['x'], eye['y'], eye['times']
-				sfreq = int(eye['sfreq'])
-				window_idx = get_time_slice(times,s,e)
-				x = x[:,window_idx]
-				y = y[:,window_idx]
-				times = times[window_idx]
 			else:
-				window_idx = get_time_slice(epochs.times,s,e)
 				x = epochs._data[:, epochs.ch_names.index('x'), window_idx]
 				y = epochs._data[:, epochs.ch_names.index('y'), window_idx]
 				times = epochs.times[window_idx]
-				sfreq = epochs.info['sfreq']
 
 			from eeg_analyses.EYE import EYE, SaccadeGlissadeDetection
-			EO = EYE(sfreq = sfreq,
+			EO = EYE(sfreq = epochs.info['sfreq'],
 					viewing_dist = eye_dict['viewing_dist'],
 					screen_res = eye_dict['screen_res'],
 					screen_h = eye_dict['screen_h'])
+
 			angles = EO.angles_from_xy(x.copy(), y.copy(), times, drift_correct)
 			if eye_dict['window_oi'][0] > 2:
 				window_idx = get_time_slice(times, eye_dict['window_oi'][0], e)

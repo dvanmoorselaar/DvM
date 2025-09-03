@@ -136,10 +136,10 @@ class TFR(FolderStructure):
 		base_method: str = 'cnd_spec', 
 		method: str = 'wavelet', 
 		downsample: int = 1, 
-		laplacian: bool = False
+		laplacian: bool = False,
+		report: bool = False
 	):
 		"""class constructor"""
-
 
 		self.sj = sj
 		self.df = df
@@ -154,6 +154,7 @@ class TFR(FolderStructure):
 		self.cycle_range = cycle_range
 		self.freq_scaling = freq_scaling
 		self.laplacian = laplacian
+		self.report = report
 		# set params
 		if self.method == 'wavelet':
 			s_freq = epochs.info['sfreq']
@@ -217,7 +218,7 @@ class TFR(FolderStructure):
 
 		# if specified remove trials matching specified criteria
 		if excl_factor is not None:
-			df, epochs = trial_exclusion(df, epochs, excl_factor)
+			df, epochs, _ = trial_exclusion(df, epochs, excl_factor)
 
 		# apply laplacian filter using mne defaults
 		if self.laplacian:
@@ -322,7 +323,7 @@ class TFR(FolderStructure):
 			self, 
 			X: np.ndarray, 
 			wavelet: np.ndarray, 
-			_conv: int, 
+			l_conv: int, 
 			nr_time: int, 
 			nr_epochs: int
 		) -> np.ndarray:
@@ -336,7 +337,8 @@ class TFR(FolderStructure):
 		match the time-frequency structure of the input data.
 
 		Args:
-			X (np.ndarray): Input data in the frequency domain (FFT of the signal).
+			X (np.ndarray): Input data in the frequency domain 
+				(FFT of the signal).
 			wavelet (np.ndarray): The Morlet wavelet to convolve with 
 				the input data.
 			l_conv (int): Length of the convolution (in samples).
@@ -358,6 +360,49 @@ class TFR(FolderStructure):
 									  (nr_time, -1), order = 'F').T 
 
 		return m
+
+	def generate_tfr_report(self,tfr:dict,info:mne.Info,
+						 report_name: str):
+		#TODO add docstring
+
+		report_name = self.folder_tracker(['tfr', 'report'],
+										f'{report_name}.h5')
+        
+		report = mne.Report(title='Single subject tfr overview')
+		for cnd in tfr['power'].keys():
+			# select a subset of frequencies for topo plots
+			freqs = tfr['frex']
+			if len(freqs)>3:
+				freqs_oi = np.linspace(freqs[0], freqs[-1], 3).astype(int)
+			else:
+				freqs_oi = freqs
+			# get time points for topo plots
+			idx = int(np.argmax(tfr['power'][cnd], axis=2).mean())
+			time_oi = tfr['times'][idx]
+			time_freqs = tuple(((time_oi,f) for f in freqs_oi))
+
+			# create mne object for visualization
+			x = tfr['power'][cnd]
+
+			# change data into mne format (..., n_ch, n_freq, n_time)
+			x = np.swapaxes(x, 0, 1) if x.ndim == 3 else np.swapaxes(x, 1, 2)
+				
+			tfr_ = mne.time_frequency.AverageTFR(info,x,tfr['times'],self.frex,
+				       						tfr['cnd_cnt'][cnd], 
+											method = self.method,
+											comment = cnd)
+
+			section = "Condition: " + cnd	
+
+			#TODO: add section after update mne (so that cnd info is displayed)
+			report.add_figure(tfr_.plot_joint(timefreqs = time_freqs),
+						title = '2D TFR & Topos (collapsed over electrodes)')
+
+			report.add_figure(fig=tfr_.plot(), 
+						title="Individual electrodes", 
+						caption=tfr['ch_names'])
+							
+		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
 
 	def lateralized_tfr(
 		self, 
@@ -451,7 +496,7 @@ class TFR(FolderStructure):
 
 		for c, cnd in enumerate(cnds):
 			counter = c + 1 
-			print(f'Decomposing condition {counter}')
+			print(f'Decomposing condition {counter}: {cnd}')
 			# set tfr name
 			tfr_name = f'sj_{self.sj}_{name}'
 
@@ -467,6 +512,7 @@ class TFR(FolderStructure):
 
 			# get baseline power (correction is done after condition loop)
 			if self.baseline is not None:
+				#TODO: speed up
 				base[cnd] = np.mean(abs(raw_conv[...,base_idx])**2, 
 									axis = (0,3))
 			else:
@@ -476,6 +522,10 @@ class TFR(FolderStructure):
 
 		# baseline correction
 		tfr = self.baseline_tfr(tfr,base,self.base_method,elec_oi)
+
+		if self.report:
+			self.generate_tfr_report(tfr,
+							epochs.info,f'sj_{self.sj}_{name}')
 
 		# save output
 		self.save_to_mne_format(tfr,epochs,tfr_name)
@@ -518,7 +568,7 @@ class TFR(FolderStructure):
 
 		# loop over channels			
 		for ch_idx in range(nr_ch):
-			print(f'Decomposing channel {ch_idx} out of {nr_ch} channels', 
+			print(f'Decomposing channel {ch_idx+1} out of {nr_ch} channels', 
 				  end='\r')
 
 			x = epochs._data[:, ch_idx].ravel()	
@@ -539,52 +589,53 @@ class TFR(FolderStructure):
 		
 		return raw_conv
 	
-	def save_to_mne_format(self,tf:dict,epochs:mne.Epochs,
-						tf_name:str):
+	def save_to_mne_format(self,tfr:dict,epochs:mne.Epochs,
+						tfr_name:str):
 		"""
 		convert tfr data to mne container for time-frequency data
 		(i.e, epochsTFR or AvereageTFR)
 
 		Args:
-			tf (dict): dictionary with tfr data
+			tfr (dict): dictionary with tfr data
 			epochs (mne.Epochs): epoched eeg data (linked to beh)
-			tf_name (str): name of tfr analysis
+			tfr_name (str): name of tfr analysis
 		"""
 
 		# set output parameters
-		times =tf['times']
+		times =tfr['times']
 
-		for cnd in tf['power'].keys():
-			x = tf['power'][cnd]
+		for cnd in tfr['power'].keys():
+			x = tfr['power'][cnd]
 
 			# change data into mne format (..., n_ch, n_freq, n_time)
 			x = np.swapaxes(x, 0, 1) if x.ndim == 3 else np.swapaxes(x, 1, 2)
 				
 			# create mne object
-			tfr = mne.time_frequency.AverageTFR(epochs.info,x,times,self.frex,
-				       						tf['cnd_cnt'][cnd], 
+			tfr_ = mne.time_frequency.AverageTFR(epochs.info,x,times,self.frex,
+				       						tfr['cnd_cnt'][cnd], 
 											method = self.method,
 											comment = cnd)
 			
 			# save TFR object
 			f_name = self.folder_tracker(['tfr',self.method],
-									f'{tf_name}_{cnd}-tfr.h5')
-			tfr.save(f_name, overwrite = True)
+									f'{tfr_name}_{cnd}-tfr.h5')
+			tfr_.save(f_name, overwrite = True)
 				
 
-	def baseline_tf(self,tf:dict,base:dict,method:str,
+	def baseline_tfr(self,tfr:dict,base:dict,method:str,
 		 			elec_oi:str='all') -> dict:
 		"""
 		Apply baseline correction via decibel conversion. 
 
 		Args:
-			tf (dict): TF power per condition (epochs X nr_freq X nr_ch X 
-			nr_time)
-			base (dict): mean baseline TF power averaged across trials (nr_freq 
-			X nr_chan)
+			tfr (dict): TF power per condition (epochs X nr_freq X 
+				nr_ch X nr_time)
+			base (dict): mean baseline TF power averaged across 
+				trials (nr_freq X nr_chan)
 			method (str): method for baseline correction
-			elec_oi (str): Necessary when baselining depends on the topographic
-			distribution of electrodes (i.e., when method is 'norm' or 'Z')
+				elec_oi (str): Necessary when baselining depends on the 
+				topographic distribution of electrodes 
+				(i.e., when method is 'norm' or 'Z')
 
 		Raises:
 			ValueError: In case incorrect baselining method is specified
@@ -593,7 +644,7 @@ class TFR(FolderStructure):
 			tf (dict): normalized time frequency power
 		"""
 
-		cnds = list(tf['power'].keys())
+		cnds = list(tfr['power'].keys())
 		
 		if method == 'cnd_avg':
 			cnd_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
@@ -601,20 +652,20 @@ class TFR(FolderStructure):
 		for cnd in cnds:
 			if method != 'Z':
 				#TODO: implement Z scoring baseline
-				tf['cnd_cnt'][cnd] = tf['power'][cnd].shape[0]
-				power = np.mean(tf['power'][cnd], axis = 0)
+				tfr['cnd_cnt'][cnd] = tfr['power'][cnd].shape[0]
+				power = np.mean(tfr['power'][cnd], axis = 0)
 			if method == 'cnd_spec':	
-				tf['power'][cnd] = self.db_convert(power, base[cnd])
+				tfr['power'][cnd] = self.db_convert(power, base[cnd])
 			elif method == 'cnd_avg':
-				tf['power'][cnd] = self.db_convert(power, cnd_avg)
+				tfr['power'][cnd] = self.db_convert(power, cnd_avg)
 			elif method == 'norm':
 				print('For normalization procedure it is assumed that it is as'
 				 	 ' if all stimuli of interest are presented right')
-				tf['power'][cnd], info = self.normalize_power(power, 
+				tfr['power'][cnd], info = self.normalize_power(power, 
 															 list(elec_oi)) 
-				tf.update({'norm_info':info})
+				tfr.update({'norm_info':info})
 			elif method is None or not base:
-				tf['power'][cnd] = power
+				tfr['power'][cnd] = power
 			else:
 				raise ValueError('Invalid method specified')
 
@@ -622,15 +673,16 @@ class TFR(FolderStructure):
 			# if method != 'norm':
 			# 	tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
 
-		return tf
+		return tfr
 				
 	def db_convert(self, power: np.array, base_power: np.array) -> np.array:
 		"""
-		Decibel (dB) is the ratio between frequency-band specific power and 
-		baseline level of power in that same frequency band. 
+		Decibel (dB) is the ratio between frequency-band specific 
+		power and baseline level of power in that same frequency band. 
 
 		Args:
-			power (np.array): TF power (epochs X nr_freq X nr_ch X nr_time)
+			power (np.array): TF power (epochs X nr_freq X nr_ch 
+				X nr_time)
 			base_power (np.array): baseline power (nr_freq X nr_chan)
 
 		Returns:
@@ -750,169 +802,6 @@ class TFR(FolderStructure):
 
 		return tfr_
 
-
-			
-	def TFanalysis(self, sj, cnds, cnd_header, time_period, tf_name, base_period = None, elec_oi = 'all',factor = None, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
-		'''
-		Time frequency analysis using either morlet waveforms or filter-hilbert method for time frequency decomposition
-
-		Add option to subtract ERP to get evoked power
-		Add option to match trial number
-
-		Arguments
-		- - - - - 
-		sj (int): subject number
-		cnds (list): list of conditions as stored in behavior file
-		cnd_header (str): key in behavior file that contains condition info
-		base_period (tuple | list): time window used for baseline correction. 
-		time_period (tuple | list): time window of interest
-		tf_name (str): name of analysis. Used to create unique file location
-		elec_oi (str | list): If not all, analysis are limited to specified electrodes 
-		factor (dict): limit analysis to a subset of trials. Key(s) specifies column header
-		method (str): specifies whether hilbert or wavelet convolution is used for time-frequency decomposition
-		flip (dict): flips a subset of trials. Key of dictionary specifies header in beh that contains flip info 
-		List in dict contains variables that need to be flipped. Note: flipping is done from right to left hemifield
-		base_type (str): specifies whether DB conversion is condition specific ('conspec') or averaged across conditions ('conavg').
-						If Z power is Z-transformed (condition specific). 
-		downsample (int): factor used for downsampling (aplied after filtering). Default is no downsampling
-		min_freq (int): minimum frequency for TF analysis
-		max_freq (int): maximum frequency for TF analysis
-		num_frex (int): number of frequencies in TF analysis
-		cycle_range (tuple): number of cycles increases in the same number of steps used for scaling
-		freq_scaling (str): specify whether frequencies are linearly or logarithmically spaced. 
-							If main results are expected in lower frequency bands logarithmic scale 
-							is adviced, whereas linear scale is advised for expected results in higher
-							frequency bands
-		Returns
-		- - - 
-		
-		wavelets(array): 
-
-
-	
-		'''
-
-		# read in data
-
-		eegs, beh = self.select_tf_data(factor, flip)
-		times = self.epochs.times
-		if elec_oi == 'all':
-			picks = mne.pick_types(self.epochs.info, eeg=True, exclude='bads')
-			ch_names = list(np.array(self.epochs.ch_names)[picks])
-		else:
-			ch_names = elec_oi	
-
-		# flip subset of trials (allows for lateralization indices)
-		if flip != None:
-			key = list(flip.keys())[0]
-			eegs = self.topoFlip(eegs, beh[key], self.epochs.ch_names, left = flip.get(key))
-
-		# get parameters
-		nr_time = eegs.shape[-1]
-		nr_chan = eegs.shape[1] if elec_oi == 'all' else len(elec_oi)
-		if method == 'wavelet':
-			wavelets, frex = self.createMorlet(min_freq = min_freq, max_freq = max_freq, num_frex = num_frex, 
-									cycle_range = cycle_range, freq_scaling = freq_scaling, 
-									nr_time = nr_time, s_freq = self.epochs.info['sfreq'])
-		
-		elif method == 'hilbert':
-			frex = [(i,i + 4) for i in range(min_freq, max_freq, 2)]
-			num_frex = len(frex)	
-
-		if type(base_period) in [tuple,list]:
-			base_s, base_e = [np.argmin(abs(times - b)) for b in base_period]
-		idx_time = np.where((times >= time_period[0]) * (times <= time_period[1]))[0]  
-		idx_2_save = np.array([idx for i, idx in enumerate(idx_time) if i % downsample == 0])
-
-		# initiate dicts
-		tf = {'ch_names':ch_names, 'times':times[idx_2_save], 'frex': frex}
-		tf_base = {'ch_names':ch_names, 'times':times[idx_2_save], 'frex': frex}
-		base = {}
-		plot_dict = {}
-
-		# loop over conditions
-		for c, cnd in enumerate(cnds):
-			print(cnd)
-			tf.update({cnd: {}})
-			tf_base.update({cnd: {}})
-			base.update({cnd: np.zeros((num_frex, nr_chan))})
-
-			if cnd != 'all':
-				cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-			else:
-				cnd_idx = np.arange(beh[cnd_header].size)	
-
-			l_conv = 2**self.nextpow2(nr_time * cnd_idx.size + nr_time - 1)
-			raw_conv = np.zeros((cnd_idx.size, num_frex, nr_chan, idx_2_save.size), dtype = complex) 
-
-			# loop over channels
-			for idx, ch in enumerate(ch_names[:nr_chan]):
-				# find ch_idx
-				ch_idx = self.epochs.ch_names.index(ch)
-
-				print('Decomposed {0:.0f}% of channels ({1} out {2} conditions)'.format((float(idx)/nr_chan)*100, c + 1, len(cnds)), end='\r')
-
-				# fft decomposition
-				if method == 'wavelet':
-					eeg_fft = fft(eegs[cnd_idx,ch_idx].ravel(), l_conv)    # eeg is concatenation of trials after ravel
-
-				# loop over frequencies
-				for f in range(num_frex):
-
-					if method == 'wavelet':
-						# convolve and get analytic signal (OUTPUT DIFFERS SLIGHTLY FROM MATLAB!!! DOUBLE CHECK)
-						m = ifft(eeg_fft * fft(wavelets[f], l_conv), l_conv)
-						m = m[:nr_time * cnd_idx.size + nr_time - 1]
-						m = np.reshape(m[math.ceil((nr_time-1)/2 - 1):int(-(nr_time-1)/2-1)], 
-									  (nr_time, -1), order = 'F').T 
-
-					elif method == 'hilbert': # NEEDS EXTRA CHECK
-						X = eegs[cnd_idx,ch_idx].ravel()
-						m = self.hilbertMethod(X, frex[f][0], frex[f][1], s_freq)
-						m = np.reshape(m, (-1, times.size))	
-
-					# populate
-					raw_conv[:,f,idx] = m[:,idx_2_save]
-					
-					# baseline correction (actual correction is done after condition loop)
-					if type(base_period) in [tuple,list]:
-						base[cnd][f,idx] = np.mean(abs(m[:,base_s:base_e])**2)
-
-			# update cnd dict with phase values (averaged across trials) and power values
-			tf[cnd]['power'] = abs(raw_conv)**2
-			tf[cnd]['phase'] = abs(np.mean(np.exp(np.angle(raw_conv) * 1j), axis = 0))
-
-		# baseline normalization
-		for cnd in cnds:
-			if base_type == 'conspec': #db convert: condition specific baseline
-				tf_base[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(base[cnd][:,:,np.newaxis],idx_2_save.size,axis = 2))
-			elif base_type == 'conavg':	
-				con_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
-				tf_base[cnd]['base_power'] = 10*np.log10(tf[cnd]['power']/np.repeat(con_avg[:,:,np.newaxis],idx_2_save.size,axis = 2))
-			elif base_type == 'Z':
-				print('For permutation procedure it is assumed that it is as if all stimuli of interest are presented right')
-				tf_base[cnd]['Z_power'], z_info = self.permuted_Z(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
-				tf_base.update(dict(z_info = z_info))
-			elif base_type == 'norm':
-				print('For normalization procedure it is assumed that it is as if all stimuli of interest are presented right')
-				tf_base[cnd]['norm_power'], norm_info = self.normalizePower(tf[cnd]['power'],ch_names, num_frex, idx_2_save.size) 
-				tf_base.update(dict(norm_info = norm_info))
-			if base_type in ['conspec','conavg']:
-				tf[cnd]['base_power'] = np.mean(tf_base[cnd]['base_power'], axis = 0)
-
-			# power values can now safely be averaged
-			tf[cnd]['power'] = np.mean(tf[cnd]['power'], axis = 0)
-
-		# save TF matrices
-		with open(self.FolderTracker(['tf',method,tf_name],'{}-tf.pickle'.format(sj)) ,'wb') as handle:
-			pickle.dump(tf, handle)		
-
-		with open(self.FolderTracker(['tf',method,tf_name],'{}-tf_base.pickle'.format(sj)) ,'wb') as handle:
-			pickle.dump(tf_base, handle)	
-	
-		
-
-
 	@staticmethod	
 	def nextpow2(i):
 		'''
@@ -925,167 +814,37 @@ class TFR(FolderStructure):
 		
 		return n
 
+	def apply_hilbert(self, 
+		X: np.ndarray, 
+		l_freq: float, 
+		h_freq: float, 
+		s_freq: float = 512) -> np.ndarray:
+		"""
+		Apply the filter-Hilbert method for time-frequency 
+		decomposition.
 
+		This method first bandpass filters the input EEG signal 
+		between `l_freq` and `h_freq`using the specified sampling 
+		frequency (`s_freq`). It then applies the Hilbert transform
+		to obtain the analytic signal, which can be used to extract 
+		instantaneous amplitude and phase.
 
+		Args:
+			X (np.ndarray): array containing the EEG signal. 
+			l_freq (float): Lower bound of the frequency band (Hz).
+			h_freq (float): Upper bound of the frequency band (Hz).
+			s_freq (float, optional): Sampling frequency of the signal 
+				(Hz). Defaults to 512.
 
-	def hilbertMethod(self, X, l_freq, h_freq, s_freq = 512):
-		'''
-		Apply filter-Hilbert method for time-frequency decomposition. 
-		Data is bandpass filtered before a Hilbert transform is applied
-
-		Arguments
-		- - - - - 
-		X (array): eeg signal
-		l_freq (int): lower border of frequency band
-		h_freq (int): upper border of frequency band
-		s_freq (int): sampling frequency
-		
-		Returns
-		- - - 
-
-		X (array): filtered eeg signal
-		
-		'''	
+		Returns:
+			np.ndarray: The analytic signal after bandpass filtering and 
+				Hilbert transform. Same shape as input `X`.
+		"""
 
 		X = hilbert(filter_data(X, s_freq, l_freq, h_freq))
 
 		return X
 
-	def TFanalysisMNE(self, sj, cnds, cnd_header, base_period, time_period, method = 'hilbert', flip = None, base_type = 'conspec', downsample = 1, min_freq = 5, max_freq = 40, num_frex = 25, cycle_range = (3,12), freq_scaling = 'log'):
-		'''
-		Time frequency analysis using either morlet waveforms or filter-hilbertmethod for time frequency decomposition
-
-		Add option to subtract ERP to get evoked power
-		Add option to match trial number
-
-		Arguments
-		- - - - - 
-		sj (int): subject number
-		cnds (list): list of conditions as stored in behavior file
-		cnd_header (str): key in behavior file that contains condition info
-		base_period (tuple | list): time window used for baseline correction
-		time_period (tuple | list): time window of interest
-		method (str): specifies whether hilbert or wavelet convolution is used for time-frequency decomposition
-		flip (dict): flips a subset of trials. Key of dictionary specifies header in beh that contains flip info 
-		List in dict contains variables that need to be flipped. Note: flipping is done from right to left hemifield
-		base_type (str): specifies whether DB conversion is condition specific ('conspec') or averaged across conditions ('conavg')
-		downsample (int): factor used for downsampling (aplied after filtering). Default is no downsampling
-		min_freq (int): minimum frequency for TF analysis
-		max_freq (int): maximum frequency for TF analysis
-		num_frex (int): number of frequencies in TF analysis
-		cycle_range (tuple): number of cycles increases in the same number of steps used for scaling
-		freq_scaling (str): specify whether frequencies are linearly or logarithmically spaced. 
-							If main results are expected in lower frequency bands logarithmic scale 
-							is adviced, whereas linear scale is advised for expected results in higher
-							frequency bands
-		Returns
-		- - - 
-		
-		wavelets(array): 
-
-
-	
-		'''
-
-		# read in data
-		eegs, beh, times, s_freq, ch_names = self.selectTFData(sj)
-
-		# flip subset of trials (allows for lateralization indices)
-		if flip != None:
-			key = flip.keys()[0]
-			eegs = self.topoFlip(eegs, beh[key], ch_names, left = [flip.get(key)])
-
-		# get parameters
-		nr_time = eegs.shape[-1]
-		nr_chan = eegs.shape[1]
-		
-		freqs = np.logspace(np.log10(min_freq), np.log10(max_freq), num_frex)
-		nr_cycles = np.logspace(np.log10(cycle_range[0]), np.log10(cycle_range[1]),num_frex)
-
-		base_s, base_e = [np.argmin(abs(times - b)) for b in base_period]
-		idx_time = np.where((times >= time_period[0]) * (times <= time_period[1]))[0]  
-		idx_2_save = np.array([idx for i, idx in enumerate(idx_time) if i % downsample == 0])
-
-		# initiate dict
-		tf = {}
-		base = {}
-
-		# loop over conditions
-		for c, cnd in enumerate(cnds):
-			tf.update({cnd: {}})
-			base.update({cnd: np.zeros((num_frex, nr_chan))})
-
-			cnd_idx = np.where(beh['block_type'] == cnd)[0]
-
-			power = tfr_array_morlet(eegs[cnd_idx], sfreq= s_freq,
-					freqs=freqs, n_cycles=nr_cycles,
-					output='avg_power')		
-
-			# update cnd dict with power values
-			tf[cnd]['power'] = np.swapaxes(power, 0,1)
-			tf[cnd]['base_power'] = rescale(np.swapaxes(power, 0,1), times, base_period, mode = 'logratio')
-			tf[cnd]['phase'] = '?'
-
-		# save TF matrices
-		with open(self.FolderTracker(['tf',method],'{}-tf-mne.pickle'.format(sj)) ,'wb') as handle:
-			pickle.dump(tf, handle)		
-
-		# store dictionary with variables for plotting
-		plot_dict = {'ch_names': ch_names, 'times':times[idx_2_save], 'frex': freqs}
-
-		with open(self.FolderTracker(['tf', method], filename = 'plot_dict.pickle'),'wb') as handle:
-			pickle.dump(plot_dict, handle)
-
-
-
-
-	def permuted_Z(self, raw_power, ch_names, num_frex, nr_time, nr_perm = 1000):
-
-
-		
-		# ipsi_contra pairs
-		contra_ipsi_pair = [('Fp1','Fp2'),('AF7','AF8'),('AF3','AF4'),('F7','F8'),('F5','F6'),('F3','F4'),\
-					('F1','F2'),('FT7','FT8'),('FC5','FC6'),('FC3','FC4'),('FC1','FC2'),('T7','T8'),\
-					('C5','C6'),('C3','C4'),('C1','C2'),('TP7','TP8'),('CP5','CP6'),('CP3','CP4'),\
-					('CP1','CP2'),('P9','P10'),('P7','P8'),('P5','P6'),('P3','P4'),('P1','P2'),\
-					('PO7','PO8'),('PO3','PO4'),('O1','O2')]
-		pair_idx =  [i for i, pair in enumerate(contra_ipsi_pair) if pair[0] in ch_names]			
-		contra_ipsi_pair = np.array(contra_ipsi_pair)[pair_idx] 
-
-		# initiate Z array
-		Z = np.zeros((contra_ipsi_pair.shape[0], num_frex, nr_time))
-		Z_elec = []
-		# loop over contra_ipsi pairs
-		pair_idx = 0
-
-		for (contra_elec, ipsi_elec) in contra_ipsi_pair:
-			
-			Z_elec.append(contra_elec)	
-			
-			# get indices of electrode pair
-			contra_idx = ch_names.index(contra_elec)
-			ipsi_idx = ch_names.index(ipsi_elec)
-			# contra_ipsi_norm = (raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx])/(raw_power[:,:,contra_idx] + raw_power[:,:,ipsi_idx])
-			# norm[pair_idx] = contra_ipsi_norm.mean(axis = 0)
-
-			# # get the real difference
-			real_diff = raw_power[:,:,contra_idx] - raw_power[:,:,ipsi_idx]
-
-			# create distribution of fake differences
-			fake_diff = np.zeros((nr_perm,) + real_diff.shape)
-
-			for p in range(nr_perm):
-			 	# randomly flip ipsi and contra
-				signed = np.sign(np.random.normal(size = real_diff.shape[0]))
-				permuter = np.tile(signed[:,np.newaxis, np.newaxis], ((1,) + real_diff.shape[-2:]))
-				fake_diff[p] = real_diff * permuter
-
-			# # Z scoring
-			print('Z scoring pair {}-{}'.format(contra_elec, ipsi_elec))
-			Z[pair_idx] = (np.mean(real_diff, axis = 0) - np.mean(fake_diff, axis = (0,1))) / np.std(np.mean(fake_diff, axis = 1), axis = 0, ddof = 1)	
-			pair_idx += 1
-
-		return Z, Z_elec
 
 
 

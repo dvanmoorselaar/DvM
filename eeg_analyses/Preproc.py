@@ -44,11 +44,10 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     #EEG.replaceChannel(sj, session, replace)
     to_remove = sj_info['ch_remove'] if 'ch_remove' \
                 in sj_info.keys() else ['EXG7','EXG8']
-    EEG.reReference(ref_channels=ref, vEOG=eog[
-                    :2], hEOG=eog[2:], changevoltage=False, 
+    EEG.rereference(ref_channels=ref, change_voltage=False, 
                     to_remove = to_remove)
 
-    EEG.setMontage(montage=montage)
+    EEG.configure_montage(montage=montage)
 
     # get epoch triggers
     events = EEG.select_events(event_id,binary=binary, min_duration=0)
@@ -56,14 +55,24 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
     if preproc_param['run_ica']:
         EEG_ica = EEG.copy().filter(l_freq=1., h_freq=None)
+        if preproc_param['notch']:
+            EEG_ica.notch_filter(freqs=[50,100,150], 
+                 method='fir', phase='zero')
 
     if preproc_param['high_pass']:                         
-        EEG.filter(h_freq=None, l_freq=preproc_param['high_pass'], fir_design='firwin',
-                skip_by_annotation='edge')
-
+        EEG.filter(h_freq=None, l_freq=preproc_param['high_pass'], 
+                   fir_design='firwin',
+                    skip_by_annotation='edge')
+        
     # report raw
     report = EEG.report_raw(report, events, event_id)
     report.save(report_file, overwrite = True)
+
+    if preproc_param['notch']:
+        EEG.notch_filter(freqs=[50], 
+                 method='fir', phase='zero')
+        report = EEG.report_raw(report, events, event_id)
+        report.save(report_file, overwrite = True)
 
     # EPOCH DATA 
     epochs = Epochs(sj, session, EEG, events, event_id=event_id,
@@ -79,7 +88,6 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
                                                 eye_inf = eye_info,
                                                 del_practice=True,
                                                 excl_factor=excl_factor)
-
 
     report.add_html(report_str, title = 'Linking events to behavior')
     report.add_epochs(epochs, title='initial epoch', psd = True)
@@ -107,7 +115,7 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     if preproc_param['run_autoreject']:
         drop_bads = preproc_param['drop_bads'] if 'drop_bads' in \
                                                 preproc_param.keys() else True
-        epochs,z_thresh,report = AR.auto_repair_noise(epochs,
+        epochs,z_thresh,report = AR.auto_repair_noise(epochs, sj, session,
                                                       drop_bads,report=report)
         report.save(report_file, overwrite = True)
     else:

@@ -55,7 +55,7 @@ class CTF(BDM):
 				power:str='band',min_freq:int=4,max_freq:int=40,
 				num_frex:int=25,freq_scaling:str='log',slide_window:int=0,
 				laplacian:bool=False,pca_cmp:int=0,avg_trials:int=1,
-				VEP:bool=False,
+				filter:int=None,VEP:bool=False,
 				baseline:Optional[tuple]=None,seed:Union[int, bool] = 42213):
 		''' 
 		
@@ -77,6 +77,10 @@ class CTF(BDM):
 		- - - -
 		self (object): SpatialEM object
 		'''
+
+
+		if filter is not None:
+			epochs.filter(l_freq = None, h_freq = filter)
 
 		self.sj = sj
 		self.beh = beh
@@ -110,6 +114,8 @@ class CTF(BDM):
 		# hypothesized set tuning functions underlying power measured across electrodes
 		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans,
 													sin_power,delta)
+
+		
 		
 	def calculate_basis_set(self,nr_bins:int,nr_chans:int, 
 			 				sin_power:int=7,delta:bool=False)->np.array:
@@ -469,7 +475,7 @@ class CTF(BDM):
 
 		# if specified remove trials matching specified criteria
 		if excl_factor is not None:
-			beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+			beh, epochs,_ = trial_exclusion(beh, epochs, excl_factor)
 
 		# if not already done reset index (to properly align beh and epochs)
 		beh.reset_index(inplace = True, drop = True)

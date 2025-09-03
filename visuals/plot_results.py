@@ -5,6 +5,7 @@ import matplotlib
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.ticker as ticker
 
 from scipy.signal import savgol_filter
 from eeg_analyses.ERP import *
@@ -45,6 +46,51 @@ def plot_time_course(x:np.array,y:np.array,
 	if show_SE:
 		kwargs.pop('label', None)
 		plt.fill_between(x,y+err,y-err,alpha=0.2,**kwargs)
+
+def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
+	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
+			nr_ticks_y:np.array=5,**kwargs):
+
+	if X.ndim > 2:
+		X = X.mean(axis=0)
+
+	# set extent
+	x_lim = [0,X.shape[-1]] if x_val is None else [x_val[0],x_val[-1]]
+	y_lim = [0,X.shape[-2]] if y_val is None else [y_val[0],y_val[-1]]
+	extent = [x_lim[0],x_lim[1],y_lim[0],y_lim[1]]
+
+	# do actuall plotting
+	plt.imshow(X,interpolation='nearest',aspect='auto',origin='lower',
+	    	extent=extent, **kwargs)
+	
+	# set ticks
+	if nr_ticks_x is not None:
+		plt.xticks(np.linspace(x_lim[0],x_lim[1],nr_ticks_x))
+
+	if nr_ticks_y is None:
+		nr_ticks_y = 5
+
+	idx = np.linspace(0, len(y_val)-1, nr_ticks_y).astype(int)
+	ticks = y_val[idx]
+	if np.allclose(np.diff(y_val),np.diff(y_val)[0],rtol=1e-2, atol=1e-8):
+		plt.yscale('linear')
+	else:
+		plt.yscale('log')
+	if np.issubdtype(y_val.dtype, np.floating):
+		tick_labels = np.round(ticks).astype(int)
+	else:
+		tick_labels = ticks
+	plt.yticks(ticks, tick_labels)
+	plt.gca().yaxis.set_minor_locator(ticker.NullLocator())
+	
+	# add colorbar
+	if colorbar:
+		plt.colorbar()
+
+	# plot the mask
+	if mask is not None:
+		plt.contour(mask,levels=[0],colors='black',linestyles='dashed',
+	      			linewidths=0.5,extent=extent)
 
 def plot_significance(x:np.array,y:np.array,p_thresh:float=0.05,
 					  stats:str='perm',marker_y:float=0.48,**kwargs):
@@ -158,7 +204,7 @@ def plot_erp_time_course(
 		# set up timecourses to plot	
 		if lateralized:
 			y = [y[0] - y[1]]
-		labels = [cnd] if len(y) == 1 else ['contra','ipsi']
+		labels = [cnd] if len(y) == 1 else ['contralateral','ipsilateral']
 
 		#do actual plotting
 		for i, y_ in enumerate(y):
@@ -199,6 +245,85 @@ def plot_erp_time_course(
 			plt.axvline(t,color = 'black',ls='--',lw=1)
 
 	sns.despine(offset = offset_axes)
+
+def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR], 
+	elec_oi: list, 
+	freq_oi: Union[int,Tuple] = None,
+	lateralized: bool = False, 
+	cnds: list = None, 
+	colors: list = None, 
+	timecourse: str = '2d',
+	show_SE: bool = False, 
+	smooth: bool = False, 
+	window_oi: Tuple = None, 
+	offset_axes: int = 10, 
+	onset_times: Union[list, bool] = [0], 
+	show_legend: bool = True, 
+	ls: str = '-', 
+	**kwargs
+):	
+	
+	#TODO: make it work with mne.time_frequency.AverageTFR objects
+	
+	if cnds is not None:
+		tfr = {key:value for (key,value) in tfr.items() if key in cnds}
+	else:
+		print('No conditions specified. Using first condition in tfr')
+		cnds = list(tfr.keys())
+
+	if timecourse == '2d' and len(cnds) > 1:
+		print('2d timecourse only supports one condition. ' \
+		'will show first condition only')
+		timecourse = 'raw_slopes'
+
+	if colors is None or len(colors) < len(cnds):
+		print('not enough colors specified. Using default colors')
+		colors = list(mcolors.TABLEAU_COLORS.values())
+
+	if isinstance(elec_oi[0],str): 
+		elec_oi = [elec_oi]
+
+	times = tfr[cnds[0]][0].times
+
+	for cnd in cnds:
+		# get indices of frequencies of interest
+		freqs = tfr[cnd][0].freqs
+		if freq_oi is not None:
+			if isinstance(freq_oi, tuple):
+				freq_idx = (np.abs(freqs - freq_oi[0]).argmin(),
+							np.abs(freqs - freq_oi[1]).argmin())
+				freq_idx = slice(freq_idx[0],freq_idx[1]+1)
+			else:
+				freq_idx = np.abs(freqs - freq_oi).argmin()
+
+			freqs = freqs[freq_idx]
+
+		# extract all time courses for the current condition
+		y = []
+		for c, elec in enumerate(elec_oi):
+			# Stack individual TFR data for the specified electrodes
+			idx = [tfr[cnd][0].ch_names.index(e) for e in elec]
+			y_ = np.stack([tfr_.data[idx] for tfr_ in tfr[cnd]]).mean(axis = 1)
+			if freq_oi is not None:
+				if isinstance(freq_idx, int):
+					y_ = np.expand_dims(y_[:, freq_idx], axis=-1)
+				else:
+					y_ = y_[:, freq_idx]
+			y.append(y_)
+				
+		# set up timecourses to plot	
+		if lateralized:
+			y = [y[0] - y[1]]
+		labels = [cnd] if len(y) == 1 else ['contralateral','ipsilateral']
+			
+		#do actual plotting
+		for i, y_ in enumerate(y):
+			if timecourse == '2d':
+				plot_2d(y_, None,times,freqs,colorbar=True)
+			else:
+				color = colors.pop(0) 
+				plot_time_course(times,y_.mean(axis = 1),show_SE,smooth,
+						label=labels[i],color=color,ls=ls,**kwargs)
 
 def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 						show_SE:bool=False,smooth:bool=False,
@@ -332,58 +457,6 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,colors:list=None,
 
 	sns.despine(offset = offset_axes)
 
-def plot_tfr(tfrs:list,times:np.array,elec_oi:list):
-
-	# get relevant params
-	channels = tfrs[0].ch_names
-	if isinstance(elec_oi[0],str):
-		elec_idx = [channels.index(elec) for elec in elec_oi]
-	else:
-		elec_idx = []
-		for elec in elec_oi:
-			elec_idx += [[channels.index(e) for e in elec]]
-
-	# extract data for the current tf plot
-	X = np.stack([tf._data for tf in tfrs])
-	if isinstance(elec_oi[0],str):
-		X = X[:,elec_idx].mean(axis=1)
-	else:
-		X = X[:,elec_idx[0]].mean(axis=1) - X[:,elec_idx[1]].mean(axis=1)
-
-def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
-	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
-			nr_ticks_y:np.array=5,**kwargs):
-
-	if X.ndim > 2:
-		X = X.mean(axis=0)
-
-	# set extent
-	x_lim = [0,X.shape[-1]] if x_val is None else [x_val[0],x_val[-1]]
-	y_lim = [0,X.shape[-2]] if y_val is None else [y_val[0],y_val[-1]]
-	extent = [x_lim[0],x_lim[1],y_lim[0],y_lim[1]]
-
-	# do actuall plotting
-	plt.imshow(X,interpolation='nearest',aspect='auto',origin='lower',
-	    	extent=extent, **kwargs)
-	
-	# set ticks
-	if nr_ticks_x is not None:
-		plt.xticks(np.linspace(x_lim[0],x_lim[1],nr_ticks_x))
-	if nr_ticks_y is not None:
-		if nr_ticks_y < 2:
-			nr_ticks_y = 2
-		idx = np.linspace(0,y_val.size,nr_ticks_y).astype(int)
-		idx[-1] -= 1
-		ticks = y_val[idx].astype(int)
-		plt.yticks(ticks, ticks)
-
-	if colorbar:
-		plt.colorbar()
-
-	# plot the mask
-	if mask is not None:
-		plt.contour(mask,levels=[0],colors='black',linestyles='dashed',
-	      			linewidths=0.5,extent=extent)
 		
 def plot_erp_topography(erps:Union[list,dict],times:np.array,
 						window_oi:tuple=None,cnds:list=None,
