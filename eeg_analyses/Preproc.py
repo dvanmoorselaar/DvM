@@ -56,7 +56,8 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     if preproc_param['run_ica']:
         EEG_ica = EEG.copy().filter(l_freq=1., h_freq=None)
         if preproc_param['notch']:
-            EEG_ica.notch_filter(freqs=[50,100,150], 
+            freqs = [i for i in [50,100,150] if i < EEG.info['sfreq'] / 2]
+            EEG_ica.notch_filter(freqs=freqs, 
                  method='fir', phase='zero')
 
     if preproc_param['high_pass']:                         
@@ -69,7 +70,8 @@ def preproc_eeg(sj:int,session:int,eeg_runs:list,nr_sessions:int,eog:list,
     report.save(report_file, overwrite = True)
 
     if preproc_param['notch']:
-        EEG.notch_filter(freqs=[50], 
+        freqs = [i for i in [50,100,150] if i < EEG.info['sfreq'] / 2]
+        EEG.notch_filter(freqs=freqs, 
                  method='fir', phase='zero')
         report = EEG.report_raw(report, events, event_id)
         report.save(report_file, overwrite = True)

@@ -7,10 +7,12 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.ticker as ticker
 
+from scipy import stats
 from scipy.signal import savgol_filter
+from statsmodels.stats.multitest import fdrcorrection
 from eeg_analyses.ERP import *
 from stats.nonparametric import bootstrap_SE
-from typing import Optional, Generic, Union, Tuple, Any
+from typing import Optional, Generic, Union, Tuple, Any, List, Dict
 from support.support import get_time_slice, get_diff_pairs
 
 from IPython import embed
@@ -47,41 +49,123 @@ def plot_time_course(x:np.array,y:np.array,
 		kwargs.pop('label', None)
 		plt.fill_between(x,y+err,y-err,alpha=0.2,**kwargs)
 
-def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
-	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
-			nr_ticks_y:np.array=5,**kwargs):
+def _perform_stats(
+		y: np.ndarray, 
+        chance: float = 0, 
+        stat_test: str = 'perm',
+        p_thresh: float = 0.05
+	) -> Tuple[np.ndarray, list, np.ndarray]:
+    """Perform statistical testing and return consistent output format.
 
-	if X.ndim > 2:
-		X = X.mean(axis=0)
+    Returns:
+        Tuple containing:
+            - test_stat: Test statistic (t-values)
+            - clusters: For perm test: list of significant clusters
+                For others: boolean mask of significant timepoints
+            - p_vals: P-values for each cluster/timepoint
+    """
+    if stat_test == 'perm':
+        (t_obs, 
+		 clusters, 
+		 p_vals, 
+		 H0) = mne.stats.permutation_cluster_1samp_test(y - chance)
+        return t_obs, clusters, p_vals
+    elif stat_test == 'ttest':
+        t_vals, p_vals = stats.ttest_1samp(y, chance, axis=0)
+        sig_mask = p_vals < p_thresh
+        # Convert mask to list of indices for consistency with cluster output
+        return t_vals, sig_mask, p_vals
+    elif stat_test == 'fdr':
+        t_vals, p_vals = stats.ttest_1samp(y, chance, axis=0)
+        _, p_vals_fdr = fdrcorrection(p_vals)
+        sig_mask = p_vals_fdr < p_thresh
+        return t_vals, sig_mask, p_vals_fdr
+
+def _get_continuous_segments(mask: np.ndarray) -> List[np.ndarray]:
+	"""Convert boolean mask into list of continuous segments.
+
+	Args:
+		mask: Boolean array indicating significant timepoints
+
+	Returns:
+		List of arrays containing indices for each continuous segment
+	"""
+	# Find boundaries of continuous segments
+	diff = np.diff(mask.astype(int))
+	segment_starts = np.where(diff == 1)[0] + 1
+	segment_ends = np.where(diff == -1)[0] + 1
+
+	# Handle edge cases
+	if mask[0]:
+		segment_starts = np.r_[0, segment_starts]
+	if mask[-1]:
+		segment_ends = np.r_[segment_ends, len(mask)]
+
+	# Return list of index arrays for each segment
+	segments = [np.arange(start, end) for 	
+			 				start, end in zip(segment_starts, segment_ends)]
+	return segments
+
+def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
+					  color:str=None,stats:str='perm',line_width:float = 4,**kwargs):
+
+	# Get current line properties
+	if color is None:
+		current_line = plt.gca().get_lines()[-1]
+		color = current_line.get_color()
+		y_data = current_line.get_ydata()
+	else:
+		y_data = np.mean(y, axis=0)
+
+	# perform statistical test
+	_, sig_mask, p_vals = _perform_stats(y, chance, stats, p_thresh)
+
+	if stats == 'perm':
+		for cl, p_val in zip(sig_mask, p_vals):
+			if p_val <= p_thresh:
+				plt.plot(x[cl], y_data[cl], linewidth=line_width, 
+                    color=color, **kwargs)
+	else:
+		for segment in _get_continuous_segments(sig_mask):
+			plt.plot(x[segment], y_data[segment], linewidth=line_width,
+                    color=color, **kwargs)
+
+def plot_2d(Z:np.array,mask:np.array=None,x_val:np.array=None,
+	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
+			nr_ticks_y:np.array=5, set_y_ticks:bool=True, **kwargs):
+
+	if Z.ndim > 2:
+		Z = Z.mean(axis=0)
 
 	# set extent
-	x_lim = [0,X.shape[-1]] if x_val is None else [x_val[0],x_val[-1]]
-	y_lim = [0,X.shape[-2]] if y_val is None else [y_val[0],y_val[-1]]
+	x_lim = [0,Z.shape[-1]] if x_val is None else [x_val[0],x_val[-1]]
+	y_lim = [0,Z.shape[-2]] if y_val is None else [y_val[0],y_val[-1]]
 	extent = [x_lim[0],x_lim[1],y_lim[0],y_lim[1]]
 
 	# do actuall plotting
-	plt.imshow(X,interpolation='nearest',aspect='auto',origin='lower',
+	plt.imshow(Z,interpolation='nearest',aspect='auto',origin='lower',
 	    	extent=extent, **kwargs)
 	
 	# set ticks
 	if nr_ticks_x is not None:
 		plt.xticks(np.linspace(x_lim[0],x_lim[1],nr_ticks_x))
 
-	if nr_ticks_y is None:
-		nr_ticks_y = 5
+	if set_y_ticks:
+		if nr_ticks_y is None:
+			nr_ticks_y = 5
 
-	idx = np.linspace(0, len(y_val)-1, nr_ticks_y).astype(int)
-	ticks = y_val[idx]
-	if np.allclose(np.diff(y_val),np.diff(y_val)[0],rtol=1e-2, atol=1e-8):
-		plt.yscale('linear')
-	else:
-		plt.yscale('log')
-	if np.issubdtype(y_val.dtype, np.floating):
-		tick_labels = np.round(ticks).astype(int)
-	else:
-		tick_labels = ticks
-	plt.yticks(ticks, tick_labels)
-	plt.gca().yaxis.set_minor_locator(ticker.NullLocator())
+		idx = np.linspace(0, len(y_val)-1, nr_ticks_y).astype(int)
+		ticks = y_val[idx]
+		if np.allclose(np.diff(y_val),np.diff(y_val)[0],rtol=1e-2, atol=1e-8):
+			plt.yscale('linear')
+		else:
+			plt.yscale('log')
+		if np.issubdtype(y_val.dtype, np.floating):
+			tick_labels = np.round(ticks).astype(int)
+		else:
+			tick_labels = ticks
+		plt.yticks(ticks, tick_labels)
+		plt.gca().yaxis.set_minor_locator(ticker.NullLocator())
 	
 	# add colorbar
 	if colorbar:
@@ -91,19 +175,6 @@ def plot_2d(X:np.array,mask:np.array=None,x_val:np.array=None,
 	if mask is not None:
 		plt.contour(mask,levels=[0],colors='black',linestyles='dashed',
 	      			linewidths=0.5,extent=extent)
-
-def plot_significance(x:np.array,y:np.array,p_thresh:float=0.05,
-					  stats:str='perm',marker_y:float=0.48,**kwargs):
-
-	if stats == 'perm':
-		(t_obs, 
-		clusters, 
-		clust_pv, 
-		H0) = mne.stats.permutation_cluster_1samp_test(y)
-
-	for cl, p_val in zip(clusters, clust_pv):
-		if p_val <= p_thresh:
-			plt.plot(x[cl], marker_y * np.ones_like(x[cl]),**kwargs)
 
 def plot_erp_time_course(
 	erps: Union[list, dict], 
@@ -118,6 +189,7 @@ def plot_erp_time_course(
 	offset_axes: int = 10, 
 	onset_times: Union[list, bool] = [0], 
 	show_legend: bool = True, 
+
 	ls: str = '-', 
 	**kwargs
 ):
@@ -324,6 +396,75 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 				color = colors.pop(0) 
 				plot_time_course(times,y_.mean(axis = 1),show_SE,smooth,
 						label=labels[i],color=color,ls=ls,**kwargs)
+				
+def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d',
+						 colors:list=None,
+						show_SE:bool=False,smooth:bool=False,method:str='auc',
+						chance_level:float=0.5,stats:Union[str,bool]='perm',
+						onset_times:Union[list,bool]=[0],offset_axes:int=10,
+						show_legend:bool=True,ls = '-',**kwargs):
+
+	if isinstance(bdms, dict):
+		bdms = [bdms]	
+	times = bdms[0]['info']['times']
+	
+	if cnds is None:
+		cnds = [key for key in bdms[0] if 'info' not in key]
+
+	if timecourse != '1d' and len(cnds) > 1:
+		print('2d timecourse only supports one condition. Plotting first ' \
+		f'condition only {cnds[0]}')
+		cnds = [cnds[0]]
+
+	if colors is None or len(colors) < len(cnds):
+		print('not enough colors specified. Using default colors')
+		colors = list(mcolors.TABLEAU_COLORS.values())
+
+	for c, cnd in enumerate(cnds):
+		# extract data
+		y = np.stack([bdm[cnd]['dec_scores'] for bdm in bdms])
+		color = colors[c] 
+
+		if timecourse == '1d':
+			y_label = method
+			# do actual plotting
+			plot_time_course(times,y,show_SE,smooth,
+							label=cnd,color=color,ls=ls)
+			if stats:		
+				plot_significance(times,y,chance_level,
+					 			color=color,stats=stats,**kwargs)
+		else: 
+			if timecourse == '2d_tfr':
+				y_range = bdms[0]['info']['freqs']	
+				y_label = 'Frequency (Hz)'
+				y_ticks = True
+			else:
+				y_range = times
+				y_label = 'Train time (ms)'
+				y_ticks = False
+			# Remove colorbar from kwargs if present
+			plot_2d(y, None,times,y_range,colorbar=True,
+		   				set_y_ticks=y_ticks,**kwargs)
+			if stats:
+				print('Statistical testing not implemented for 2d timecourse')
+
+	# fine tune plot	
+	if show_legend:
+		handles, labels = plt.gca().get_legend_handles_labels()
+		by_label = dict(zip(labels, handles))
+		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
+		prop={'size': 7},frameon=False)
+
+	if onset_times and timecourse == '1d':
+		for t in onset_times:
+			plt.axvline(t,color = 'black',ls='--',lw=1)
+	
+	plt.xlabel('Time (ms)')
+	plt.ylabel(y_label)
+	if timecourse == '1d':
+		plt.axhline(chance_level, color = 'black', ls = '--', lw=1)
+
+	sns.despine(offset = offset_axes)
 
 def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 						show_SE:bool=False,smooth:bool=False,
@@ -402,62 +543,7 @@ def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 	plt.axhline(0, color = 'black', ls = '--', lw=1)
 
 	sns.despine(offset = offset_axes)
-
-
-def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,colors:list=None,
-						show_SE:bool=False,smooth:bool=False,method:str='auc',
-						chance_level:float=0.5,stats:Union[str,bool]='perm',
-						onset_times:Union[list,bool]=[0],offset_axes:int=10,
-						show_legend:bool=True,ls = '-',**kwargs):
-
-	if isinstance(bdms, dict):
-		bdms = [bdms]	
-	times = bdms[0]['info']['times']
 	
-	if cnds is None:
-		cnds = [key for key in bdms[0] if 'info' not in key]
-
-	if colors is None or len(colors) < len(cnds):
-		print('not enough colors specified. Using default colors')
-		colors = list(mcolors.TABLEAU_COLORS.values())
-
-	for c, cnd in enumerate(cnds):
-		# extract data
-		y = np.stack([bdm[cnd]['dec_scores'] for bdm in bdms])
-		color = colors[c] 
-		plot_time_course(times,y,show_SE,smooth,
-							label=cnd,color=color,ls=ls)
-		if stats:
-			if c == 0:
-				y_ = np.stack([bdm[cnd]['dec_scores'] for cnd in cnds 
-				   										for bdm in bdms])
-				y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
-				y_min = np.mean(y_, axis = 1).min()
-				y_max = np.mean(y_, axis = 1).max()
-				step = (y_max - y_min)/25
-
-			marker_y = y_min - np.abs(y_min * step*c)
-			plot_significance(times,y-chance_level,stats=stats,
-					 		 color=color,marker_y = marker_y)
-
-	# fine tune plot	
-	if show_legend:
-		handles, labels = plt.gca().get_legend_handles_labels()
-		by_label = dict(zip(labels, handles))
-		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
-		prop={'size': 7},frameon=False)
-
-	if onset_times:
-		for t in onset_times:
-			plt.axvline(t,color = 'black',ls='--',lw=1)
-	
-	plt.xlabel('Time (ms)')
-	plt.ylabel(method)
-	plt.axhline(chance_level, color = 'black', ls = '--', lw=1)
-
-	sns.despine(offset = offset_axes)
-
-		
 def plot_erp_topography(erps:Union[list,dict],times:np.array,
 						window_oi:tuple=None,cnds:list=None,
 						topo:str='raw',montage:str='biosemi64',**kwargs):
@@ -500,71 +586,6 @@ def plot_topography(X:np.array,ch_types:str='eeg',montage:str='biosemi64',
 	# do actuall plotting
 	mne.viz.plot_topomap(X, info,**kwargs)
 			
-
-
-
-
-
-
-
-
-def contraIpsiPlotter(contra_X, ipsi_X, times, labels, colors, sig_mask = False, p_val = 0.05, errorbar = False, legend_loc = 'best'):
-	'''
-
-	'''
-
-	# loop over all waveforms
-	for i, (contra, ipsi) in enumerate(zip(contra_X, ipsi_X)):
-		d_wave = contra - ipsi
-		
-		# do actual plotting
-		plotTimeCourse(times, d_wave, color = colors[i], label = labels[i],
-					   mask = sig_mask, mask_p_val = p_val, errorbar = errorbar)
-
-	plt.axvline(x = 0, ls = '--', color = 'black')
-	plt.axhline(y = 0, ls = '--', color = 'black')			
-	plt.legend(loc = legend_loc)		
-	sns.despine(offset=10, trim = False)
-
-
-def plotTimeCourse(times, X, color = 'blue', label = None, mask = False, mask_p_val = 0.05, paired = False, errorbar = False):
-	'''
-
-	'''
-
-	if X.ndim > 1:
-		err, x = bootstrap(X)
-	else:
-		x = X	
-	if errorbar:
-		plt.fill_between(times, x + err, x - err, alpha = 0.2, color = color)
-
-	if type(mask) != bool:
-		mask = clusterMask(X, mask, mask_p_val)
-		x_sig = np.ma.masked_where(~mask, x)
-		x_nonsig = np.ma.masked_where(mask, x)
-		plt.plot(times, x_sig, color = color, ls = ':')
-		plt.plot(times, x_nonsig, label = label, color = color)
-	else:
-		plt.plot(times, x, label = label, color = color)
-
-
-def plotSignificanceBars(X1, X2, times, y, color, p_val = 0.05, paired = True, show_descriptives = False, lw = 2, ls = '-'):
-	'''
-
-	'''
-
-	# find significance mask
-	mask = clusterMask(X1, X2, p_val, paired = paired)
-	y_sig = np.ma.masked_where(~mask, np.ones(mask.size) * y)
-	plt.plot(times, y_sig, color = color, ls = ls, lw = lw)
-	if show_descriptives:
-		embed()
-
-
-
-
-
 
 
 

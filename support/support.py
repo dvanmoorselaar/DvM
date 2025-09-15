@@ -6,6 +6,7 @@ import itertools
 import numpy as np
 import pandas as pd
 
+from numpy.lib.npyio import NpzFile
 from typing import Optional, Generic, Union, Tuple, Any
 from IPython import embed 
 from math import sqrt
@@ -106,7 +107,7 @@ def get_diff_pairs(montage:str, ch_names:list)->dict:
 
 
 def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
-				eye_dict:dict,preproc_file:str=None)->\
+				eye_dict:dict,eye: Optional[NpzFile] = None,preproc_file:str=None)->\
 				Tuple[pd.DataFrame,mne.Epochs]:
 	"""
 	Filters out eye movements based on either a step algorhytm or 
@@ -158,20 +159,13 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 		if drift_correct[0] < s:
 			s = drift_correct[0]	
 
-	
-
 	# check whether selection should be based on eyetracker data
 	if 'use_tracker' not in eye_dict or not eye_dict['use_tracker']:
 		tracker_bins = np.full(beh.shape[0], np.nan)
 		perc_tracker = 'no tracker'
 	else:
-		from .FolderStructure import FolderStructure
-		session = 1
-		file = FolderStructure().folder_tracker(ext=['eye','processed'],
-				fname=f'sj_{sj}_ses_{session}_xy_eye.npz')
-		if os.path.isfile(file) or ('x' in epochs.ch_names):
-			if os.path.isfile(file):
-				eye = np.load(file)
+		if isinstance(eye,NpzFile) or ('x' in epochs.ch_names):
+			if eye is not None:
 				x, y, times = eye['x'], eye['y'], eye['times']
 				sfreq = int(eye['sfreq'])
 				window_idx = get_time_slice(times,s,e)
@@ -191,9 +185,9 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 					screen_res = eye_dict['screen_res'],
 					screen_h = eye_dict['screen_h'])
 			angles = EO.angles_from_xy(x.copy(), y.copy(), times, drift_correct)
-			if eye_dict['window_oi'][0] > 2:
+			if eye_dict['window_oi'][0] > times[0]:
 				window_idx = get_time_slice(times, eye_dict['window_oi'][0], e)
-				angles_oi = np.array(angles)[:, :window_idx]
+				angles_oi = np.array(angles)[:,window_idx]
 			else:
 				angles_oi = np.array(angles)
 			min_samples = 40 * epochs.info['sfreq'] / 1000  # 40 ms
@@ -550,19 +544,19 @@ def cnd_time_shift(EEG, beh, cnd_info, cnd_header):
 
 
 def select_electrodes(ch_names: Union[list, np.ndarray], elec_oi: Union[list, str]=  'all') -> np.ndarray:
-	"""allows picking a subset of all electrodes 
+	"""Allows picking a subset of all electrodes, filtered by available channels.
 
 	Args:
-		ch_names (Union[list, np.ndarray]): list of all electrodes in EEG object (MNE format)
-		subset (Union[list, str], optional): [description].Description of subset of electrodes to be used. 
-		In addition to all electrodes, supports selection of 'posterior', 'frontal, 'middle' and 'eye' electrodes.
-		To select a specific set of electrodes specify a list with electrode names. Defaults to 'all'.
+		ch_names: List of all electrodes in EEG object (MNE format)
+		elec_oi: Description of subset of electrodes to be used.
+				Can be 'all', 'post', 'frontal', 'middle', 'eye', 'tracker'
+				or a specific list of electrode names.
 
 	Returns:
-		picks (np.ndarray): indices of selected electrodes
+		picks: Indices of selected electrodes that exist in ch_names
 	"""
 
-	if type(elec_oi) == str:
+	if isinstance(elec_oi, str):
 		if elec_oi == 'all':
 			elec_oi = ['Fp1', 'AF7','AF3','F1','F3','F5','F7',
  					'FT7','FC5','FC3','FC1','C1','C3','C5','T7','TP7',
@@ -586,8 +580,14 @@ def select_electrodes(ch_names: Union[list, np.ndarray], elec_oi: Union[list, st
 		elif elec_oi == 'eye':
 			elec_oi  = ['V_up','V_do','H_r', 'H_l']	
 		elif elec_oi == 'tracker':
-			elec_oi  = ['x','y']		
+			elec_oi  = ['x','y']	
 
+	# Filter elec_oi to only include electrodes that exist in ch_names
+	elec_oi = [e for e in elec_oi if e in ch_names]
+	if not elec_oi:
+		warnings.warn('None of the specified electrodes found in channel names')
+		return np.array([], dtype=int)
+			
 	picks = mne.pick_channels(ch_names, include = elec_oi)
 
 	return picks	

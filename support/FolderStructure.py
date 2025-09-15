@@ -9,7 +9,7 @@ import copy
 import numpy as np
 import pandas as pd
 
-from typing import Optional, Generic, Union, Tuple, Any
+from typing import Dict, List, Optional, Generic, Union, Tuple, Any
 from support.support import exclude_eye, match_epochs_times, trial_exclusion
 from IPython import embed
 
@@ -34,6 +34,14 @@ class FolderStructure(object):
 
     def __init__(self):
         pass
+
+    @staticmethod
+    def _extract_subject_number(fname: str) -> int:
+        """Extract subject number from filename."""
+        match = re.search(r'sj_(\d+)_', fname)
+        if match:
+            return int(match.group(1))
+        raise ValueError(f"Could not extract subject number from {fname}")
 
     @staticmethod
     def folder_tracker(ext:list=[], fname:str=None,overwrite:bool=True)->str:
@@ -120,34 +128,36 @@ class FolderStructure(object):
         
         # start by reading in processed eeg data
         epochs = mne.read_epochs(self.folder_tracker(ext = ['processed'],
-                            fname = f'subject-{sj}_{fname}-epo.fif'))
+                            fname = f'sj_{sj}_{fname}-epo.fif'))
 
         # check whether metadata is saved alongside epoched eeg
         if epochs.metadata is not None:
-            beh = copy.copy(epochs.metadata)
+            df = copy.copy(epochs.metadata)
         else:
             if beh_file:
                 # read in seperate behavior file
-                beh = pd.read_csv(self.folder_tracker(ext=['beh','processed'],
+                df = pd.read_csv(self.folder_tracker(ext=['beh','processed'],
                     fname = f'subject-{sj}_{fname}.csv'))
             else:
-                beh = pd.DataFrame({'condition': epochs.events[:,2]})
+                df = pd.DataFrame({'condition': epochs.events[:,2]})
 
         # remove a subset of trials 
         if type(excl_factor) == dict: 
-            beh, epochs = trial_exclusion(beh, epochs, excl_factor)
+            df, epochs,_ = trial_exclusion(df, epochs, excl_factor)
 
         # reset index(to properly align beh and epochs)
-        beh.reset_index(inplace = True, drop = True)
+        df.reset_index(inplace = True, drop = True)
 
         # exclude eye movements based on threshold criteria in eye_dict
         if eye_dict is not None:
             file = FolderStructure().folder_tracker(
                             ext = ['preprocessing','group_info'],
                             fname = f'preproc_param_{preproc_name}.csv')
-            beh, epochs = exclude_eye(sj,beh,epochs,eye_dict,file)
+            eye = np.load(self.folder_tracker(ext=['eye','processed'],
+                fname=f'sj_{sj}_{fname}.npz'))
+            df, epochs = exclude_eye(sj,df,epochs,eye_dict,eye,file)
 
-        return beh, epochs
+        return df, epochs
 
 
     def load_data(self, sj, name = 'all', eyefilter = False, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
@@ -321,10 +331,15 @@ class FolderStructure(object):
 
         return tfr
 
-    def read_bdm(self,bdm_folder_path:list,bdm_name:str,sjs:list='all')->list:
+    def read_bdm(
+        self,
+        bdm_folder_path: list,
+        bdm_name: Union[str, List[str]],
+        sjs: Union[list, str] = 'all',
+        analysis_labels: Optional[List[str]] = None
+    ) -> list:
         """
         Read in classification data as created by BDM class.
-        Decoding scores are returned within a dictionary.
 
         Args:
             bdm_folder_path (list): List of folders (as created by BDM) within
@@ -340,21 +355,92 @@ class FolderStructure(object):
         # set extension
         ext = ['bdm'] + bdm_folder_path
 
-        if sjs == 'all':
-            files = sorted(glob.glob(self.folder_tracker(
-                            ext = ext,
-                            fname = f'sj_*_{bdm_name}.pickle')),
-                            key = lambda s: int(re.search(r'\d+', s).group()))
+        if isinstance(bdm_name, str):
+            bdm_names = [bdm_name]
         else:
-            files = [self.folder_tracker(ext = ext,
-                    fname = f'sj_{sj}_{bdm_name}.pickle')for sj in sjs]
+            bdm_names = bdm_name
 
-        bdm = [pickle.load(open(file, "rb")) for file in files]
+        # Get files for all bdm_names
+        all_files = []
+        for name in bdm_names:
+            if sjs == 'all':
+                files = sorted(glob.glob(self.folder_tracker(
+                    ext = ext,
+                    fname = f'sj_*_{name}.pickle')),
+                    key = lambda s: int(re.search(r'sj_(\d+)_', s).group(1)))
+            else:
+                files = [self.folder_tracker(ext = ext,
+                    fname = f'sj_{sj}_{name}.pickle')for sj in sjs]
+                
+            if not files:
+                raise ValueError(f"No files found for analysis {name}")
+            all_files.append(files)
+        
+        # Check if we have matching files for each subject
+        ref_subjects = [self._extract_subject_number(f) for f in all_files[0]]
+        for files in all_files[1:]:
+            curr_subjects = [self._extract_subject_number(f) for f in files]
+            if curr_subjects != ref_subjects:
+                raise ValueError(
+                    f"Subject mismatch. Expected subjects {ref_subjects}, "
+                    f"but got {curr_subjects}")
+
+        bdm = []
+        for sj_files in zip(*all_files):
+
+            # load initial file to get reference data
+            ref_data = pickle.load(open(sj_files[0], "rb"))
+            ref_times = ref_data['info']['times']
+
+            # initialize combined data
+            combined_data = {
+                'info': ref_data['info'],
+                'bdm_info': {}
+            }
+
+            # process individual files
+            for i, file in enumerate(sj_files):
+                data = pickle.load(open(file, "rb"))
+                
+                # check time alignment
+                if not np.array_equal(data['info']['times'], ref_times):
+                    raise ValueError(f"Time mismatch in {file}")
+                
+                # Get analysis name for prefixing
+                analysis = bdm_names[i]
+
+                # Add bdm_info with analysis prefix
+                for key, value in data['bdm_info'].items():
+                    if analysis_labels and i < len(analysis_labels):
+                        new_key = f"{analysis_labels[i]}_{key}"
+                    else:
+                        new_key = f"{analysis}_{key}"
+                    combined_data['bdm_info'][new_key] = value
+
+                # Add condition results with custom or default naming
+                for key in data.keys():
+                    if key not in ['info', 'bdm_info']:
+                        update = False
+                        if len(all_files) == 1:
+                            new_key = key
+                        elif analysis_labels and i < len(analysis_labels):
+                            new_key = f"{analysis_labels[i]}_{key}"
+                            update = True
+                        else:
+                            new_key = f"{analysis}_{key}"
+                            update = True
+
+                        if update and len(data.keys()) == 3:
+                            last_underscore = new_key.rfind('_')
+                            if last_underscore != -1:
+                                new_key = new_key[:last_underscore]
+                        
+                        combined_data[new_key] = data[key]
+
+            bdm.append(combined_data)
 
         return bdm
     
-
-
     def read_ctfs(self,ctf_folder_path:list,output_type:str,
                   ctf_name:str,sjs:list='all')->list:
 

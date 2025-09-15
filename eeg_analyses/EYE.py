@@ -200,11 +200,10 @@ class EYE(FolderStructure):
 		for i, trial in enumerate(eye):
 			for event in trial['events']['msg']:
 				if start_event in event[1]:
-
-					# adjust trial times such that start_event is at 0 ms
+					# Only process if trial has data
 					if trial['trackertime'].size > 0:
+						# Align to start_event
 						tr_times = trial['trackertime'] - event[0]
-						idx = get_time_slice(tr_times, start, end)
 
 						if interpolate_blinks and tr_times[0] >= start:
 							x_, y_  = self.interp_trial(trial)
@@ -212,16 +211,20 @@ class EYE(FolderStructure):
 							x_ = np.array(trial['x'])
 							y_ = np.array(trial['y'])
 
-						# populate x,y with window of interest
-						# TODO: Fill from right
-						start_fill = x.shape[1]- x_[idx][:times.size].size
-						try:
-							x[i,start_fill:] = x_[idx][:times.size]
-							y[i,start_fill:] = y_[idx][:times.size]
-						except:
-							pass
+						# find overlapping time points
+						idx = get_time_slice(tr_times, start, end)
+						trial_times = tr_times[idx]
 
-		return x, y, times	
+						# Find corresponding indices in target time array
+						target_idx = np.where((times >= trial_times[0]) & 
+												(times <= trial_times[-1]))[0]
+			
+						# Only copy data where times overlap
+						if len(target_idx) > 0:
+							x[i,target_idx] = x_[idx][:len(target_idx)]
+							y[i,target_idx] = y_[idx][:len(target_idx)]
+
+		return x, y, times
 
 	def set_xy(self, x, y, times, drift_correct = None):	
 		''' 

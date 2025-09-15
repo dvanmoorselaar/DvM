@@ -165,7 +165,8 @@ class TFR(FolderStructure):
 			self.wavelets = wavelets
 			self.frex = frex
 		elif self.method == 'hilbert':
-			print('Double check')
+			self.freq_bands = self.create_freq_bands()
+			self.frex = [(low + high)/2 for low, high in self.freq_bands]
 
 	def select_tfr_data(
 		self, 
@@ -242,6 +243,45 @@ class TFR(FolderStructure):
 	
 		return epochs, df
 	
+	def create_freq_bands(self) -> list:
+		"""Creates frequency bands for Hilbert transform.
+		
+		Uses same frequency spacing as wavelet method (linear or log) 
+		to create overlapping frequency bands. Band edges are placed 
+		halfway between center frequencies.
+		
+		Returns:
+			list: List of tuples containing (low_freq, high_freq) for 
+			each band
+		"""
+		# Get center frequencies using same spacing as wavelets
+		if self.freq_scaling == 'log':
+			center_freqs = np.logspace(np.log10(self.min_freq), 
+									np.log10(self.max_freq), 
+									self.num_frex)
+		else:  # linear
+			center_freqs = np.linspace(self.min_freq, 
+									self.max_freq, 
+									self.num_frex)
+		
+		# Create band edges halfway between center frequencies
+		freq_bands = []
+		for i in range(len(center_freqs)):
+			if i == 0:  # First band
+				low_freq = center_freqs[0] - (center_freqs[1] - center_freqs[0])/2
+				low_freq = max(0.1, low_freq)  # Avoid too low frequencies
+			else:
+				low_freq = (center_freqs[i-1] + center_freqs[i])/2
+				
+			if i == len(center_freqs)-1:  # Last band
+				high_freq = center_freqs[-1] + (center_freqs[-1] - center_freqs[-2])/2
+			else:
+				high_freq = (center_freqs[i] + center_freqs[i+1])/2
+				
+			freq_bands.append((low_freq, high_freq))
+		
+		return freq_bands
+	
 	def create_morlet(
 		self, 
 		min_freq: int, 
@@ -309,7 +349,7 @@ class TFR(FolderStructure):
 		else:
 			raise ValueError('Unknown frequency scaling option')
 
-		t = np.arange(-nr_time/s_freq/2, nr_time/s_freq/2, 1/s_freq)	
+		t = np.arange(-nr_time/s_freq/2, nr_time/s_freq/2, 1/s_freq)
 		 	
 		# create wavelets
 		wavelets = np.zeros((num_frex, len(t)), dtype = complex)
@@ -353,7 +393,7 @@ class TFR(FolderStructure):
 		"""
 
 
-		# new code
+		# Perform convolution in frequency domain
 		m = ifft(X * fft(wavelet, l_conv), l_conv)
 		m = m[:nr_time * nr_epochs + nr_time - 1]
 		m = np.reshape(m[math.ceil((nr_time-1)/2 - 1):int(-(nr_time-1)/2-1)], 
@@ -403,6 +443,31 @@ class TFR(FolderStructure):
 						caption=tfr['ch_names'])
 							
 		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
+
+	def compute_tfr(self, epochs: mne.Epochs, output:str = 'power'):
+		
+		# get data
+		raw_conv = self.tfr_loop(epochs)
+		raw_conv = raw_conv.astype(np.complex64, copy=False)
+		if output == 'power':
+			X = raw_conv.real**2
+			X += raw_conv.imag**2
+		elif output == 'phase':
+			#TODO: check difference between sin and cos
+			X = np.cos(np.angle(raw_conv))
+
+		# apply baseline
+		if output == 'power' and self.baseline is not None:
+			print('Applying TFR baseline correction')
+			s,e = self.baseline
+			base_idx = get_time_slice(epochs.times,s,e)
+			base = X[..., base_idx].mean(axis=-1, keepdims=True)
+			X = 10*(np.log10(X+1e-12)-np.log(base+1e-12))
+
+		# make sure freqs are the first dim
+		X = np.swapaxes(X, 0, 1)
+
+		return X
 
 	def lateralized_tfr(
 		self, 
@@ -512,13 +577,17 @@ class TFR(FolderStructure):
 
 			# get baseline power (correction is done after condition loop)
 			if self.baseline is not None:
-				#TODO: speed up
-				base[cnd] = np.mean(abs(raw_conv[...,base_idx])**2, 
+				# TODO: check whether averaging across epochs is correct!!!
+				base_power = raw_conv[..., base_idx].real**2
+				base_power += raw_conv[..., base_idx].imag**2
+				base[cnd] = np.mean(base_power, 
 									axis = (0,3))
 			else:
 				base = {}
 			# populate tf
-			tfr['power'][cnd] = abs(raw_conv[..., idx_2_save])**2
+			power = raw_conv[..., idx_2_save].real**2
+			power += raw_conv[..., idx_2_save].imag**2
+			tfr['power'][cnd] = power
 
 		# baseline correction
 		tfr = self.baseline_tfr(tfr,base,self.base_method,elec_oi)
@@ -532,7 +601,7 @@ class TFR(FolderStructure):
 
 	def tfr_loop(self, epochs: mne.Epochs) -> np.array:
 		"""
-		TODO: implement hilbert convolution
+		TODO: check hilbert convolution
 		Generates a time-frequency (TF) matrix for each channel.
 
 		This function performs time-frequency decomposition for each 
@@ -559,6 +628,7 @@ class TFR(FolderStructure):
 		"""
 
 		# initialize convolution array
+		s_freq = epochs.info['sfreq']
 		nr_time = epochs.times.size
 		nr_ch = len(epochs.ch_names)
 		nr_epochs = len(epochs)
@@ -566,26 +636,39 @@ class TFR(FolderStructure):
 		raw_conv = np.zeros((nr_epochs, self.num_frex, nr_ch, 
 							nr_time), dtype = complex)
 
+
 		# loop over channels			
 		for ch_idx in range(nr_ch):
 			print(f'Decomposing channel {ch_idx+1} out of {nr_ch} channels', 
 				  end='\r')
 
-			x = epochs._data[:, ch_idx].ravel()	
+			x = epochs._data[:, ch_idx]
 			if self.method == 'wavelet':
 				# fft decomposition
-				x_fft = fft(x, l_conv)
-
-			for f in range(self.num_frex):
-				# convolve and get analytic signal
-				if self.method == 'wavelet':
+				x_fft = fft(x.ravel(), l_conv)
+				for f in range(self.num_frex):
+					# convolve and get analytic signal
 					m = self.wavelet_convolution(x_fft, self.wavelets[f], 
-												l_conv, nr_time, nr_epochs)
-				elif self.method == 'hilbert':
-					print('method not yet implemented')
-					pass
+													l_conv, nr_time, nr_epochs)
+					# populate output array
+					raw_conv[:,f,ch_idx] = m
+			elif self.method == 'hilbert':
+				# Loop through frequency bands
+				for f, (l_freq, h_freq) in enumerate(self.freq_bands):
+					# Bandpass filter across all epochs at once
+					x_filt = mne.filter.filter_data(x,s_freq, l_freq, h_freq, 
+												method='fir', 
+												phase='zero-double',
+												verbose=False)
+	
+					# Apply Hilbert transform
+					analytic = hilbert(x_filt, axis=-1)
+					
+					# Store result
+					raw_conv[:,f,ch_idx] = analytic
 
-				raw_conv[:,f,ch_idx] = m
+		# for memory efficiency
+		raw_conv = raw_conv.astype(np.complex64, copy=False)
 		
 		return raw_conv
 	

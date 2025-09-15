@@ -611,7 +611,7 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                     viewing_dist = eye_info['viewing_dist'],
                     screen_res = eye_info['screen_res'],
                     screen_h = eye_info['screen_h'])
-
+            
             (x,
             y,
             times,
@@ -1296,8 +1296,17 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
         # save eeg
         self.save(self.folder_tracker(ext=[
                     'processed'],
-                    fname=f'subject-{self.sj}_ses-{self.session}_{preproc_name}-epo.fif'),
+                    fname=f'sj_{self.sj}_ses_{self.session}_{preproc_name}-epo.fif'),
                     split_size='2GB', overwrite = True)
+
+        # check whether matching eye file exists and adjust name
+        eye_file = self.folder_tracker(ext=['eye','processed'],
+                        fname=f'sj_{self.sj}_ses_{self.session}_xy_eye.npz')
+        if os.path.exists(eye_file):
+            old_name = eye_file
+            new_name = self.folder_tracker(ext=['eye','processed'],
+                fname=f'sj_{self.sj}_ses_{self.session}_{preproc_name}.npz')
+            os.rename(old_name, new_name)
 
         # check whether individual sessions need to be combined
         if combine_sessions and int(self.session) != 1:
@@ -1306,11 +1315,11 @@ class Epochs(mne.Epochs, BaseEpochs,FolderStructure):
                 session = i + 1
                 all_eeg.append(mne.read_epochs(self.folder_tracker(ext=[
                                'processed'],
-                               fname=f'subject-{self.sj}_ses-{session}_{preproc_name}-epo.fif')))
+                               fname=f'sj_{self.sj}_ses_{session}_{preproc_name}-epo.fif')))
 
             all_eeg = mne.concatenate_epochs(all_eeg)
             all_eeg.save(self.folder_tracker(ext=[
-                         'processed'], fname=f'subject-{self.sj}_all_{preproc_name}-epo.fif'),
+                         'processed'], fname=f'sj_{self.sj}_all_{preproc_name}-epo.fif'),
                         split_size='2GB', overwrite = True)
 
     def link_behavior(self, beh: pd.DataFrame, combine_sessions: bool = True):
@@ -1787,6 +1796,10 @@ class ArtefactReject(object):
         sfreq = epochs.info['sfreq']
 
         # filter data, apply hilbert (limited to 'good' EEG channels) and smooth the data (using defaults)
+        if band_pass[1] > sfreq / 2:
+            band_pass[1] = sfreq / 2 - 1
+            UserWarning('High cutoff frequency is greater than Nyquist ' +
+            'frequency. Setting to Nyquist frequency.')
         X = self.apply_hilbert(epochs, band_pass[0], band_pass[1])
         X = self.box_smoothing(X, sfreq)
 

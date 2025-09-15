@@ -28,7 +28,8 @@ The necessary steps are outlined below:
 9. pip install -U autoreject
 In case you want to make use of picard during ica
 10. pip install python-picard
-11. pip install openpyxl
+11. pip install openpyxly
+12. conda install statsmodels
 
 
 ## Folderstructure
