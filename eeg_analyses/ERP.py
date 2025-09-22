@@ -134,7 +134,7 @@ class ERP(FolderStructure):
 
         # if specified remove trials matching specified criteria
         if excl_factor is not None:
-            df, epochs = trial_exclusion(df, epochs, excl_factor)
+            df, epochs, _ = trial_exclusion(df, epochs, excl_factor)
 
         # check whether left stimuli should be 
         # artificially transferred to left hemifield
@@ -236,7 +236,7 @@ class ERP(FolderStructure):
         
         report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
                         
-    def lateralized_erp(
+    def condition_erps(
         self, 
         pos_labels: np.array, 
         cnds: Optional[dict] = None, 
@@ -248,26 +248,24 @@ class ERP(FolderStructure):
         name: str = 'main'
     ):
         """
-        Creates lateralized event-related potentials (ERPs) for 
-        specified conditions.
+        Creates event-related potentials (ERPs) for specified 
+        conditions.
 
-        This function selects trials of interest based on lateralized 
-        stimuli and generates condition-specific ERPs. It optionally 
-        applies exclusion criteria, flips the topography for lateralized 
-        designs, and crops the time window of interest. ERPs can also be 
-        split into fast and slow trials based on median reaction time 
-        (RT).
+        This function selects trials of interest based on provided 
+        position labels and generates condition-specific ERPs. It 
+        optionally applies exclusion criteria, flips the topography for 
+        lateralized designs (if specified via topo_flip),and crops the 
+        time window of interest. ERPs can also be split into fast and 
+        slow trials based on median reaction time (RT).
 
         Args:
             pos_labels (dict): A dictionary specifying the position 
-                labels for lateralized stimuli. The key should be the 
+                labels for stimuli of interest.The key should be the 
                 column in the corresponding behavioral DataFrame that 
                 contains position labels, and the value should be a list 
-                of lateralized position labels to be used in the 
-                analysis.
-                For example, `dict(target_loc=[2,6])` selects trials
-                where the target is presented on positions 2 and 6 
-                (e.g., left and right hemifield).
+                of position labels to be used in the analysis.
+                For example, `dict(target_loc=[2,6])` selects trials 
+                where the target is presented on positions 2 and 6.
             cnds (Optional[dict]): Dictionary specifying conditions for 
                 ERP creation. The key should be the column name in the 
                 behavioral data, and the value should be a list of 
@@ -306,8 +304,6 @@ class ERP(FolderStructure):
         Returns:
             None: The function saves the generated ERPs to disk.
         """
-
-
 
         # get data
         df, epochs = self.select_erp_data(excl_factor,topo_flip)

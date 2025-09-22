@@ -107,7 +107,8 @@ def _get_continuous_segments(mask: np.ndarray) -> List[np.ndarray]:
 	return segments
 
 def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
-					  color:str=None,stats:str='perm',line_width:float = 4,**kwargs):
+					  color:str=None,stats:str='perm',
+					  smooth:bool=False,line_width:float = 4,**kwargs):
 
 	# Get current line properties
 	if color is None:
@@ -119,6 +120,9 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 
 	# perform statistical test
 	_, sig_mask, p_vals = _perform_stats(y, chance, stats, p_thresh)
+
+	if smooth:
+		y_data = savgol_filter(y_data, 9, 1)
 
 	if stats == 'perm':
 		for cl, p_val in zip(sig_mask, p_vals):
@@ -432,7 +436,8 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d
 							label=cnd,color=color,ls=ls)
 			if stats:		
 				plot_significance(times,y,chance_level,
-					 			color=color,stats=stats,**kwargs)
+					 			color=color,stats=stats,
+								smooth=smooth,**kwargs)
 		else: 
 			if timecourse == '2d_tfr':
 				y_range = bdms[0]['info']['freqs']	
@@ -509,23 +514,28 @@ def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 			else:
 				plot_time_course(times,y,show_SE,smooth,
 								label=label,color=color,ls=['-','--'][o])
-			if stats:
-				if c == 0:
-					y_ = np.stack([ctf[cnd][out] for cnd in cnds 
-															for ctf in ctfs])
+
+			if stats:		
+				plot_significance(times,y,0,
+					 			color=color,stats=stats,
+								smooth=smooth,**kwargs)
+			# if stats:
+			# 	if c == 0:
+			# 		y_ = np.stack([ctf[cnd][out] for cnd in cnds 
+			# 												for ctf in ctfs])
 					
-					if y_.ndim > 2 and avg_bins:
-						y_ = y_[:,:,~np.all(y_ == 0, axis=(0,1))].mean(axis=-1)				
-					y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
-					y_min = np.mean(y_, axis = 1).min()
-					y_max = np.mean(y_, axis = 1).max()
-					step = (y_max - y_min)/20
+			# 		if y_.ndim > 2 and avg_bins:
+			# 			y_ = y_[:,:,~np.all(y_ == 0, axis=(0,1))].mean(axis=-1)				
+			# 		y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
+			# 		y_min = np.mean(y_, axis = 1).min()
+			# 		y_max = np.mean(y_, axis = 1).max()
+			# 		step = (y_max - y_min)/20
 
 				
-				marker_y = y_min + np.abs(step*c)
-				plot_significance(times,y,stats=stats,
-								color=color,marker_y=marker_y,
-								ls=['-','--'][o])
+			# 	marker_y = y_min + np.abs(step*c)
+			# 	plot_significance(times,y,stats=stats,
+			# 					color=color,marker_y=marker_y,
+			# 					ls=['-','--'][o])
 			
 	# fine tune plot	
 	if show_legend:

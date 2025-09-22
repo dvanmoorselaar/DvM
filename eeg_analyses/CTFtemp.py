@@ -92,7 +92,7 @@ class CTF(BDM):
 		self.cross = False
 		self.baseline = baseline
 		self.seed = seed
-		self.shift_bins = shift_bins
+		self.shift_bins = shift_bins		# shift of channel position
 
 		# specify model parameters
 		self.method = method
@@ -100,7 +100,8 @@ class CTF(BDM):
 		self.nr_chans = nr_chans 												# underlying channel functions coding for spatial location
 		self.nr_iter = nr_iter													# nr iterations to apply forward model 		
 		self.nr_folds = nr_folds												# nr blocks to split up training and test data with leave one out test procedure
-		self.sfreq = 512														# shift of channel position
+		self.sin_power = sin_power
+		self.delta = delta												
 		self.power = power
 		self.VEP = VEP
 		self.min_freq = min_freq
@@ -110,12 +111,7 @@ class CTF(BDM):
 		self.slide_wind = slide_window
 		self.laplacian = laplacian
 		self.pca=pca_cmp
-		self.avg_trials = avg_trials
-		# hypothesized set tuning functions underlying power measured across electrodes
-		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans,
-													sin_power,delta)
-
-		
+		self.avg_trials = avg_trials	
 		
 	def calculate_basis_set(self,nr_bins:int,nr_chans:int, 
 			 				sin_power:int=7,delta:bool=False)->np.array:
@@ -245,7 +241,11 @@ class CTF(BDM):
 			collapse (bool, optional): _description_. Defaults to False.
 			name (int, optional): _description_. Defaults to 'main'.
 		"""
- 
+
+		# hypothesized set tuning functions underlying power measured across electrodes
+		print('Creating bassiset with sin_power ', self.sin_power )
+		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans,
+													self.sin_power,self.delta)
 		# read in data
 		epochs = self.epochs.copy()
 		beh = self.beh.copy()

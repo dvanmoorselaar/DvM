@@ -234,7 +234,7 @@ class FolderStructure(object):
         return beh
 
     #@blockPrinting
-    def read_erps(self, erp_folder:str,erp_name:str,
+    def read_erps(self,erp_name:str,
                 cnds:list=None,sjs:list='all',
                 match:str=False)->Tuple[dict,np.array]:
         """
@@ -242,8 +242,6 @@ class FolderStructure(object):
         returned in dictionary
 
         Args:
-            erp_folder (str): name of folder within erp folder that 
-            contains data of interest
             erp_name (str): name assigned to erp analysis
             cnds (list, optional): conditions of interest. 
             Defaults to None
@@ -258,6 +256,9 @@ class FolderStructure(object):
             erps (dict): Dictionary with evoked data (with conditions as keys)
         """
 
+        if cnds is None:
+            cnds = ['all_data']
+
         # initiate condtion dict
         erps = dict.fromkeys(cnds, 0)
         
@@ -265,12 +266,12 @@ class FolderStructure(object):
         for cnd in cnds:
             if sjs == 'all':
                 files = sorted(glob.glob(self.folder_tracker(
-                            ext = ['erp',erp_folder],
+                            ext = ['erp','evoked'],
                             fname = f'sj_*_{cnd}_{erp_name}-ave.fif')),
                             key = lambda s: int(re.search(r'\d+', s).group()))
             else:
                 files = [self.folder_tracker(
-                                ext = ['erp',erp_folder],
+                                ext = ['erp','evoked'],
                                 fname = f'sj_{sj}_{cnd}_{erp_name}-ave.fif')
                                             for sj in sjs]
 
