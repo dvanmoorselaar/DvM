@@ -163,6 +163,7 @@ def exclude_eye(sj:int,beh:pd.DataFrame,epochs:mne.Epochs,
 	if 'use_tracker' not in eye_dict or not eye_dict['use_tracker']:
 		tracker_bins = np.full(beh.shape[0], np.nan)
 		perc_tracker = 'no tracker'
+		window_idx = get_time_slice(epochs.times,s,e)
 	else:
 		if isinstance(eye,NpzFile) or ('x' in epochs.ch_names):
 			if eye is not None:

@@ -153,9 +153,19 @@ class FolderStructure(object):
             file = FolderStructure().folder_tracker(
                             ext = ['preprocessing','group_info'],
                             fname = f'preproc_param_{preproc_name}.csv')
-            eye = np.load(self.folder_tracker(ext=['eye','processed'],
-                fname=f'sj_{sj}_{fname}.npz'))
-            df, epochs = exclude_eye(sj,df,epochs,eye_dict,eye,file)
+            # Check if the file exists before proceeding
+            eye_file = self.folder_tracker(ext=['eye','processed'],
+                    fname=f'sj_{sj}_{fname}.npz')
+            if os.path.isfile(eye_file):
+                eye = np.load(eye_file)
+                df, epochs = exclude_eye(sj,df,epochs,eye_dict,eye,file)
+            else:
+                print(f"Warning: Preprocessing parameter file not found: \
+                      {file}. Eye exclusion based on EOG data only")
+                temp = eye_dict['use_tracker']
+                eye_dict['use_tracker'] = False
+                df, epochs = exclude_eye(sj,df,epochs,eye_dict,None,file)
+                eye_dict['use_tracker'] = temp
 
         return df, epochs
 

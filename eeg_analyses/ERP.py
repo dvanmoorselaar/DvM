@@ -238,7 +238,7 @@ class ERP(FolderStructure):
                         
     def condition_erps(
         self, 
-        pos_labels: np.array, 
+        pos_labels: Optional[dict] = None, 
         cnds: Optional[dict] = None, 
         midline: Optional[dict] = None, 
         topo_flip: Optional[dict] = None, 
@@ -307,9 +307,15 @@ class ERP(FolderStructure):
 
         # get data
         df, epochs = self.select_erp_data(excl_factor,topo_flip)
-    
-        # select trials of interest (i.e., lateralized stimuli)
-        idx = self.select_lateralization_idx(df,pos_labels,midline)
+        
+        # select trials of interest (e.g., lateralized stimuli)
+        if isinstance(pos_labels, dict):
+            idx = ERP.select_lateralization_idx(df, pos_labels, midline)
+        elif pos_labels is None:
+            idx = np.arange(len(df))
+        else:
+            raise TypeError(f"pos_labels must be a dict or None, \
+                            got {type(pos_labels).__name__}")
 
         # loop over all conditions
         if cnds is None:
@@ -525,11 +531,11 @@ class ERP(FolderStructure):
                 Defaults to 0.05.
 
         Returns:
-            Union[tuple, dict]: 
-                - If `method='cnd_avg'`, returns a tuple representing 
-                the selected time window (start, end).
+            Union[list, dict]: 
+                - If `method='cnd_avg'`, returns a list representing 
+                the selected time window [start, end].
                 - If `method='cnd_spc'`, returns a dictionary where keys 
-                are condition names and values are tuples representing 
+                are condition names and values are lists representing 
                 condition-specific time windows.
         """
 
@@ -572,8 +578,9 @@ class ERP(FolderStructure):
             elif polarity == 'neg':
                 idx_peak = np.argmin(X[window_idx])
             
-            erp_window = (times[window_idx][idx_peak] - window_size/2, 
-                         times[window_idx][idx_peak] + window_size/2)
+            erp_window = [times[window_idx][idx_peak] - window_size/2, 
+                         times[window_idx][idx_peak] + window_size/2,
+                         polarity]
         
         elif method == 'cnd_spc':
             erp_window = {}
@@ -593,8 +600,9 @@ class ERP(FolderStructure):
                 elif polarity == 'neg':
                     idx_peak = np.argmin(X[window_idx])
                 
-                erp_window[cnd] = (times[window_idx][idx_peak] - window_size/2, 
-                                   times[window_idx][idx_peak] + window_size/2)
+                erp_window[cnd] = [times[window_idx][idx_peak] - window_size/2, 
+                                   times[window_idx][idx_peak] + window_size/2,
+                                   polarity]
 
         return erp_window
     
@@ -635,7 +643,7 @@ class ERP(FolderStructure):
     @staticmethod
     def export_erp_metrics_to_csv(
         erps: Union[dict, list], 
-        window_oi: Union[tuple, dict], 
+        window_oi: Union[list, dict], 
         elec_oi: list, 
         cnds: list = None, 
         method: str = 'mean_amp', 
@@ -656,8 +664,8 @@ class ERP(FolderStructure):
                 of evoked objects (mne.Evoked) or a dictionary where 
                 keys are condition names and values are lists of evoked 
                 objects.
-            window_oi (Union[tuple, dict]): Time window of interest for 
-                calculating metrics. If a tuple, the same window is 
+            window_oi (Union[list, dict]): Time window of interest for 
+                calculating metrics. If a list, the same window is 
                 applied to all conditions. If a dictionary, 
                 condition-specific windows are used 
                 (keys correspond to condition names).
@@ -681,8 +689,8 @@ class ERP(FolderStructure):
         if not isinstance(erps, (dict, list)):
             raise ValueError("erps must be a dictionary or a list of " \
                             "evoked objects.")
-        if not isinstance(window_oi, (tuple, dict)):
-            raise ValueError("window_oi must be a tuple or a dictionary.")
+        if not isinstance(window_oi, (list, dict)):
+            raise ValueError("window_oi must be a list or a dictionary.")
 
         # initialize output list and set parameters
         X, headers = [], []
@@ -695,7 +703,7 @@ class ERP(FolderStructure):
         # get channels and times
         channels, times = ERP.get_erp_params(erps)
 
-        if isinstance(window_oi, tuple):
+        if isinstance(window_oi, list):
             idx = get_time_slice(times, window_oi[0], window_oi[1])
 
         # extract condition specific data

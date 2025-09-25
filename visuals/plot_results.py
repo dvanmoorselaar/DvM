@@ -136,7 +136,8 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 
 def plot_2d(Z:np.array,mask:np.array=None,x_val:np.array=None,
 	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
-			nr_ticks_y:np.array=5, set_y_ticks:bool=True, **kwargs):
+			nr_ticks_y:np.array=5, set_y_ticks:bool=True,
+			interpolation:str='bilinear', **kwargs):
 
 	if Z.ndim > 2:
 		Z = Z.mean(axis=0)
@@ -147,7 +148,7 @@ def plot_2d(Z:np.array,mask:np.array=None,x_val:np.array=None,
 	extent = [x_lim[0],x_lim[1],y_lim[0],y_lim[1]]
 
 	# do actuall plotting
-	plt.imshow(Z,interpolation='nearest',aspect='auto',origin='lower',
+	plt.imshow(Z,interpolation=interpolation,aspect='auto',origin='lower',
 	    	extent=extent, **kwargs)
 	
 	# set ticks
@@ -329,6 +330,7 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 	cnds: list = None, 
 	colors: list = None, 
 	timecourse: str = '2d',
+	stats:Union[str,bool]=False,
 	show_SE: bool = False, 
 	smooth: bool = False, 
 	window_oi: Tuple = None, 
@@ -348,9 +350,9 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 		cnds = list(tfr.keys())
 
 	if timecourse == '2d' and len(cnds) > 1:
-		print('2d timecourse only supports one condition. ' \
-		'will show first condition only')
-		timecourse = 'raw_slopes'
+		print(f'2d timecourse only supports one condition. '
+		f'will show first condition only: {cnds[0]}')
+		cnds = [cnds[0]]
 
 	if colors is None or len(colors) < len(cnds):
 		print('not enough colors specified. Using default colors')
@@ -400,6 +402,12 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 				color = colors.pop(0) 
 				plot_time_course(times,y_.mean(axis = 1),show_SE,smooth,
 						label=labels[i],color=color,ls=ls,**kwargs)
+				if stats:		
+					plot_significance(times,y_.mean(axis = 1),0,
+									color=color,stats=stats,
+									smooth=smooth,**kwargs)
+
+	sns.despine(offset = offset_axes)
 				
 def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d',
 						 colors:list=None,

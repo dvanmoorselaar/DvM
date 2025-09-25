@@ -32,93 +32,97 @@ class TFR(FolderStructure):
 	The TFR class supports functionality for time-frequency 
 	decomposition (TFR) analysis on EEG data.
 	It provides methods for ....
-    TODO: UPDATE DOCSTRING!!!!!
+	TODO: UPDATE DOCSTRING!!!!!
 
-    This class inherits from FolderStructure, which provides 
-    functionality for managing file paths and saving outputs. 
+	This class inherits from FolderStructure, which provides 
+	functionality for managing file paths and saving outputs. 
 
 	Args:
-        sj (int): Subject identifier.
-        df (pd.DataFrame): Behavioral data associated with the 
-            EEG epochs.
-        epochs (mne.Epochs): Preprocessed EEG data segmented 
-            into epochs.
-        min_freq (int, optional): Minimum frequency (in Hz) for the 
-            time-frequency analysis. Defaults to 4 Hz.
-        max_freq (int, optional): Maximum frequency (in Hz) for the 
-            time-frequency analysis. Can not be higher than Nyquist 
+		sj (int): Subject identifier.
+		df (pd.DataFrame): Behavioral data associated with the 
+			EEG epochs.
+		epochs (mne.Epochs): Preprocessed EEG data segmented 
+			into epochs.
+		min_freq (int, optional): Minimum frequency (in Hz) for the 
+			time-frequency analysis. Defaults to 4 Hz.
+		max_freq (int, optional): Maximum frequency (in Hz) for the 
+			time-frequency analysis. Can not be higher than Nyquist 
 			frequency.Defaults to 40 Hz.
-        num_frex (int, optional): Number of frequencies to analyze 
-            between `min_freq` and `max_freq`. In general 20-30 
+		num_frex (int, optional): Number of frequencies to analyze 
+			between `min_freq` and `max_freq`. In general 20-30 
 			frequencies provide a reasonable number to cover a broad 
 			frequency range (e.g., 4-60 Hz), while also generating 
 			nice-looking plots. Defaults to 25.
-        cycle_range (tuple, optional): Range of cycles to use for the 
-            wavelet analysis. The tuple specifies the minimum and 
-            maximum number of cycles. The number of cycles of the 
+		cycle_range (tuple, optional): Range of cycles to use for the 
+			wavelet analysis. The tuple specifies the minimum and 
+			maximum number of cycles. The number of cycles of the 
 			Gaussiantaper define its width, and thus the width of the 
 			wavelet. This parameter controls the trade-off between 
 			temporal and frequency precision. Specifying a range 
 			(i.e., a tuple) makes sure that that the cycles increase in 
 			the same number of steps as the frequency of the wavelets. 
 			Defaults to (3,10).
-        freq_scaling (str, optional): Scaling method for the frequency 
-            axis. Supported values are `'log'` (logarithmic scaling) 
-            and `'linear'`. If main results are expected in lower 
+		freq_scaling (str, optional): Scaling method for the frequency 
+			axis. Supported values are `'log'` (logarithmic scaling) 
+			and `'linear'`. If main results are expected in lower 
 			frequency bands logarithmic scale is adviced, whereas linear 
 			scale is advised for expected results in higher frequency 
 			bands. Defaults to 'log'.Defaults to `'log'`.
-        baseline (tuple, optional): Time range (start, end) in seconds 
-            for baseline correction. If None, no baseline correction is 
-            applied. Defaults to None.
-        base_method (str, optional): Method for baseline correction. 
+		baseline (tuple, optional): Time range (start, end) in seconds 
+			for baseline correction. If None, no baseline correction is 
+			applied. Defaults to None.
+		base_method (str, optional): Method for baseline correction. 
 			Specifies whether DB conversion is condition specific 
 			('cnd_spec') or averaged across conditions ('cnd_avg'). 
 			Defaults to condition specific baselining. 
-        method (str, optional): Method for time-frequency analysis. 
-            Supported values are `'wavelet'` and `'morlet'`. 
-            Defaults to `'wavelet'`.
-            TODO: Check MORLET functionality
-        downsample (int, optional): Factor by which to downsample the
-            time-frequency data. Defaults to 1 (no downsampling).
-        laplacian (bool, optional): If True, applies a Laplacian spatial 
-            filter to the EEG data before time-frequency analysis. 
-            Defaults to False.
+		method (str, optional): Method for time-frequency analysis. 
+			Supported values are `'wavelet'` and `'morlet'`. 
+			Defaults to `'wavelet'`.
+			TODO: Check MORLET functionality
+		downsample (int, optional): Factor by which to downsample the
+			time-frequency data. Defaults to 1 (no downsampling).
+		laplacian (bool, optional): If True, applies a Laplacian spatial 
+			filter to the EEG data before time-frequency analysis. 
+			Defaults to False.
+		normalize_wavelets (bool, optional): Whether to normalize
+			wavelets to unit energy for consistent amplitude scaling 
+			across frequencies. Recommended for most applications. 
+			Defaults to True.
 
 	Attributes:
-        sj (int): Subject identifier.
-        df (pd.DataFrame): Behavioral data associated with the 
+		sj (int): Subject identifier.
+		df (pd.DataFrame): Behavioral data associated with the 
 			EEG epochs.
-        epochs (mne.Epochs): Preprocessed EEG data segmented into 
+		epochs (mne.Epochs): Preprocessed EEG data segmented into 
 			epochs.
-        min_freq (int): Minimum frequency (in Hz) for the time-frequency 
+		min_freq (int): Minimum frequency (in Hz) for the time-frequency 
 			analysis.
-        max_freq (int): Maximum frequency (in Hz) for the time-frequency 
+		max_freq (int): Maximum frequency (in Hz) for the time-frequency 
 			analysis.
-        num_frex (int): Number of frequencies to analyze between
-		 	`min_freq` and `max_freq`.
-        cycle_range (tuple): Range of cycles to use for the wavelet 
+		num_frex (int): Number of frequencies to analyze between
+			`min_freq` and `max_freq`.
+		cycle_range (tuple): Range of cycles to use for the wavelet 
 			analysis.
-        freq_scaling (str): Scaling method for the frequency axis 
+		freq_scaling (str): Scaling method for the frequency axis 
 			(`'log'` or `'linear'`).
-        baseline (tuple): Time range (start, end) in seconds for 
+		baseline (tuple): Time range (start, end) in seconds for 
 			baseline correction.
-        base_method (str): Method for baseline correction 
+		base_method (str): Method for baseline correction 
 			(condition specific or condition averaged).
-        method (str): Method for time-frequency analysis
+		method (str): Method for time-frequency analysis
 			(`'wavelet'` or `'hilbert'`).
-        downsample (int): Factor by which to downsample the 	
+		downsample (int): Factor by which to downsample the 	
 			time-frequency data.
-        laplacian (bool): Indicates whether a Laplacian spatial filter 
+		laplacian (bool): Indicates whether a Laplacian spatial filter 
 			is applied.
-        wavelets (np.ndarray): Morlet wavelets used for time-frequency 
+		wavelets (np.ndarray): Morlet wavelets used for time-frequency 
 			analysis (if `method='wavelet'`).
-        frex (np.ndarray): Array of frequencies corresponding to the 
+		frex (np.ndarray): Array of frequencies corresponding to the 
 			wavelets (if `method='wavelet'`).
 
-    Returns:
-        None: This is the constructor method and does not 
-        return a value.
+	Returns:
+		None: This is the constructor method and does not 
+		return a value.
 
 	"""
 
@@ -133,10 +137,12 @@ class TFR(FolderStructure):
 		cycle_range: tuple = (3, 10), 
 		freq_scaling: str = 'log', 
 		baseline: tuple = None, 
-		base_method: str = 'cnd_spec', 
+		base_method: str = 'trial_spec', 
 		method: str = 'wavelet', 
+		power: str = 'total',
 		downsample: int = 1, 
 		laplacian: bool = False,
+		normalize_wavelets: bool = True,
 		report: bool = False
 	):
 		"""class constructor"""
@@ -154,25 +160,53 @@ class TFR(FolderStructure):
 		self.cycle_range = cycle_range
 		self.freq_scaling = freq_scaling
 		self.laplacian = laplacian
+		self.normalize_wavelets = normalize_wavelets
 		self.report = report
-		# set params
-		if self.method == 'wavelet':
-			s_freq = epochs.info['sfreq']
-			nr_time = epochs.times.size
-			wavelets, frex = self.create_morlet(min_freq, max_freq, num_frex, 
-												cycle_range, freq_scaling, 
-												nr_time, s_freq)
-			self.wavelets = wavelets
-			self.frex = frex
-		elif self.method == 'hilbert':
+		self.power = power
+		
+		# Initialize wavelets as None - will be generated when needed
+		self.wavelets = None
+		self.frex = None
+		self._wavelet_params_hash = None  # Track when wavelets need regeneration
+		
+		if self.method == 'hilbert':
 			self.freq_bands = self.create_freq_bands()
 			self.frex = [(low + high)/2 for low, high in self.freq_bands]
+
+	def _get_wavelet_params_hash(self):
+		"""Generate a hash of current wavelet parameters to 
+		detect changes."""
+		import hashlib
+		params = (self.min_freq, self.max_freq, self.num_frex, 
+				 self.cycle_range, self.freq_scaling, self.normalize_wavelets,
+				 self.epochs.info['sfreq'], self.epochs.times.size)
+		return hashlib.md5(str(params).encode()).hexdigest()
+	
+	def _ensure_wavelets(self):
+		"""Ensure wavelets are generated and up-to-date 
+		with current parameters."""
+		if self.method != 'wavelet':
+			return
+			
+		current_hash = self._get_wavelet_params_hash()
+		
+		if (self.wavelets is None or self.frex is None or 
+			self._wavelet_params_hash != current_hash):
+			
+			s_freq = self.epochs.info['sfreq']
+			nr_time = self.epochs.times.size
+			self.wavelets, self.frex = self.create_morlet(
+				self.min_freq, self.max_freq, self.num_frex, 
+				self.cycle_range, self.freq_scaling, 
+				nr_time, s_freq, self.normalize_wavelets)
+			self._wavelet_params_hash = current_hash
 
 	def select_tfr_data(
 		self, 
 		elec_oi: Union[str, list], 
 		excl_factor: dict = None, 
-		topo_flip: dict = None
+		topo_flip: dict = None,
+		cnds: dict = None
 	) -> Tuple[mne.Epochs, pd.DataFrame]:
 		"""
 		Selects time-frequency (TF) data and applies initial data 
@@ -204,6 +238,9 @@ class TFR(FolderStructure):
 				values specify the conditions to flip. For example, 
 				`{'cnd': 'left'}` flips the topography of all trials 
 				where the condition is `'left'`. Defaults to None.
+			cnds (dict, optional): Conditions for condition-specific
+				evoked subtraction when calculating induced power.
+				Format: {column_name: [cond1, cond2]}.
 
 		Returns:
 			Tuple[mne.Epochs, pd.DataFrame]: 
@@ -290,7 +327,8 @@ class TFR(FolderStructure):
 		cycle_range: tuple, 
 		freq_scaling: str, 
 		nr_time: int, 
-		s_freq: float
+		s_freq: float,
+		normalize_wavelets: bool = True
 	) -> Tuple[np.array, np.array]:
 		"""
 		Creates Morlet wavelets for time-frequency (TF) decomposition.
@@ -322,6 +360,11 @@ class TFR(FolderStructure):
 				can be equivalent to the number of time points in the 
 				epoched data.
 			s_freq (float): Sampling frequency (in Hz).
+			normalize_wavelets (bool, optional): Whether to normalize 
+				wavelets to unit energy (Cohen-style normalization). 
+				This ensures consistent amplitude scaling across 
+				frequencies and is recommended for most applications. 
+				Defaults to True.
 
 		Raises:
 			ValueError: If an unsupported frequency scaling option is 
@@ -338,7 +381,7 @@ class TFR(FolderStructure):
 		# setup wavelet parameters (gaussian width and time)
 		if freq_scaling == 'log':
 			frex = np.logspace(np.log10(min_freq), np.log10(max_freq), 
-							  num_frex)
+					  num_frex)
 			s = np.logspace(np.log10(cycle_range[0]), 
 									np.log10(cycle_range[1]),num_frex) 
 			s /= (2*math.pi*frex)
@@ -354,8 +397,14 @@ class TFR(FolderStructure):
 		# create wavelets
 		wavelets = np.zeros((num_frex, len(t)), dtype = complex)
 		for fi in range(num_frex):
-			wavelets[fi,:] = (np.exp(2j * math.pi * frex[fi] * t) * 
-							 np.exp(-t**2/(2*s[fi]**2)))
+			wavelet = (np.exp(2j * math.pi * frex[fi] * t) * 
+					   np.exp(-t**2/(2*s[fi]**2)))
+			
+			# Optional normalization to unit energy (Cohen-style)
+			if normalize_wavelets:
+				wavelet = wavelet / np.sqrt(np.sum(np.abs(wavelet)**2))
+			
+			wavelets[fi,:] = wavelet
 		
 		return wavelets, frex	
 	
@@ -444,7 +493,7 @@ class TFR(FolderStructure):
 							
 		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
 
-	def compute_tfr(self, epochs: mne.Epochs, output:str = 'power'):
+	def compute_tfrs(self, epochs: mne.Epochs, output:str = 'power'):
 		
 		# get data
 		raw_conv = self.tfr_loop(epochs)
@@ -456,7 +505,7 @@ class TFR(FolderStructure):
 			#TODO: check difference between sin and cos
 			X = np.cos(np.angle(raw_conv))
 
-		# apply baseline
+		# apply baseline (trial specific)
 		if output == 'power' and self.baseline is not None:
 			print('Applying TFR baseline correction')
 			s,e = self.baseline
@@ -469,7 +518,7 @@ class TFR(FolderStructure):
 
 		return X
 
-	def lateralized_tfr(
+	def condition_tfrs(
 		self, 
 		pos_labels: dict, 
 		cnds: dict = None, 
@@ -481,21 +530,24 @@ class TFR(FolderStructure):
 		name: str = 'main'
 	):
 		"""
-		Performs lateralized time-frequency (TFR) decomposition for 
-		specified conditions.
+		Performs time-frequency (TFR) decomposition for specified 
+		conditions with optional lateralization.
 
-		This function computes lateralized time-frequency 
-		representations (TFRs) for specified conditions and electrodes 
-		of interest. It supports baseline correction, downsampling, and 
+		This function computes time-frequency representations (TFRs) 
+		for specified conditions and electrodes of interest. It supports 
+		lateralization handling via topography flipping (`topo_flip`). 
+		The function also supports baseline correction, downsampling, and 
 		condition-specific trial selection. The output is saved in a 
 		format compatible with MNE-Python.
 
 		Args:
 			pos_labels (dict): Dictionary specifying the position labels 
-				for lateralized stimuli. For example, 
+				for stimuli of interest. For example, 
 				`{'target_loc': [2, 6]}` specifies the column name 
 				(`'target_loc'`) and the values corresponding to 
-				left and right hemifield stimuli.
+				left and right hemifield stimuli. Note: lateralized 
+				TFRs are optional when `topo_flip` is defined, as 
+				topography flipping can handle lateralization.
 			cnds (dict, optional): Dictionary specifying conditions for 
 				TFR decomposition. The key should be the column name in 
 				the behavioral data, and the value should be a list of 
@@ -531,9 +583,18 @@ class TFR(FolderStructure):
 		
 		# get data
 		epochs, df = self.select_tfr_data(elec_oi,excl_factor,topo_flip)
+
+		# Ensure wavelets are generated BEFORE creating output dict
+		self._ensure_wavelets()
 		
-		# select trials of interest (i.e., lateralized stimuli)
-		idx = ERP.select_lateralization_idx(df, pos_labels, midline)
+		# select trials of interest (e.g., lateralized stimuli)
+		if isinstance(pos_labels, dict):
+			idx = ERP.select_lateralization_idx(df, pos_labels, midline)
+		elif pos_labels is None:
+			idx = np.arange(len(df))
+		else:
+			raise TypeError(f"pos_labels must be a dict or None, \
+							got {type(pos_labels).__name__}")
 
 		# get baseline index
 		times = epochs.times
@@ -561,7 +622,7 @@ class TFR(FolderStructure):
 
 		for c, cnd in enumerate(cnds):
 			counter = c + 1 
-			print(f'Decomposing condition {counter}: {cnd}')
+			print(f'Decomposing condition {counter}: {cnd} \n')
 			# set tfr name
 			tfr_name = f'sj_{self.sj}_{name}'
 
@@ -572,15 +633,31 @@ class TFR(FolderStructure):
 				idx_c = np.where(df[cnd_header] == cnd)[0]
 				idx_c = np.intersect1d(idx, idx_c)
 
+			# calculate induced power
+			if self.power == 'induced':
+				print('Calculating induced power (i.e., subtracting evoked ' \
+				'response)')
+				evoked = epochs[idx_c].average()
+				tfr_epochs = epochs[idx_c].subtract_evoked(evoked)
+			elif self.power == 'evoked':
+				print('Calculating evoked power (i.e., average of ' \
+				'epochs)')
+				tfr_epochs = epochs[idx_c].average()	
+			else: # total power
+				tfr_epochs = epochs[idx_c]
+
 			# TF decomposition 
-			raw_conv = self.tfr_loop(epochs[idx_c])
+			raw_conv = self.tfr_loop(tfr_epochs)
 
 			# get baseline power (correction is done after condition loop)
 			if self.baseline is not None:
-				# TODO: check whether averaging across epochs is correct!!!
 				base_power = raw_conv[..., base_idx].real**2
 				base_power += raw_conv[..., base_idx].imag**2
-				base[cnd] = np.mean(base_power, 
+				if self.base_method == 'trial_spec':
+					base[cnd] = np.mean(base_power, 
+									axis = -1)
+				else: # cnd_avg or cnd_spec
+					base[cnd] = np.mean(base_power, 
 									axis = (0,3))
 			else:
 				base = {}
@@ -627,15 +704,22 @@ class TFR(FolderStructure):
 				- `nr_time`: Number of time points in each trial.
 		"""
 
+		# # Ensure wavelets are up-to-date before processing
+		# self._ensure_wavelets()
+
 		# initialize convolution array
 		s_freq = epochs.info['sfreq']
 		nr_time = epochs.times.size
 		nr_ch = len(epochs.ch_names)
-		nr_epochs = len(epochs)
+		if isinstance(epochs, mne.epochs.EpochsFIF):
+			nr_epochs = len(epochs.events)
+		else:  # mne.epochs.EpochsArray
+			nr_epochs = 1
+			epochs._data = epochs._data[np.newaxis, ...]  # Add epoch dimension
+
 		l_conv = 2**self.nextpow2(nr_time * nr_epochs + nr_time - 1)
 		raw_conv = np.zeros((nr_epochs, self.num_frex, nr_ch, 
 							nr_time), dtype = complex)
-
 
 		# loop over channels			
 		for ch_idx in range(nr_ch):
@@ -704,19 +788,31 @@ class TFR(FolderStructure):
 									f'{tfr_name}_{cnd}-tfr.h5')
 			tfr_.save(f_name, overwrite = True)
 				
-
 	def baseline_tfr(self,tfr:dict,base:dict,method:str,
 		 			elec_oi:str='all') -> dict:
 		"""
 		Apply baseline correction via decibel conversion. 
 
+		For 'trial_spec': applies baseline correction to individual trials 
+		then averages
+		For 'cnd_spec'/'cnd_avg': averages trials first then applies baseline 
+		correction. 
+
 		Args:
 			tfr (dict): TF power per condition (epochs X nr_freq X 
 				nr_ch X nr_time)
-			base (dict): mean baseline TF power averaged across 
-				trials (nr_freq X nr_chan)
-			method (str): method for baseline correction
-				elec_oi (str): Necessary when baselining depends on the 
+			base (dict): baseline TF power. Format depends on method:
+				- For 'cnd_spec'/'cnd_avg': mean baseline across trials 
+				(nr_freq X nr_chan)
+				- For 'trial_specific': baseline per trial 
+				(epochs X nr_freq X nr_chan)
+			method (str): method for baseline correction. Options:
+				- 'cnd_spec': condition-specific baseline 
+					(each condition uses its own baseline)
+				- 'cnd_avg': condition-averaged baseline (all conditions 
+				use same baseline)
+				- 'trial_spec': trial-specific baseline correction
+			elec_oi (str): Necessary when baselining depends on the 
 				topographic distribution of electrodes 
 				(i.e., when method is 'norm' or 'Z')
 
@@ -724,7 +820,7 @@ class TFR(FolderStructure):
 			ValueError: In case incorrect baselining method is specified
 
 		Returns:
-			tf (dict): normalized time frequency power
+			tfr (dict): baseline corrected time frequency power
 		"""
 
 		cnds = list(tfr['power'].keys())
@@ -733,48 +829,68 @@ class TFR(FolderStructure):
 			cnd_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 
 		for cnd in cnds:
-			if method != 'Z':
-				#TODO: implement Z scoring baseline
-				tfr['cnd_cnt'][cnd] = tfr['power'][cnd].shape[0]
-				power = np.mean(tfr['power'][cnd], axis = 0)
-			if method == 'cnd_spec':	
-				tfr['power'][cnd] = self.db_convert(power, base[cnd])
-			elif method == 'cnd_avg':
-				tfr['power'][cnd] = self.db_convert(power, cnd_avg)
+			power = tfr['power'][cnd]  # Shape: (epochs X nr_freq X nr_ch X nr_time)
+			tfr['cnd_cnt'][cnd] = power.shape[0]
+
+			if method == 'trial_spec':
+				#  baseline correct individual trials, then average
+				power = self.db_convert(power, base[cnd])
+				tfr['power'][cnd] = np.mean(power, axis = 0)
+			elif method == 'cnd_spec' or method == 'cnd_avg':
+				# average first, then baseline correct
+				avg_power = np.mean(power, axis=0)  
+				if method == 'cnd_spec':
+					tfr['power'][cnd] = self.db_convert(avg_power, base[cnd])
+				else:
+					tfr['power'][cnd] = self.db_convert(avg_power,cnd_avg)
 			elif method == 'norm':
 				print('For normalization procedure it is assumed that it is as'
 				 	 ' if all stimuli of interest are presented right')
-				tfr['power'][cnd], info = self.normalize_power(power, 
+				# Average first for normalization
+				avg_power = np.mean(power, axis=0)  # Shape: (nr_freq X nr_ch X nr_time)
+				tfr['power'][cnd], info = self.normalize_power(avg_power, 
 															 list(elec_oi)) 
 				tfr.update({'norm_info':info})
 			elif method is None or not base:
-				tfr['power'][cnd] = power
+				# Simply average across trials when no baseline correction
+				tfr['power'][cnd] = np.mean(power, axis = 0)
 			else:
-				raise ValueError('Invalid method specified')
+				raise ValueError(f'Invalid method specified: {method}')
 
-			# # power values can now safely be averaged
-			# if method != 'norm':
-			# 	tf['power'][cnd] = np.mean(tf['power'][cnd], axis = 0)			
-
-		return tfr
-				
+		return tfr	
+	
 	def db_convert(self, power: np.array, base_power: np.array) -> np.array:
 		"""
-		Decibel (dB) is the ratio between frequency-band specific 
-		power and baseline level of power in that same frequency band. 
+		Decibel (dB) conversion with automatic detection of 
+		baseline type.
+		
+		Handles both trial-specific and condition-averaged baseline correction 
+		based on the dimensionality of both power and base_power inputs.
 
 		Args:
-			power (np.array): TF power (epochs X nr_freq X nr_ch 
-				X nr_time)
-			base_power (np.array): baseline power (nr_freq X nr_chan)
+			power (np.array): TF power. Can be:
+				- 4D (epochs X nr_freq X nr_ch X nr_time): individual trials
+				- 3D (nr_freq X nr_ch X nr_time): trial-averaged power
+			base_power (np.array): baseline power. Can be:
+				- 2D (nr_freq X nr_chan): condition-averaged baseline
+				- 3D (epochs X nr_freq X nr_chan): trial-specific baseline
 
 		Returns:
-			norm_power (np.array): baseline normalized power(dB)
+			norm_power (np.array): baseline normalized power (dB)
+				- Same shape as input power
 		"""
 
 		nr_time = power.shape[-1]
-		base_power = np.repeat(base_power[...,np.newaxis],nr_time,axis = 2)
-		norm_power = 10*np.log10(power/base_power)
+		if base_power.ndim == 2:
+			# trial generic baseline (condition specific or averaged)
+			base_power = np.repeat(base_power[...,np.newaxis],nr_time,axis = 2)
+		elif base_power.ndim == 3:
+			# trial specific baseline
+			base_power = np.repeat(base_power[...,np.newaxis],nr_time,axis=-1)
+		else:
+			raise ValueError('base_power should be either 2D or 3D array')
+		
+		norm_power = 10*(np.log10(power+1e-12)-np.log10(base_power+1e-12))
 
 		return norm_power
 

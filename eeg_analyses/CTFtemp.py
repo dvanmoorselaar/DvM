@@ -54,7 +54,7 @@ class CTF(BDM):
 				avg_ch:bool=True,ctf_param:Union[str,bool]='slope',
 				power:str='band',min_freq:int=4,max_freq:int=40,
 				num_frex:int=25,freq_scaling:str='log',slide_window:int=0,
-				laplacian:bool=False,pca_cmp:int=0,avg_trials:int=1,
+				laplacian:bool=False,pca_cmp:int=0,
 				filter:int=None,VEP:bool=False,
 				baseline:Optional[tuple]=None,seed:Union[int, bool] = 42213):
 		''' 
@@ -78,9 +78,7 @@ class CTF(BDM):
 		self (object): SpatialEM object
 		'''
 
-
-		if filter is not None:
-			epochs.filter(l_freq = None, h_freq = filter)
+		# TODO: change moment to filter
 
 		self.sj = sj
 		self.beh = beh
@@ -111,7 +109,7 @@ class CTF(BDM):
 		self.slide_wind = slide_window
 		self.laplacian = laplacian
 		self.pca=pca_cmp
-		self.avg_trials = avg_trials	
+		self.filter = filter	
 		
 	def calculate_basis_set(self,nr_bins:int,nr_chans:int, 
 			 				sin_power:int=7,delta:bool=False)->np.array:
@@ -268,6 +266,10 @@ class CTF(BDM):
 		ctf, info = {}, {}
 		freqs, nr_freqs = self.set_frequencies(freqs)
 		data_type = 'power' if freqs != ['raw'] else 'raw'
+		if data_type == 'raw':
+			if self.filter is not None:
+				epochs.filter(l_freq = None, h_freq = self.filter)
+
 		if self.method == 'k-fold':
 			# TODO: fix
 			print('Method not yet  implemented')
@@ -484,8 +486,9 @@ class CTF(BDM):
 			epochs = mne.preprocessing.compute_current_source_density(epochs)
 
 		# if specified # average across trials
-		(epochs, 
-		beh) = self.average_trials(epochs,beh,[self.to_decode] + headers) 
+		#TODO: check whether this makes sense for ctf
+		# (epochs, 
+		# beh) = self.average_trials(epochs,beh,[self.to_decode] + headers) 
 
 		# limit analysis to electrodes of interest
 		picks = select_electrodes(epochs.ch_names, elec_oi) 
@@ -971,8 +974,8 @@ class CTF(BDM):
 		# loop over iterations
 		for i in range(self.nr_iter):
 			#  initiate new array for each block assignment
-			blocks = np.empty(nr_tr) * np.nan
-			shuf_blocks = np.empty(nr_tr) * np.nan
+			blocks = np.full(nr_tr, np.nan)
+			shuf_blocks = np.full(nr_tr, np.nan)
 
 			idx_shuf = np.random.permutation(nr_tr) 			
 			shuf_bin = cnd_bins[idx_shuf]
