@@ -611,6 +611,7 @@ class TFR(FolderStructure):
 
 		# initiate output dicts and loop over conditions
 		tfr = {'ch_names':np.array(epochs.ch_names), 
+			  'base':'baseline' if self.baseline is not None else 'no_base', 
 		 	  'times':times[idx_2_save], 
 			  'frex': self.frex, 'power': {},
 			  'cnd_cnt':{}}
@@ -781,7 +782,7 @@ class TFR(FolderStructure):
 			tfr_ = mne.time_frequency.AverageTFR(epochs.info,x,times,self.frex,
 				       						tfr['cnd_cnt'][cnd], 
 											method = self.method,
-											comment = cnd)
+											comment = tfr['base'])
 			
 			# save TFR object
 			f_name = self.folder_tracker(['tfr',self.method],

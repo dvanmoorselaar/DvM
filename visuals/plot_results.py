@@ -9,6 +9,7 @@ import matplotlib.ticker as ticker
 
 from scipy import stats
 from scipy.signal import savgol_filter
+from scipy.ndimage.filters import gaussian_filter
 from statsmodels.stats.multitest import fdrcorrection
 from eeg_analyses.ERP import *
 from stats.nonparametric import bootstrap_SE
@@ -51,35 +52,52 @@ def plot_time_course(x:np.array,y:np.array,
 
 def _perform_stats(
 		y: np.ndarray, 
-        chance: float = 0, 
-        stat_test: str = 'perm',
-        p_thresh: float = 0.05
+		chance: float = 0, 
+		stat_test: str = 'perm',
+		p_thresh: float = 0.05
 	) -> Tuple[np.ndarray, list, np.ndarray]:
-    """Perform statistical testing and return consistent output format.
+	"""Perform statistical testing and return consistent output format.
 
-    Returns:
-        Tuple containing:
-            - test_stat: Test statistic (t-values)
-            - clusters: For perm test: list of significant clusters
-                For others: boolean mask of significant timepoints
-            - p_vals: P-values for each cluster/timepoint
-    """
-    if stat_test == 'perm':
-        (t_obs, 
-		 clusters, 
-		 p_vals, 
-		 H0) = mne.stats.permutation_cluster_1samp_test(y - chance)
-        return t_obs, clusters, p_vals
-    elif stat_test == 'ttest':
-        t_vals, p_vals = stats.ttest_1samp(y, chance, axis=0)
-        sig_mask = p_vals < p_thresh
-        # Convert mask to list of indices for consistency with cluster output
-        return t_vals, sig_mask, p_vals
-    elif stat_test == 'fdr':
-        t_vals, p_vals = stats.ttest_1samp(y, chance, axis=0)
-        _, p_vals_fdr = fdrcorrection(p_vals)
-        sig_mask = p_vals_fdr < p_thresh
-        return t_vals, sig_mask, p_vals_fdr
+	Args:
+		y: Data array. For 1D: (n_subjects, n_timepoints)
+						For 2D: (n_subjects, n_frequencies, n_timepoints)
+		chance: Chance level for statistical testing
+		stat_test: Statistical test type ('perm', 'ttest', 'fdr')
+		p_thresh: P-value threshold for significance
+		adjacency: Adjacency matrix for 2D clustering (only for perm test)
+
+	Returns:
+		Tuple containing:
+			- test_stat: Test statistic (t-values)
+			- clusters/sig_mask: For perm test: list of significant clusters
+								For others: boolean mask of significant timepoints/pixels
+			- p_vals: P-values for each cluster/timepoint/pixel
+	"""
+
+    # Determine input data dimensionality
+	is_2d = y.ndim == 3
+
+	if stat_test == 'perm':
+		(t_obs, 
+		clusters, 
+		p_vals, 
+		H0) = mne.stats.permutation_cluster_1samp_test(y - chance)
+		return t_obs, clusters, p_vals
+	elif stat_test == 'ttest':
+		t_vals, p_vals = stats.ttest_1samp(y, chance, axis=0)
+		sig_mask = p_vals < p_thresh
+		return t_vals, sig_mask, p_vals
+	elif stat_test == 'fdr':
+		t_vals, p_vals = stats.ttest_1samp(y, chance, axis=0)
+		if is_2d:
+			# Apply FDR correction across all 2D points
+			_, p_vals_fdr = fdrcorrection(p_vals.flatten())
+			p_vals_fdr = p_vals_fdr.reshape(p_vals.shape)
+		else:
+			_, p_vals_fdr = fdrcorrection(p_vals)
+		sig_mask = p_vals_fdr < p_thresh
+		
+		return t_vals, sig_mask, p_vals_fdr
 
 def _get_continuous_segments(mask: np.ndarray) -> List[np.ndarray]:
 	"""Convert boolean mask into list of continuous segments.
@@ -108,33 +126,73 @@ def _get_continuous_segments(mask: np.ndarray) -> List[np.ndarray]:
 
 def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 					  color:str=None,stats:str='perm',
-					  smooth:bool=False,line_width:float = 4,**kwargs):
-
-	# Get current line properties
-	if color is None:
-		current_line = plt.gca().get_lines()[-1]
-		color = current_line.get_color()
-		y_data = current_line.get_ydata()
-	else:
-		y_data = np.mean(y, axis=0)
+					  smooth:bool=False,line_width:float = 4,
+					   y_val:np.array=None,**kwargs):
+	
+	# Infer plot type from data dimensions
+	plot_type = '2d' if y.ndim == 3 else '1d'
 
 	# perform statistical test
 	_, sig_mask, p_vals = _perform_stats(y, chance, stats, p_thresh)
 
-	if smooth:
-		y_data = savgol_filter(y_data, 9, 1)
+	if plot_type == '2d':
+		# Require y_val for 2D plots
+		if y_val is None:
+			raise ValueError("y_val (e.g., freq values) required for 2D plots")
+		
+		# Handle 2D significance plotting
+		x_lim = [x[0], x[-1]]
+		y_lim = [y_val[0], y_val[-1]]
+		extent = [x_lim[0], x_lim[1], y_lim[0], y_lim[1]]
 
-	if stats == 'perm':
-		for cl, p_val in zip(sig_mask, p_vals):
-			if p_val <= p_thresh:
-				plt.plot(x[cl], y_data[cl], linewidth=line_width, 
-                    color=color, **kwargs)
+		if color is None:
+			color = 'white'
+
+		# Plot significance contours based on test type
+		if stats == 'perm':
+			# Handle cluster-based results
+			for cluster, p_val in zip(sig_mask, p_vals):
+				if p_val <= p_thresh:
+					cluster_mask = np.zeros(y.shape[1:])  # (n_freqs, n_times)
+					cluster_mask[cluster] = 1
+
+					# Smooth the cluster mask
+					cluster_mask_smooth = gaussian_filter(
+										cluster_mask.astype(float), sigma=1.0)
+					plt.contour(cluster_mask_smooth, levels=[0.5], colors=color,
+								linestyles='dashed', linewidths=1,
+								extent=extent, **kwargs)
+		else:
+			# Handle boolean mask results (ttest, fdr)
+			# Apply same smoothing for visual consistency
+			sig_mask_smooth = gaussian_filter(sig_mask.astype(float), sigma=1.0)
+			plt.contour(sig_mask_smooth, levels=[0.5], colors=color,
+						linestyles='dashed', linewidths=1,
+						extent=extent, **kwargs)
+	
 	else:
-		for segment in _get_continuous_segments(sig_mask):
-			plt.plot(x[segment], y_data[segment], linewidth=line_width,
-                    color=color, **kwargs)
+		# Get current line properties
+		if color is None:
+			current_line = plt.gca().get_lines()[-1]
+			color = current_line.get_color()
+			y_data = current_line.get_ydata()
+		else:
+			y_data = np.mean(y, axis=0)
 
-def plot_2d(Z:np.array,mask:np.array=None,x_val:np.array=None,
+		if smooth:
+			y_data = savgol_filter(y_data, 9, 1)
+
+		if stats == 'perm':
+			for cl, p_val in zip(sig_mask, p_vals):
+				if p_val <= p_thresh:
+					plt.plot(x[cl], y_data[cl], linewidth=line_width, 
+						color=color, **kwargs)
+		else:
+			for segment in _get_continuous_segments(sig_mask):
+				plt.plot(x[segment], y_data[segment], linewidth=line_width,
+						color=color, **kwargs)
+
+def plot_2d(Z:np.array,x_val:np.array=None,
 	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
 			nr_ticks_y:np.array=5, set_y_ticks:bool=True,
 			interpolation:str='bilinear', **kwargs):
@@ -175,11 +233,6 @@ def plot_2d(Z:np.array,mask:np.array=None,x_val:np.array=None,
 	# add colorbar
 	if colorbar:
 		plt.colorbar()
-
-	# plot the mask
-	if mask is not None:
-		plt.contour(mask,levels=[0],colors='black',linestyles='dashed',
-	      			linewidths=0.5,extent=extent)
 
 def plot_erp_time_course(
 	erps: Union[list, dict], 
@@ -397,7 +450,10 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 		#do actual plotting
 		for i, y_ in enumerate(y):
 			if timecourse == '2d':
-				plot_2d(y_, None,times,freqs,colorbar=True)
+				plot_2d(y_, x_val=times, y_val=freqs, colorbar=True)
+				if stats:		
+					plot_significance(times, y_, 0, color='white', stats=stats,
+							y_val=freqs, **kwargs)
 			else:
 				color = colors.pop(0) 
 				plot_time_course(times,y_.mean(axis = 1),show_SE,smooth,
@@ -456,7 +512,7 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d
 				y_label = 'Train time (ms)'
 				y_ticks = False
 			# Remove colorbar from kwargs if present
-			plot_2d(y, None,times,y_range,colorbar=True,
+			plot_2d(y,x_val=times,y_val=y_range,colorbar=True,
 		   				set_y_ticks=y_ticks,**kwargs)
 			if stats:
 				print('Statistical testing not implemented for 2d timecourse')
