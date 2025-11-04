@@ -1,5 +1,48 @@
+"""
+Brain Decoding Multivariate (BDM) Analysis Module.
+
+This module provides comprehensive multivariate decoding functionality 
+for EEG dataanalysis. The BDM class implements various machine learning 
+classifiers to predict experimental variables (classes) from observed 
+patterns of brain activity, primarily using Linear Discriminant Analysis 
+(LDA) by default.
+
+Key Features
+------------
+- Multiple classifier support (LDA, SVM, Gaussian Naive Bayes)
+- K-fold cross-validation with balanced class sampling
+- Time-frequency domain decoding support
+- Generalization Across Time (GAT) analysis
+- Independent training/testing sets (localizer paradigm)
+- Sliding window feature enhancement
+- PCA dimensionality reduction
+- Comprehensive performance metrics (AUC, accuracy)
+
+Classes
+-------
+BDM : Main class for brain decoding analysis
+    Inherits from FolderStructure for file management
+
+Notes
+-----
+The module uses event balancing through undersampling to ensure equal 
+class representation. Area under the curve (AUC) is the default 
+performance metric.
+
+Examples
+--------
+>>> from eeg_analyses.BDM import BDM
+>>> bdm = BDM(sj=1, epochs=epochs, df=behavior_df, 
+				to_decode='target_loc')
+>>> results = bdm.classify(window_oi=(0.1, 0.5))
+
+See Also
+--------
+eeg_analyses.TFR : Time-frequency analysis for use with BDM
+support.FolderStructure : Base class for file organization
+"""
+
 import os
-from xml.dom import NotFoundErr
 import mne
 import pickle
 import random
@@ -8,65 +51,162 @@ import itertools
 import warnings
 
 import numpy as np
-from numpy.fft import ifft2
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from typing import Optional, Generic, Union, Tuple, Any
-from support.FolderStructure import *
-from mne.filter import filter_data
+from typing import Optional, Generic, Union, Tuple, Any, List
+from support.FolderStructure import FolderStructure
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import LinearSVC
 from sklearn.calibration import CalibratedClassifierCV
- 
-from sklearn.pipeline import make_pipeline
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, confusion_matrix
 from support.support import select_electrodes, trial_exclusion, get_time_slice
 from scipy.stats import rankdata
-from scipy.signal import hilbert
 from eeg_analyses.TFR import TFR
-
-from IPython import embed
 
 warnings.simplefilter('default')
 
 class BDM(FolderStructure):
-
 	"""
-	The BDM object supports multivariate decoding functionality to 
-	predict an experimental variable (class) given an observed 
-	pattern of brain activity.
-	By default the BDM class employs Linear Discriminant Analysis (LDA) 
-	to perform decoding.
+	Brain Decoding Multivariate analysis class for EEG data 
+	classification.
 
-	The BDM class makes use of k-fold cross validation, in which the 
-	trials are split up into k equally sized folds, such that on any 
-	given iteration the training daa are independent from the test data.
-	In an iterative procedure, the model is trained on k-1 folds, 
-	and testing is done on the remaining fold that was not used for 
-	training, until each trial served as a test set once. It is ensured 
-	that each class has the same number of observations 
-	(i.e., balanced classes) in both the training and the testing set. 
+	The BDM class provides comprehensive multivariate decoding 
+	functionality to predict experimental variables (classes) from 
+	observed patterns of brain activity. It employs Linear Discriminant
+	Analysis (LDA) by default and supports various other classifiers.
 
-	In class assignment, BDM applies event balancing by default through 
-	undersampling so that each class has the same number of 
-	observations(i.e., if one class has 200 observations, and the other 
-	class has 100 observations, the number of observations in the first 
-	class is artificially lowered by randomly removing 100 
-	observations). Consequently, if the design is heavily unbalanced 
-	between classes you may loose a lot of data. 
+	The class implements k-fold cross validation with balanced class 
+	sampling, ensuring that each class has equal representation in both 
+	training and testing sets. Event balancing is achieved through 
+	undersampling.
 
-	Area under the curve (AUC; Bradley, 1997), a metric derived from 
-	signal detection theory, is the default performance measure that BDM 
-	computes.
+	Parameters
+	----------
+	sj : int
+		Subject identifier used for file naming and organization.
+	epochs : mne.Epochs or list of mne.Epochs
+		Epoched EEG data. If list of two Epochs objects, the first 
+		serves as training set and second as test set for
+		localizer-based decoding.
+	df : pd.DataFrame or list of pd.DataFrame  
+		Behavioral parameters dataframe. Each row corresponds to an 
+		epoch.If list, should match epochs structure for localizer 
+		paradigm.
+	to_decode : str
+		Column name in df containing class labels for classification.
+	nr_folds : int, default=10
+		Number of folds for k-fold cross validation.
+	classifier : {'LDA', 'svm', 'GNB'}, default='LDA'
+		Classifier type:
+		- 'LDA': Linear Discriminant Analysis
+		- 'svm': Support Vector Machine (with calibration)
+		- 'GNB': Gaussian Naive Bayes
+	data_type : {'raw', 'tfr'}, default='raw'
+		Data domain for decoding:
+		- 'raw': Time domain EEG data
+		- 'tfr': Time-frequency domain power
+	tfr : TFR, optional
+		Pre-computed TFR object for time-frequency decoding. Required if
+		data_type='tfr' and min_freq/max_freq not provided.
+	metric : {'auc', 'acc'}, default='auc'
+		Performance metric:
+		- 'auc': Area Under Curve (ROC)
+		- 'acc': Classification accuracy
+	elec_oi : str or list, default='all'
+		Electrodes of interest. Can be predefined subset name or list
+		of electrode names.
+	downsample : int, default=128
+		Target sampling frequency for computational efficiency.
+	avg_runs : int, default=1
+		Number of cross-validation repetitions to average.
+	avg_trials : int, default=1
+		Number of trials to average within each condition/label 
+		combination before cross-validation.
+	sliding_window : tuple, default=(1, True, False)
+		Sliding window parameters (size, demean, average):
+		- size: Window size in samples
+		- demean: Whether to demean within window
+		- average: Whether to average within window vs. 
+			concatenate features
+	scale : bool, default=False
+		Whether to apply standardization and unit variance scaling.
+	pca_components : tuple, default=(0, 'across')
+		PCA parameters (n_components, mode):
+		- n_components: Number of components (or fraction if <1)
+		#TODO: check whether this is correct
+		- mode: 'across' (fit on train+test) or 'all' 
+			(fit on train only)
+	montage : str, default='biosemi64'
+		EEG montage for visualization in reports.
+	output_params : bool, default=False
+		Whether to save classifier weights and confusion matrices.
+	baseline : tuple, optional
+		Baseline correction window (start, end) in seconds.
+	seed : int or bool, default=42213
+		Random seed for reproducibility. If False, no seed applied.
+	min_freq : float, optional
+		Minimum frequency for auto-generated TFR (when data_type='tfr').
+	max_freq : float, optional  
+		Maximum frequency for auto-generated TFR (when data_type='tfr').
+	**tfr_kwargs
+		Additional arguments passed to TFR constructor.
 
-	Args:
-		FolderStructure (object): Class that creates file paths to 
-		load raw eeg/ behavior and save decoding ouput
+	Attributes
+	----------
+	data_type : str
+		Immutable data type set during initialization.
+	cross : bool
+		Whether using cross-condition decoding paradigm.
+
+	Raises
+	------
+	ValueError
+		If data_type='tfr' but neither tfr object nor frequency 
+			parameters provided.
+		If invalid classifier or data_type specified.
+	Warning
+		If TFR parameters provided when data_type='raw'.
+
+	Examples
+	--------
+	Standard within-condition decoding:
+
+	>>> bdm = BDM(sj=1, epochs=epochs, df=behavior, 
+					to_decode='stimulus_type')
+	>>> results = bdm.classify(window_oi=(0.1, 0.5))
+
+	Cross-condition decoding:
+
+	>>> cnds = {'condition': [['train_cond'], 'test_cond']}
+	>>> results = bdm.classify(cnds=cnds)
+
+	Time-frequency decoding:
+
+	>>> bdm = BDM(sj=1, epochs=epochs, df=behavior, 
+					to_decode='response',data_type='tfr',
+					min_freq=8, max_freq=12)
+	>>> results = bdm.classify()
+
+	Generalization Across Time:
+
+	>>> results = bdm.classify(GAT=True)
+
+	Notes
+	-----
+	- Class balancing is performed through undersampling
+	- Default metric (AUC) is robust to class imbalance
+	- Trial averaging reduces noise but decreases sample size
+	- PCA should be combined with data standardization
+	- Cross-validation ensures generalizability of results
+
+	See Also
+	--------
+	TFR : Time-frequency analysis
+	support.FolderStructure : Base class for file management
 	"""
 
 	def __init__(self,sj:int,epochs:Union[mne.Epochs,list],
@@ -76,95 +216,86 @@ class BDM(FolderStructure):
 				elec_oi:Union[str,list]='all',downsample:int=128,
 				avg_runs:int=1,avg_trials:int=1,
 				sliding_window:tuple=(1,True,False),
-				scale:dict={'standardize':False,'scale':False}, 
+				scale:bool=False, 
 				pca_components:tuple=(0,'across'),montage:str='biosemi64',
 				output_params:Optional[bool]=False,
 				baseline:Optional[tuple]=None, 
-				seed:Union[int, bool] = 42213):
-		"""set decoding parameters that will be used in BDM class
+				seed:Union[int, bool] = 42213,min_freq:Optional[float]=None,
+				max_freq:Optional[float]=None,**tfr_kwargs):
+		"""
+		Initialize BDM decoding analysis.
 
-		Args:
-			sj (int): subject identifier. Used to save output files.
-			beh (pd.DataFrame | list): Dataframe with behavioral 
-			parameters. Each row represents an epoch in epochs object.
-			epochs (mne.Epochs | list): Epoched eeg data (linked to 
-			beh). Can be a list of two mne.Epochs objects, in which case
-			the first will serve as the training set and the second as 
-			the test set in a localizer based decoding regime (see
-			localizer_classif())
-			to_decode (str): column name in beh that contains classes
-			information. By default all classes are used for 
-			classification, but a subset can be specified when calling
-			decoding functions (i.e., classify or localizer_classify)
-			nr_folds (int): Number of folds that are used for 
-			k-fold cross validation
-			classifier (str, optional): Sets which classifier is used 
-			for decoding. Supports 'LDA' (linear discriminant analysis),
-			'svm' (support vector machine), 'GNB' (Gaussian Naive Bayes)
-			data_type (str, optional): Specifies whether decoding should 
-			be performed on raw data ('raw') or on power after 
-			time-frequency decomposition ('tfr'). In the latter case, 
-			decoding can be done on a single band (e.g., alpha) or a 
-			range of frequency bands. By default decoding is performed
-			on the alpha band, unless specified otherwise. See tf_bands. 
-			tf_bands (dict | list): [description]
-			metric (str, optional): Metric used to quantify decoding 
-			performance. Defaults to 'auc'.
-			elec_oi (Optional[str, list], optional): Electrodes used as
-			features during decoding. Can be a string of a predefined 
-			subset of electrodes (e.g., post, see documentation) or a 
-			list of electrode names. Defaults to 'all'.
-			downsample (int, optional): Sampling frequency used
-			during decoding. Can be used to save computation time.
-			Defaults to 128.
-			avg_runs (int, optional): Specifies how often (random) 
-			cross-validation procedure is performed. Decoding output 
-			reflects the average of all cross-validation runs.
-			avg_trials (int, Optional): Specifies the number of trials 
-			that are averaged together before cross-validation. 
-			Averaging is done across each unique combination 
-			of condition and decoding label. Trial averaging is always 
-			done before subsequent optional data transformation steps
-			(except tfr decomposition).Defaults to  1 
-			(i.e., no trial averaging). 
-			sliding_window (tuple, optional): Increases the  number of 
-			features used for decoding by a factor of the size of the 
-			sliding_window by giving the classifier access to all time 
-			points in the window (see Grootswagers et al. 2017, JoCN). 
-			Second argument in tuple specifies whether (True) or not 
-			(False) the activity in each sliding window is demeaned 
-			(see Hajonides et al. 2021, NeuroImage). If the third \
-			argument is set to True rather than increasing the number 
-			of features, each  time point reflects the average within 
-			the sliding window. Defaults to (1,True,False) meaning that 
-			no data transformation will be applied.
-			scale (dict): Dictinary with two keys specifying whether 
-			data should be standardized (True) or not (False). The scale 
-			argument specifies whether or not data should also be scaled 
-			to unit variance (or equivalently, unit standard deviation). 
-			This step is always performed before PCA. Defaults to 
-			{'standardize': False, 'scale': False}, no standardization
-			pca_components (tuple, optional): Apply dimensionality 
-			reduction before decoding. The first arguments specifies how 
-			features should reduce to N principal components,
-            if N < 1 it indicates the % of explained variance 
-			(and the number of components is inferred). The second 
-			argument specifies whether transformation is estimated
-			on both training and test data ('all') or estimated on 
-			training data only and applied to the test data in each 
-			cross validation step. Defaults to (0, 'across') (i.e., no 
-			PCA reduction)
-			montage (Optional[str]): Montage used during recording. 
-			Is used to plot weigts in the bdm report.
-			bdm_filter (Optional[dict], optional): [description]. 
-			Defaults to None.
-			baseline (Optional[tuple], optional): [description]. 
-			Defaults to None.
-			seed (Optional[int]): Sets a random seed such that 
-			cross-validation procedure can be repeated. In case of False 
-			, no seed is applied before cross validation. In case 
-			avg_runs > 1, seed will be increased by 1 for each run.
-			Defaults to 42213 (A1Z26 cipher of DvM)
+		Sets up all parameters for multivariate decoding analysis
+		including classifier selection, cross-validation strategy, and
+		data preprocessing options.
+
+		Parameters
+		----------
+		sj : int
+			Subject identifier used for file naming and organization.
+		epochs : mne.Epochs or list of mne.Epochs
+			Epoched EEG data. If list of two Epochs objects, first 
+			serves as training set and second as test set for 
+			localizer-based decoding.
+		df : pd.DataFrame or list of pd.DataFrame
+			Behavioral parameters dataframe where each row represents an 
+			epoch. If list, should match epochs structure.
+		to_decode : str
+			Column name in df containing class labels for 
+			classification.
+		nr_folds : int, default=10
+			Number of folds for k-fold cross validation.
+		classifier : {'LDA', 'svm', 'GNB'}, default='LDA'
+			Classifier type to use for decoding.
+		data_type : {'raw', 'tfr'}, default='raw'
+			Whether to perform decoding on raw EEG or time-frequency 
+			data.
+		tfr : TFR, optional
+			Pre-computed TFR object for time-frequency decoding.
+		metric : {'auc', 'acc'}, default='auc'
+			Performance metric for classification evaluation.
+		elec_oi : str or list, default='all'
+			Electrodes of interest for decoding features.
+		downsample : int, default=128
+			Target sampling frequency for computational efficiency.
+		avg_runs : int, default=1
+			Number of cross-validation repetitions to average.
+		avg_trials : int, default=1
+			Number of trials to average within each condition/label 
+			before CV.
+		sliding_window : tuple, default=(1, True, False)
+			Sliding window parameters (size, demean, average).
+		scale : bool, default=False
+			Whether to apply standardization before decoding.
+		pca_components : tuple, default=(0, 'across')
+			PCA dimensionality reduction parameters.
+		montage : str, default='biosemi64'
+			EEG montage for visualization.
+		output_params : bool, default=False
+			Whether to save classifier weights and confusion matrices.
+		baseline : tuple, optional
+			Baseline correction window in seconds.
+		seed : int or bool, default=42213
+			Random seed for reproducibility.
+		min_freq : float, optional
+			Minimum frequency for auto-generated TFR.
+		max_freq : float, optional
+			Maximum frequency for auto-generated TFR.
+		**tfr_kwargs
+			Additional arguments for TFR constructor.
+
+		Raises
+		------
+		ValueError
+			If data_type='tfr' but required TFR parameters missing.
+			If invalid classifier or data_type specified.
+		Warning
+			If TFR parameters provided when data_type='raw'.
+
+		Notes
+		-----
+		The data_type parameter becomes immutable after initialization to
+		prevent inconsistent analysis configurations.
 		"""	
 
 		self.sj = sj
@@ -173,7 +304,7 @@ class BDM(FolderStructure):
 		self.classifier = classifier
 		self.baseline = baseline
 		self.to_decode = to_decode
-		self.data_type = data_type
+		self._data_type = data_type  # Use private attribute during init
 		self.tfr = tfr
 		self.nr_folds = nr_folds
 		self.elec_oi = elec_oi
@@ -190,15 +321,96 @@ class BDM(FolderStructure):
 		self.output_params = output_params
 		self.cross = False
 
+		# data type is immutable after initialization
+		self._data_type = data_type
+
+		# Set up TFR processing: use provided object or
+		#  auto-create from parameters
+		if self._data_type == 'tfr':
+			if tfr is not None:
+				# Use explicit TFR object
+				self.tfr = tfr
+			elif min_freq is not None and max_freq is not None:
+				# Auto-create TFR object
+				self.tfr = TFR(
+					sj=sj, epochs=epochs, df=df,
+					min_freq=min_freq, max_freq=max_freq, 
+					baseline=baseline, **tfr_kwargs
+				)
+			else:
+				raise ValueError("When data_type='tfr', must provide either " \
+							"'tfr' object or frequency parameters (min_freq" \
+							", max_freq)")
+		elif self._data_type == 'raw':
+			if tfr is not None or min_freq is not None:
+				raise Warning("TFR parameters ignored when data_type='raw'")
+			self.tfr = None
+		else:
+			raise ValueError(f"data_type must be 'raw' or 'tfr', "
+					f"got '{self._data_type}'")
+
+	@property
+	def data_type(self):
+		"""
+		Get the data type for decoding analysis.
+		
+		Returns
+		-------
+		str
+			The data type ('raw' or 'tfr') set during initialization.
+			
+		Notes
+		-----
+		This property is immutable after initialization to prevent
+		inconsistent analysis configurations.
+		"""
+		return self._data_type
+	
+	@data_type.setter
+	def data_type(self, value):
+		"""
+		Prevent changing data_type after initialization.
+		
+		Parameters
+		----------
+		value : str
+			Attempted new data type value.
+			
+		Raises
+		------
+		AttributeError
+			Always raised since data_type cannot be changed after 
+			initialization.
+		"""
+		raise AttributeError("data_type cannot be changed after " \
+					"initialization. Create a new BDM instance instead.")
+
 	def select_classifier(self) -> Any:
 		"""
-		Function that initialises the classifier
+		Initialize and return the specified classifier.
 
-		Raises:
-			ValueError: In case incorrect classifier is selected
+		Creates an instance of the classifier specified during BDM 
+		initialization. Supports Linear Discriminant Analysis, Support 
+		Vector Machine (with calibration for probability estimates), 
+		and Gaussian Naive Bayes.
 
-		Returns:
-			clf: sklearn classifier class
+		Returns
+		-------
+		sklearn classifier
+			Initialized classifier object ready for training:
+			- LinearDiscriminantAnalysis for 'LDA'
+			- CalibratedClassifierCV(LinearSVC()) for 'svm' 
+			- GaussianNB for 'GNB'
+
+		Raises
+		------
+		ValueError
+			If classifier type is not one of the supported options.
+
+		Notes
+		-----
+		SVM classifier is wrapped with CalibratedClassifierCV to provide
+		probability estimates required for AUC calculation.
 		"""
 		
 		if self.classifier == 'LDA':
@@ -213,9 +425,39 @@ class BDM(FolderStructure):
 		return clf
 
 	def get_classifier_weights(self, clf, Xtr_):
-		"""Get classifier weights regardless of classifier type."""
+		"""
+		Extract classifier weights regardless of classifier type.
+
+		Retrieves the feature weights from different types of trained 
+		classifiers, handling the varied interfaces of sklearn 
+		classifiers.
+
+		Parameters
+		----------
+		clf : sklearn classifier
+			Trained classifier object with fitted parameters.
+		Xtr_ : np.ndarray
+			Training data used to determine weight array dimensions.
+			Shape: (n_samples, n_features)
+
+		Returns
+		-------
+		np.ndarray
+			Feature weights with shape (n_features,). Returns zero array
+			if weights cannot be extracted from the classifier type.
+
+		Notes
+		-----
+		Different classifiers store weights in different attributes:
+		- LDA: use coef_ attribute
+		- CalibratedClassifierCV (SVM): extract from base_estimator.coef_
+		- Other classifiers: return zeros with warning
+
+		The weights represent the contribution of each feature 
+		(electrode/time) to the classification decision.
+		"""
 		if hasattr(clf, 'coef_'):
-			# For LDA, LogisticRegression
+			# For LDA
 			weights = clf.coef_[0]
 		elif hasattr(clf, 'calibrated_classifiers_'):
 			# For CalibratedClassifierCV (SVM)
@@ -229,82 +471,116 @@ class BDM(FolderStructure):
 
 	def classify(self,cnds:dict=None,window_oi:tuple=None,
 				labels_oi:Union[str,list]='all',collapse:bool=False,
-				excl_factor:dict=None,nr_perm:int=0,GAT:bool=False, 
+				excl_factor:dict=None,nr_perm:int=0,
+				GAT:Union[bool,Tuple[Tuple[float,float],
+						 Tuple[float,float]]]=False, 
 				downscale:bool=False,split_fact:dict=None,
 				save:bool=True,bdm_name:str='main')->dict:
 		"""
-		Multivariate decoding across time of the classes specified upon 
-		class initialization. Decoding can either be condition specific,
-		or a cross decoding analysis, where the model is trained on 
-		classes within one condition to decode another condition 
-		(see cnds argument on how to initialize different kinds of
-		decoding analyses)
+		Perform multivariate decoding across time on specified classes.
 
-		Args:
-			cnds (dict, optional): Condition information used in 
-			decoding analysis. For condition specific decoding specify 
-			a dictionary, where the key is the column that contains 
-			condition labels in beh. Values should be a list of all 
-			conditions to be included. Defaults to None --> decoding is
-			performed on all data.
+		This is the main decoding function that supports both 
+		within-condition and cross-condition decoding analyses. 
+		It implements k-fold cross-validation with balanced class 
+		sampling and various data preprocessing options.
+
+		Parameters
+		----------
+		cnds : dict, optional
+			Condition specifications for decoding analysis. Structure 
+			determines analysis type:
 			
-			Example:
-			cnds = dict(condition = ['present','absent'])). 
-
-			For a cross condition decoding analysis, training 
-			conditions are specified within a list at the first position
-			of the condition list. 
-
-			Example:
-			cnds = dict(condition = [['present'],'absent']))
-
-			In this case the model is trained using data from the 
-			present condition to predict data within the absent 
-			condition. Multiple testing conditions can also be 
-			specified. To use multiple training and testing conditions 
-			use the following syntax:
-
-			cnds = dict(condition = [['train_1','train_2'],
-										['test_1','test_2']))
-
-			window_oi (tuple, optional): time window of interest. 
-			Defaults to None --> use all samples in epochs
-			labels_oi (Union[str,list], optional): can be used to limit 
-			decoding to a subset of classes. 
-			Defaults to 'all' (i.e., use all classes for decoding).
-			collapse (bool, optional): In addition to condition 
-			specific decoding, also perform decoding collapsed
-			across all conditions. Defaults to False.
-			excl_factor (dict, optional): This gives the option to 
-			exclude specific conditions from analysis. 
+			Within-condition decoding:
+				``{'condition_column': ['cond1', 'cond2']}``
 			
-			For example, to only include trials where the cue was 
-			pointed to the left and not to the right 
-			specify the following: 
-
-			excl_factor = dict(cue_direc = ['right']). 
+			Cross-condition decoding (train on first, test on second):
+				``{'condition_column': [['train_cond'], 'test_cond']}``
 			
-			Mutiple column headers and multiple variables per header can 
-			be specified. Defaults to None (i.e., no trial exclusion).
-			nr_perm (int, optional): Can be used to obtain a data driven
-			chance baseline. If perm > 0, decoding is additionaly 
-			performed on permuted labels, where the number sets the 
-			number of permutations. Defaults to 0.
-			GAT (bool, optional): perform decosing across
-			all combinations of timepoints (i.e., generate a 
-			generalization across time decoding matrix). 
-			Defaults to False.
-			downscale (bool, optional): Allows decoding to be repeatedly 
-			run with increasingly less trials. Can be used to examine 
-			the minimum number of trials that support reliable 
-			classification. Defaults to False.
-			save (bool, optional): save decoding output to disk.
-			Defaults to True.
-			bdm_name (str, optional): name of decoding analysis used 
-			during saving. Defaults to 'main'.
+			Multiple training/testing conditions:
+				``{'condition_column': [['train1', 'train2'], 
+										['test1', 'test2']]}``
+			
+			If None, decoding performed on all data.
+			
+		window_oi : tuple, optional
+			Time window of interest in seconds, e.g., (0.1, 0.5).
+			If None, uses all time samples in epochs.
+		labels_oi : str or list, default='all'
+			Subset of class labels to include in decoding. If 'all',
+			uses all unique labels in to_decode column.
+		collapse : bool, default=False
+			Whether to also perform decoding collapsed across all 
+			conditions in addition to condition-specific decoding.
+		excl_factor : dict, optional
+			Criteria for excluding trials from analysis. Format:
+			``{'column_name': ['value1', 'value2']}`` excludes trials
+			where column_name contains specified values.
+		nr_perm : int, default=0
+			Number of permutation tests for chance-level baseline.
+			If >0, additional decoding performed with shuffled labels.
+		GAT : bool or tuple, default=False
+			Generalization Across Time analysis:
+			
+			- False: Standard within-time decoding
+			- True: Full GAT matrix (train at each time, 
+									test at all times)
+			- Tuple: Custom time windows as ((train_start, train_end), 
+			  (test_start, test_end))
+			  
+		downscale : bool, default=False
+			Whether to run decoding with progressively fewer trials to
+			examine minimum trial requirements for reliable 
+			classification.
+		split_fact : dict, optional
+			Additional factor to split analysis by. Decoding performed
+			separately for each level and results averaged.
+		save : bool, default=True
+			Whether to save results to disk using standard file 
+			organization.
+		bdm_name : str, default='main'
+			Name identifier for saving analysis results.
 
-		Returns:
-			bdm_scores: decoding output
+		Returns
+		-------
+		tuple
+			(bdm_scores, bdm_params) where:
+			
+			bdm_scores : dict
+				Classification results with structure:
+				``{'condition': {'dec_scores': array}, 'info': {...}}``
+				Contains accuracy/AUC scores and analysis metadata.
+				
+			bdm_params : dict
+				Analysis parameters including classifier weights and
+				confusion matrices (if output_params=True).
+
+		Examples
+		--------
+		Basic within-condition decoding:
+		
+		>>> results, params = bdm.classify(window_oi=(0.1, 0.5))
+		
+		Cross-condition decoding:
+		
+		>>> cnds = {'block_type': [['practice'], 'test']}
+		>>> results, params = bdm.classify(cnds=cnds)
+		
+		Generalization across time:
+		
+		>>> results, params = bdm.classify(GAT=True)
+		
+		Permutation testing:
+		
+		>>> results, params = bdm.classify(nr_perm=100)
+
+		Notes
+		-----
+		- Results automatically include metadata about electrodes and 
+			times
+		- Cross-validation ensures independence of training and 
+			test data
+		- Class balancing prevents bias toward majority classes
+		- Progress information printed during execution
 		"""
 
 		# select condition specific data
@@ -331,7 +607,7 @@ class BDM(FolderStructure):
 		y,
 		df, 
 		times) = self.select_bdm_data(self.epochs.copy(), self.df.copy(),
-									window_oi, excl_factor, headers)
+									window_oi, excl_factor,headers,cnds)
 
 		(nr_labels,
 		tr_max, 
@@ -351,17 +627,29 @@ class BDM(FolderStructure):
 			(bdm_scores, 
 			bdm_params, 
 			bdm_info) = self.classify_(X,y,df,tr_cnds,te_cnds,cnd_head,tr_max,
-										labels_oi, collapse,GAT,nr_perm)
+										labels_oi, collapse,GAT,nr_perm,times)
 		else:
 			(bdm_scores, 
 			bdm_params, 
 			bdm_info) = self.iter_classify_(split_fact,X,y,df,tr_cnds,te_cnds,
 								   			cnd_head,tr_max,labels_oi, 
-											collapse,GAT,nr_perm)	
-					
+											collapse,GAT,nr_perm,times)	
+
 		bdm_scores.update({'info':{'elec':self.elec_oi,'times':times}})
-		if self.data_type == 'tfr':
+		if self._data_type == 'tfr':
 			bdm_scores['info'].update({'freqs':self.tfr.frex})
+		
+		if GAT:
+			if isinstance(GAT, tuple):
+				tr_window, te_window = GAT
+				train_times = times[get_time_slice(times, tr_window[0], 
+									   						tr_window[1])]
+				test_times = times[get_time_slice(times, te_window[0],
+									  						te_window[1])]
+			else:
+				train_times = test_times = times
+			bdm_scores['info'].update({'test_times':test_times,})
+			bdm_scores['info']['times'] = train_times
 
 		# create report (specific to unpermuted data)
 		if not GAT:
@@ -382,13 +670,31 @@ class BDM(FolderStructure):
 		return bdm_scores, bdm_params	
 	
 	def iter_classify_(self,split_fact:dict,X:np.array,y:np.array,
-					beh:pd.DataFrame,tr_cnds:list,te_cnds:list,cnd_head:str,
-					tr_max:list,labels_oi:Union[str,list],collapse:bool,
-					GAT:bool,nr_perm:int):
+				df:pd.DataFrame,tr_cnds:list,te_cnds:list,cnd_head:str,
+				tr_max:list,labels_oi:Union[str,list],collapse:bool,
+				GAT:Union[bool,Tuple[Tuple[float,float],Tuple[float,float]]],
+				nr_perm:int,times:np.array):
 		"""
-		helper function of classify that does decoding 
-		per condition in an iterative procedure such that decoding 
-		output reflects the mean of the seperate decoding regimes
+		Internal helper for iterative decoding across data subsets.
+		
+		Splits data by specified factors (e.g., blocks, sessions) and runs
+		classify_ on each subset, then averages results across iterations.
+		Used when multiple independent decoding runs are needed.
+		
+		Parameters
+		----------
+		split_fact : dict
+			Factors to split data by (e.g., {'block': [1,2,3]})
+		X, y, df : array-like
+			EEG data, labels, and behavioral dataframe
+		tr_cnds, te_cnds : list
+			Training and test conditions
+		Other parameters passed through to classify_
+		
+		Returns
+		-------
+		tuple
+			Averaged bdm_scores, bdm_params, bdm_info across iterations
 		"""
 
 		# split the selected data into subsets and apply decoding 
@@ -396,18 +702,19 @@ class BDM(FolderStructure):
 		dec_scores, dec_params = [],[]
 		for key, value in split_fact.items():
 			for v in value:
-				mask = beh[key] == v
+				mask = df[key] == v
 				X_ = X[mask]
 				y_ = y[mask].reset_index(drop = True)
-				beh_ = beh[mask].reset_index(drop = True)
+				df_ = df[mask].reset_index(drop = True)
 				# reset max trials for folding
-				tr_max = [self.selectMaxTrials(beh_,tr_cnds,labels_oi,
+				tr_max = [self.selectMaxTrials(df_,tr_cnds,labels_oi,
 								   			cnd_head)]
 				
 				(bdm_scores, 
 				bdm_params, 
-				bdm_info) = self.classify_(X_,y_,beh_,tr_cnds,te_cnds,cnd_head,
-							   			tr_max,labels_oi, collapse,GAT,nr_perm)
+				bdm_info) = self.classify_(X_,y_,df_,tr_cnds,te_cnds,cnd_head,
+							   			tr_max,labels_oi, collapse,GAT,nr_perm,
+										times)
 				
 				dec_scores.append(bdm_scores)
 				dec_params.append(bdm_params)
@@ -427,13 +734,42 @@ class BDM(FolderStructure):
 			
 		return bdm_scores, bdm_params, bdm_info
 
-	def classify_(self,X:np.array,y:np.array,beh:pd.DataFrame,tr_cnds:list,
-			   		te_cnds:list,cnd_head:str,tr_max:list,
-					labels_oi:Union[str,list],collapse:bool,GAT:bool,
-					nr_perm:int):
+	def classify_(self,X:np.array,y:np.array,df:pd.DataFrame,tr_cnds:list,
+			   	te_cnds:list,cnd_head:str,tr_max:list,
+				labels_oi:Union[str,list],collapse:bool,
+				GAT:Union[bool,Tuple[Tuple[float,float],Tuple[float,float]]],
+				nr_perm:int,times:np.array):
 		"""
-		helper function of classify that does actual decoding 
-		per condition
+		Internal helper that performs the core decoding computation.
+		
+		Executes the main classification pipeline including 
+		cross-validation, permutation testing, and GAT analysis. Handles 
+		both within-condition and cross-condition decoding based on 
+		tr_cnds and te_cnds.
+		
+		Parameters
+		----------
+		X, y : array-like
+			EEG data and corresponding labels
+		df : pd.DataFrame
+			Behavioral data with condition information
+		tr_cnds, te_cnds : list
+			Training and test condition lists
+		GAT : bool or tuple
+			Generalization across time settings
+		nr_perm : int
+			Number of permutation iterations
+		times : array
+			Time vector for time window selection
+		Other parameters : 
+			Various classification parameters passed from main classify 
+			method
+		
+		Returns
+		-------
+		tuple
+			bdm_scores, bdm_params, bdm_info for current classification 
+			run
 		"""
 
 		bdm_scores, bdm_params = {}, {}
@@ -447,6 +783,22 @@ class BDM(FolderStructure):
 
 		nr_perm += 1
 
+		# set train and test time points based on GAT
+		if isinstance(GAT, tuple):
+			tr_window, te_window = GAT
+			tr_idx = get_time_slice(times, tr_window[0], tr_window[1])
+			te_idx = get_time_slice(times, te_window[0], te_window[1])
+		else: # full GAT or standard decoding
+			window_oi = times[[0,-1]]
+			tr_idx = get_time_slice(times, times[0], times[-1])
+			te_idx = tr_idx
+
+		nr_train = tr_idx.stop - tr_idx.start
+		if GAT == False:
+			nr_test = 1
+		else:
+			nr_test = te_idx.stop - te_idx.start
+
 		# loop over (training and testing) conditions
 		for tr_cnd in tr_cnds:
 			for te_cnd in (te_cnds if te_cnds is not None else [None]):
@@ -455,26 +807,19 @@ class BDM(FolderStructure):
 				bdm_info = {}
 
 				# get condition indices and labels
-				(beh, cnd_idx, 
+				(df, cnd_idx, 
 				cnd_labels, labels,
-				tr_max) = self.get_condition_labels(beh, cnd_head,tr_cnd,
+				tr_max) = self.get_condition_labels(df, cnd_head,tr_cnd,
 													tr_max, labels_oi,collapse)
 
 				# initiate decoding arrays for current condition
-				if GAT:
-					class_acc = np.empty((self.avg_runs, nr_perm,nr_freq,
-									nr_time, nr_time)) * np.nan
-					weights = np.empty((self.avg_runs, nr_perm, nr_freq,
-										nr_time, nr_time, nr_elec))
-					conf_matrix = np.empty((self.avg_runs, nr_perm,nr_freq,
-										nr_time, nr_time, labels.size,labels.size))									
-				else:	
-					class_acc = np.empty((self.avg_runs,nr_perm,nr_freq,
-									nr_time,1)) * np.nan	
-					weights = np.empty((self.avg_runs, nr_perm,nr_freq,
-										nr_time, 1,nr_elec))
-					conf_matrix = np.empty((self.avg_runs, nr_perm,nr_freq,
-										nr_time, 1,labels.size,labels.size))	
+				class_acc = np.empty((self.avg_runs, nr_perm,nr_freq,
+								nr_train, nr_test)) * np.nan
+				weights = np.empty((self.avg_runs, nr_perm, nr_freq,
+									nr_train, nr_test, nr_elec))
+				conf_matrix = np.empty((self.avg_runs, nr_perm,nr_freq,
+									nr_train, nr_test, labels.size,
+									labels.size))
 
 				# permutation loop (if perm is 1, train labels are not shuffled)
 				#TODO: check position of permutation loop
@@ -495,7 +840,7 @@ class BDM(FolderStructure):
 							if self.cross:
 								# TODO1: make sure that multiple test conditions can be classified
 								# TODO2: make sure that bdm_info is saved 
-								test_idx = np.where(beh[cnd_head] == te_cnd)[0]
+								test_idx = np.where(df[cnd_head] == te_cnd)[0]
 								(Xtr, Xte, 
 								Ytr, Yte) = self.train_test_cross(X, y, 
 																cnd_idx,test_idx)
@@ -508,6 +853,9 @@ class BDM(FolderStructure):
 								Ytr, Yte) = self.train_test_select(X, y,
 																train_tr,test_tr)
 							
+							# restrict to training and test time window
+							Xtr = Xtr[..., tr_idx]
+							Xte = Xte[..., te_idx]
 							(class_acc[run, p], 
 							weights[run, p],
 							conf_matrix[run,p]) = self.cross_time_decoding(Xtr,Xte, 
@@ -823,40 +1171,88 @@ class BDM(FolderStructure):
 
 	def select_bdm_data(self,epochs:mne.Epochs,df:pd.DataFrame,
 						window_oi:tuple,excl_factor:dict=None,
-						headers:list=None)-> \
+						headers:list=None,cnds:list=None)-> \
 						Tuple[np.array, pd.DataFrame, np.array]:
 		"""
-		Selects bdm data and applies initial data transformation steps 
-		in the following order (all optional).
+		Select and preprocess data for BDM analysis.
 
-		1. Slicing data by excluding specific trials (set excl_factor)
-		2. Data reduction via trial averaging (see class parameters)
-		3. Time-frequency decomposition (see class parameters)
-		4. Baseline correction (see class parameters)
-		5. Downsampling (see class parameters)
-		6. Slicing time window (window_oi) and electrodes (see class 
-		parameters) of interest
-		7. Sliding window based data transformation
+		Applies data transformation steps in the following order:
+		1. Trial exclusion based on specified criteria
+		2. Trial averaging (if specified)
+		3. Time-frequency decomposition (if specified)
+		4. Baseline correction (if specified)
+		5. Downsampling (if specified)
+		6. Time window and electrode selection
+		7. Sliding window transformation (if specified)
 
-		Args:
-			epochs (mne.Epochs): epochs objects
-			beh (pd.DataFrame): Dataframe with behavioral parameters
-			window_oi (tuple): time window of interest
-			excl_factor (dict, optional): exclude specific conditions 
-			(see classify or localizer_classify)). Defaults to None.
-			headers (list, optional): column that contains condition 
-			info. Makes sure that trial averaging is condition 
-			(and label) specific. Defaults to None.
+		Parameters
+		----------
+		epochs : mne.Epochs
+			Epoched EEG data to be processed.
+		df : pd.DataFrame
+			Behavioral dataframe corresponding to epochs.
+		window_oi : tuple
+			Time window of interest in seconds, e.g., (0.1, 0.5).
+		excl_factor : dict, optional
+			Trial exclusion criteria. 
+			Format: {'column': ['value1', 'value2']} excludes trials 
+			where column contains specified values.
+		headers : list, optional
+			Column names for condition-specific processing.
+		cnds : list, optional
+			Conditions of interest for trial selection.
 
-		Returns:
-			X (np.array): data [nr_epochs, nr_elecs, nr_samples]
-			beh (pd.DataFrame): behavior parameters 
-			times (np.array): sampling times of decoding data
+		Returns
+		-------
+		X : np.ndarray
+			Preprocessed EEG data with shape:
+			- (n_epochs, n_channels, n_times) for raw data
+			- (n_freqs, n_epochs, n_channels, n_times) for TFR data
+		y : pd.Series
+			Decoding labels corresponding to preprocessed data.
+		df : pd.DataFrame
+			Updated behavioral dataframe after preprocessing.
+		times : np.ndarray
+			Time samples corresponding to data time dimension.
+
+		Notes
+		-----
+		This method handles the core data preprocessing pipeline 
+		including trial exclusion, averaging, frequency decomposition, 
+		and temporal windowing. The specific transformations applied 
+		depend on the BDM class initialization parameters.
 		"""
 
-		# remove a subset of trials 
-		if type(excl_factor) == dict: 
+		# remove a subset of trials (including conditiions not of interest)
+		cnd_header = headers[0]
+		if headers is not None and cnds is not None and cnds != ['all_data']:
+			# exclude trials based on condition info
+			flat_cnds = []
+			for item in cnds:
+				if isinstance(item, list):
+					flat_cnds.extend(item)
+				else:
+					flat_cnds.append(item)
+			to_exclude = [cnd for cnd in df[cnd_header].unique() 
+				 									if cnd not in flat_cnds]
+
+			if to_exclude:
+				if excl_factor is None:
+					excl_factor = {}
+				excl_factor.setdefault(cnd_header, []).extend(to_exclude)
+
+		if excl_factor is not None:
 			df, epochs,_ = trial_exclusion(df, epochs, excl_factor)
+
+		# cnd selection for optional induced tfr decoding
+		if self.tfr is not None:
+			if self.tfr.power == 'induced':
+				if cnds == ['all_data']:
+					cnd_idx = [np.arange(df.shape[0])]
+				else:
+					cnd_idx = [df[cnd_header].values == cnd for cnd in cnds]
+			else:
+				cnd_idx = None
 
 		# reset index(to properly align beh and epochs)
 		df.reset_index(inplace = True, drop = True)
@@ -868,14 +1264,12 @@ class BDM(FolderStructure):
 		epochs = epochs.pick_channels(np.array(epochs.ch_names)[picks])
 
 		# apply filtering and downsampling (if specified)
-		if self.data_type == 'tfr':
-			print('start tfr decomposition')
-			self.tfr.epochs = epochs
-			self.tfr.df = df
-			X = self.tfr.compute_tfr(epochs)
+		if self._data_type == 'tfr':
+			X = self.tfr.compute_tfrs(epochs, for_decoding = True, 
+							 		cnd_idx = cnd_idx)
 
 		# apply baseline correction
-		if isinstance(self.baseline, tuple) and self.data_type == 'raw':
+		if isinstance(self.baseline, tuple) and self._data_type == 'raw':
 			epochs.apply_baseline(baseline = self.baseline)
 
 		# average across trials
@@ -890,7 +1284,7 @@ class BDM(FolderStructure):
 			if self.window_size[0] == 1:
 				print('downsampling data')
 				epochs.resample(self.downsample, npad='auto')					
-				if self.data_type == 'tfr':
+				if self._data_type == 'tfr':
 					#print('data is downsampled via subsampling')
 					#X = X[:,:,:,::self.down_factor]
 					X = mne.filter.resample(X.astype(float), 
@@ -908,7 +1302,7 @@ class BDM(FolderStructure):
 			step = np.diff(epochs.times)[0] * self.window_size[0]
 			window_oi = (window_oi, window_oi + step)
 		idx = get_time_slice(epochs.times, window_oi[0], window_oi[1])
-		if self.data_type == 'raw':
+		if self._data_type == 'raw':
 			X = epochs._data[:,:,idx]
 		else:
 			X = X[...,idx]
@@ -1052,11 +1446,61 @@ class BDM(FolderStructure):
 			
 	def set_folder_path(self) -> list:
 		"""
-		sets the folder path for the current analysis based on 
-		input parameters
+		Generate standardized folder path components for analysis 
+		organization.
+		
+		Creates a systematic folder structure based on analysis 
+		parameters to ensure consistent file organization and easy 
+		retrieval of results. The path components reflect key analysis 
+		settings for identification.
 
-		Returns:
-			list: folder path (used as extension to set file location)
+		Returns
+		-------
+		list[str]
+			Folder path components that will be joined to create the 
+			full directory path for saving analysis results. 
+			Components include:
+			- 'bdm': Base identifier for BDM analyses
+			- Decoding target (e.g., 'stimulus', 'response')
+			- Electrode selection (e.g., 'all_elecs', 'post_elecs')
+			- 'cross': Added if cross-condition analysis
+			- Classifier name: Added if non-default (not 'LDA')
+
+		Notes
+		-----
+		The folder structure enables:
+		1. Systematic organization of analysis results
+		2. Easy identification of analysis parameters from path
+		3. Separation of different analysis types and configurations
+		4. Consistent naming across different experiments
+
+		The path is used by the parent FolderStructure class to
+		determine where to save output files and figures.
+
+		Examples
+		--------
+		Standard within-condition LDA analysis:
+		
+		>>> bdm.to_decode = 'stimulus'
+		>>> bdm.elec_oi = 'all'
+		>>> bdm.cross = False
+		>>> bdm.classifier = 'LDA'
+		>>> path_components = bdm.set_folder_path()
+		>>> path_components  # ['bdm', 'stimulus', 'all_elecs']
+
+		Cross-condition SVM analysis:
+		
+		>>> bdm.cross = True
+		>>> bdm.classifier = 'SVM'
+		>>> path_components = bdm.set_folder_path()
+		>>> path_components  # ['bdm', 'stimulus', 'all_elecs', 'cross', 
+		...						'SVM']
+
+		Posterior electrode selection:
+		
+		>>> bdm.elec_oi = 'post'
+		>>> path_components = bdm.set_folder_path()
+		>>> 'post_elecs' in path_components  # True
 		"""
 
 		base = ['bdm']
@@ -1076,41 +1520,57 @@ class BDM(FolderStructure):
 	def sliding_window(self,X:np.array,window_size:int=20,demean:bool=True, 
 						avg_window:bool=False)->np.array:
 		"""	
-		Copied from temp_dec developed by @author: jasperhajonides 
-		(github.com/jasperhajonides/temp_dec)
-			
-		Reformat array so that time point t includes all information 
-		from features up to t-n where n is the size of the 
-		predefined window.
+		Apply sliding window transformation to increase feature space.
+		
+		Reformats data so that time point t includes information from
+		features up to t-n where n is the window size. This increases
+		the number of features by a factor of window_size, giving the
+		classifier access to temporal context (Grootswagers et al. 2017)
 
-		Allows input to be either:
-    	- 3D array [trial repeats x electrodes x time points]
-    	- 4D array [frequencies x trial repeats x electrodes x time points]
+		Parameters
+		----------
+		X : np.ndarray
+			Input EEG data with shape:
+			- (n_trials, n_channels, n_times) for 3D input
+			- (n_freqs, n_trials, n_channels, n_times) for 4D input
+		window_size : int, default=20
+			Number of time points to include in sliding window.
+		demean : bool, default=True
+			Whether to subtract mean from each feature within the 
+			sliding window (Hajonides et al. 2021).
+		avg_window : bool, default=False
+			If True, each time point reflects average activity within 
+			the window rather than concatenated features.
 
-		example:
-			
-		100, 60, 240 = X.shape
-		data_out = sliding_window(X, window_size=5)
-		100, 300, 240 = output.shape
+		Returns
+		-------
+		np.ndarray
+			Transformed data with shape:
+			- (n_trials, n_channels*window_size, n_times) 
+				if avg_window=False
+			- (n_trials, n_channels, n_times) if avg_window=True
+			For 4D input, frequency dimension is preserved.
 
-		Args:
-			X (np.array):Input array (3D or 4D)
-			window_size (int, optional): number of time points to 
-				include in the sliding window. Defaults to 20.
-			demean (bool, optional): subtract mean from each feature 
-				within the specified sliding window. Defaults to True.
-			avg_window (bool, optional): If True rather than increasing 
-				number of features, each timepoint reflects the average 
-				activity within that time window and subsequent timepoint 
-				as defined by the size of the window. Defaults to False 
+		Notes
+		-----
+		Based on temporal decoding implementation by @jasperhajonides
+		(github.com/jasperhajonides/temp_dec). The sliding window 
+		approach improves decoding by providing temporal context around 
+		each time point.
 
-		Raises:
-			ValueError: In case data has incorrect format
+		Examples
+		--------
+		Increase feature dimension:
+		
+		>>> X_shape = (100, 64, 500)  # trials, channels, times
+		>>> X_windowed = bdm.sliding_window(X, window_size=5)
+		>>> X_windowed.shape  # (100, 320, 500)
 
-		Returns:
-			output (np.array): Reshaped array with increased feature 
-				dimension based on window_size, or averaged within 
-				window if avg_window=True
+		Average within window:
+		
+		>>> X_avg = bdm.sliding_window(X, window_size=5, 
+										avg_window=True)
+		>>> X_avg.shape  # (100, 64, 500)
 		"""
 
 		# Handle both 3D and 4D inputs
@@ -1165,40 +1625,68 @@ class BDM(FolderStructure):
 	def average_trials(self,epochs:mne.Epochs,beh:pd.DataFrame,
 				beh_headers:list) -> Tuple[np.array, pd.DataFrame]:
 		"""
-		Reduces shape of eeg data by averaging across trials. 
-		The number of trials used for averaging is set as a BDM 
-		parameter. Averaging is done across all unique labels and 
-		conditions as specified in the behavior info. Remaining trials 
-		after grouping will averaged together.
+		Reduce data dimensionality by averaging trials within 
+		condition groups.
+		
+		Groups trials by unique combinations of labels and conditions, 
+		then averages within each group. The number of trials per 
+		average is controlled by the `tr_avg` parameter. This 
+		preprocessing step can improve signal-to-noise ratio while 
+		reducing computational load.
 
-		example 1 (data contains two labels, each with 
-		four observations):
-			
-		8, 64, 240 = epochs._data.shape
-		self.tr_avg = 4
-		epochs, beh = self.average_trials(epochs, beh) 
-		2, 64, 240 = epochs._data.shape
+		Parameters
+		----------
+		epochs : mne.Epochs
+			Epoched EEG data with shape (n_trials, n_channels, n_times).
+		beh : pd.DataFrame
+			Behavioral data containing condition and label information
+			for each trial.
+		beh_headers : list
+			Column names in behavioral dataframe specifying:
+			- [0]: decoding labels (target variable)
+			- [1]: condition information (grouping variable, optional)
+			If only one header provided, averaging is done across all 
+			trials within each label.
 
-		example 2 (data contains two labels, each with 
-		four observations):
+		Returns
+		-------
+		tuple[mne.Epochs, pd.DataFrame]
+			epochs : mne.Epochs
+				Averaged epoched data with reduced trial count.
+			beh : pd.DataFrame
+				Updated behavioral dataframe corresponding to averaged 
+				trials.
 
-		8, 64, 240 = epochs._data.shape
-		self.tr_avg = 3
-		epochs, beh = self.average_trials(epochs, beh) 
-		4, 64, 240 = epochs._data.shape
+		Notes
+		-----
+		The averaging process:
+		1. Groups trials by unique label-condition combinations
+		2. Within each group, creates subgroups of size `self.tr_avg`
+		3. Averages trials within each subgroup
+		4. Updates behavioral dataframe to match new trial structure
 
-		Args:
-			epochs (mne.Epochs): epoched data [trial repeats by 
-			electrodes by time points].
-			beh (pd.DataFrame): behavior dataframe with two 
-			columns (conditions and labels)
-			beh_headers (list): Header of decoding labels and condition 
-			info in behavior. If no condition info is specified, 
-			data will be averaged across all trials
+		Examples
+		--------
+		Two labels with 4 observations each, average every 4 trials:
+		
+		>>> epochs.get_data().shape  # (8, 64, 240)
+		>>> bdm.tr_avg = 4
+		>>> epochs_avg, beh_avg = bdm.average_trials(epochs, beh, 
+														['label'])
+		>>> epochs_avg.get_data().shape  # (2, 64, 240)
 
-		Returns:
-			epochs (mne.Epochs):epoched data data after trial averaging
-			beh (pd.DataFrame): updated behavior dataframe 
+		Two labels with 4 observations each, average every 3 trials:
+		
+		>>> epochs.get_data().shape  # (8, 64, 240) 
+		>>> bdm.tr_avg = 3
+		>>> epochs_avg, beh_avg = bdm.average_trials(epochs, beh, 
+		...													['label'])
+		>>> epochs_avg.get_data().shape  # (4, 64, 240)
+		
+		Warnings
+		--------
+		#TODO: Ensure trial averaging uses consistent subsets 
+		# across runs.
 		"""
 
 		#TODO: make sure trial averaging is always done on the same subset of data
@@ -1269,34 +1757,87 @@ class BDM(FolderStructure):
 				collapse:bool=False)->\
 				Tuple[pd.DataFrame,np.array,np.array,np.array,list]:
 		"""
-		Based on input data selects the condition indices and labels. 
-		These serve as input for train_test_split (and train_test_cross)
-		to create training and test data
+		Extract condition-specific trial indices and labels for 
+		classification.
+		
+		This method selects trials based on condition criteria and 
+		prepares the data structure needed for train-test splitting. 
+		It handles special cases like collapsed conditions and ensures 
+		balanced class assignment.
 
-		Args:
-			beh (pd.DataFrame): behavior dataframe with variables of 
-			interest
-			cnd_header (str): column name that contains condition 
-			information
-			cnd (str): current condition used for decoding. 
-			In a cross training analysis this is the train condition
-			max_tr (list): contains the maximum number of observations 
-			that allows for balanced class assignment. 
-			Is only adjusted in case collapse is set to True
-			labels (str, list): unique decoding labels. 
-			Defaults to 'all'.
-			collapse (bool, optional): specifies wheter or not  
-			decoding is performed on collapsed condition data. 
-			Defaults to False.
+		Parameters
+		----------
+		beh : pd.DataFrame
+			Behavioral dataframe containing trial information and 
+			labels.
+		cnd_header : str
+			Column name containing condition information.
+		cnd : str
+			Current condition for decoding. Special values:
+			- 'all_data': Use all available trials
+			- 'collapsed': Use previously collapsed conditions
+			- Other: Specific condition name to filter by
+		max_tr : list
+			Maximum number of trials per class for balanced assignment.
+			Updated when collapse=True.
+		labels : str or list, default='all'
+			Decoding labels to include. If 'all', uses all available 
+			labels. If list, filters trials to only include specified 
+			labels.
+		collapse : bool, default=False
+			Whether to mark current condition trials for later collapsed
+			analysis. When True, adds 'collapsed' column to behavioral 
+			data.
 
-		Returns:
-			beh (pd.DataFrame): behavior dataframe with variables of 
-			interest
-			cnd_idx (np.array): trial indices of current condition
-			cnd_labels (np.array): condition labels
-			labels (np.array): unique decoding labels
-			max_tr (list): contains the maximum number of observations 
-			that allows for balanced class assignment
+		Returns
+		-------
+		tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, list]
+			beh : pd.DataFrame
+				Updated behavioral dataframe (may include 'collapsed' 
+				column).
+			cnd_idx : np.ndarray
+				Trial indices for the selected condition.
+			cnd_labels : np.ndarray
+				Decoding labels for the selected trials.
+			labels : np.ndarray
+				Unique labels present in the selected data.
+			max_tr : list
+				Updated maximum trials per class (modified if 
+				collapsed).
+
+		Notes
+		-----
+		This method is a core component of the cross-validation pipeline
+		, preparing data for `train_test_split` and `train_test_cross` 
+		methods.
+		
+		The collapse functionality allows for:
+		1. Marking trials from multiple conditions during initial passes
+		2. Later analysis of the combined 'collapsed' condition set
+		3. Automatic rebalancing of trial counts for collapsed 
+			conditions
+
+		Examples
+		--------
+		Select trials from specific condition:
+		
+		>>> (beh, cnd_idx, cnd_labels, 
+		...     labels, max_tr) = bdm.get_condition_labels(
+		...     beh, 'condition', 'cond_A', [50], labels='all')
+		>>> len(cnd_idx)  # Number of trials in condition A
+
+		Mark trials for collapsed analysis:
+		
+		>>> (beh, cnd_idx, cnd_labels, 
+		... labels, max_tr = bdm.get_condition_labels(
+		...     beh, 'condition', 'cond_A', [50], collapse=True)
+		>>> 'collapsed' in beh.columns  # True
+
+		Use previously collapsed trials:
+		
+		>>> (beh, cnd_idx, cnd_labels, 
+		...     labels, max_tr) = bdm.get_condition_labels(
+		...     beh, 'condition', 'collapsed', [50])
 		"""
 
 		# get condition indices
@@ -1333,29 +1874,77 @@ class BDM(FolderStructure):
 	def train_test_split(self,idx:np.array,labels:np.array,max_tr:int, 
 						bdm_info: dict) -> Tuple[np.array, np.array, dict]:
 		"""
-		Splits up data into training and test sets. The number of 
-		training and test sets is equal to the number of folds. 
-		Splitting is done such that all data is tested exactly once.
-		Number of folds determines the ratio between training and test 
-		trials. With 10 folds, 90% of the data is used for training and 
-		10% for testing. Ensures that the number of observations per 
-		class is balanced both in the training and the testing set
- 
-		Args:
-			idx (np.array): trial indices of decoding labels
-			labels (np.array): array of decoding labels
-			max_tr (int): max number unique labels
-			bdm_info (dict): dictionary with selected trials per label. 
-			If the value of the current run is {}, 
-			a random subset of trials will be selected
+		Create balanced train-test splits for k-fold cross-validation.
+		
+		Generates stratified k-fold splits ensuring balanced class 
+		representation in both training and test sets. Each fold uses a 
+		different subset for testing while maintaining equal class 
+		distribution across folds.
 
-		Returns:
-			train_tr (np.array): trial indices per fold 
-			and unique label [folds, labels, trials]
-			test_tr (np.array): trial indices per fold and 
-			unique label [folds, labels, trials]
-			bdm_info (dict): cross-validation info per decoding run 
-			(can be reported for replication purposes)
+		Parameters
+		----------
+		idx : np.ndarray
+			Trial indices corresponding to the decoding labels.
+		labels : np.ndarray
+			Array of class labels for each trial in idx.
+		max_tr : int
+			Maximum number of trials per class to ensure balanced 
+			sampling.
+		bdm_info : dict
+			Cross-validation information dictionary. If empty ({}), 
+			random trial selection is performed. If populated, 
+			uses specified trial assignments for replication.
+
+		Returns
+		-------
+		tuple[np.ndarray, np.ndarray, dict]
+			train_tr : np.ndarray
+				Training trial indices with shape (n_folds, n_classes,
+				n_train_trials).
+				Each fold contains balanced training sets for each 
+				class.
+			test_tr : np.ndarray
+				Test trial indices with shape (n_folds, n_classes, 
+				n_test_trials).
+				Each fold contains balanced test sets for each class.
+			bdm_info : dict
+				Updated cross-validation information containing trial 
+				assignments for each class and fold. Can be saved for 
+				exact replication.
+
+		Notes
+		-----
+		The splitting strategy:
+		1. Ensures balanced class representation in all folds
+		2. Tests each trial exactly once across all folds
+		3. Maintains consistent train/test ratios (e.g., 90%/10% for 
+			10-fold CV)
+		4. Supports reproducible splits via bdm_info parameter
+
+		The number of folds is controlled by the `self.nr_folds` 
+		parameter, with more folds providing larger training sets but 
+		smaller test sets.
+
+		Examples
+		--------
+		Create 10-fold cross-validation splits:
+		
+		>>> self.nr_folds = 10
+		>>> idx = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+		>>> labels = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+		>>> (train_tr, test_tr, 
+		... bdm_info) = bdm.train_test_split(idx, labels, 5, {})
+		>>> train_tr.shape  # (10, 2, 4) - 10 folds, 2 classes, 
+											4 training trials
+		>>> test_tr.shape   # (10, 2, 1) - 10 folds, 2 classes, 
+											1 test trial
+
+		Replicate previous split:
+		
+		>>> # Use bdm_info from previous run for exact replication
+		>>> train_tr_rep, test_tr_rep, _ = bdm.train_test_split(
+		...     idx, labels, 5, bdm_info)
+		>>> np.array_equal(train_tr, train_tr_rep)  # True
 		"""
 
 		# set up params
@@ -1399,26 +1988,80 @@ class BDM(FolderStructure):
 				test_idx:Union[np.array,bool],max_tr:int=None)-> \
 				Tuple[np.array, np.array, np.array, np.array]:
 		"""
-		Creates independent training and test sets (based on training 
-		and test conditions). Ensures that the number of observations 
-		per classis balanced both in the training and the testing set
+		Create independent training and test sets for cross-condition 
+		analysis.
+		
+		This method implements cross-condition decoding by creating 
+		balanced training and test sets from different experimental 
+		conditions. Unlike standard cross-validation, training and 
+		testing are performed on completely independent condition sets.
 
-		Args:
-			X (np.array): Input data [trials x channels x time] or 
-           		[freq x trials x channels x time]
-			y (np.array): Decoding labels 
-			train_idx (np.array): Indices of train trials 
-				(i.e., condition specific data as selected in classify
-				or localizer_classify)
-			test_idx (np.array | bool): Indices of test trials. If False
-				only training data is selected
+		Parameters
+		----------
+		X : np.ndarray
+			Input EEG data with shape:
+			- (n_trials, n_channels, n_times) for 3D data
+			- (n_freqs, n_trials, n_channels, n_times) for 4D data
+		y : np.ndarray
+			Decoding labels corresponding to each trial in X.
+		train_idx : np.ndarray
+			Trial indices for training set (condition-specific subset).
+		test_idx : np.ndarray or bool
+			Trial indices for test set. If False, only training data
+			is prepared (test arrays will be empty).
+		max_tr : int, optional
+			Maximum trials per class for balanced sampling. If None,
+			determined automatically from minimum class count.
 
-		Returns:
-			Xtr (array): Training data [folds x (freq) x trials x 
-				channels x time]
-			Xte (array): Test data [folds x (freq) x trials x channels x time]
-			Ytr (array): Training labels. Training label for trial epoch in Xtr
-			Yte (array): Test labels. Test label for each trial in Xte
+		Returns
+		-------
+		tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+			Xtr : np.ndarray
+				Training data with shape:
+				- (n_folds, n_trials_train, n_channels, n_times) for 3D 
+					input
+				- (n_folds, n_freqs, n_trials_train, n_channels, 
+					n_times) for 4D input
+			Xte : np.ndarray
+				Test data with same structure as Xtr but for 
+					test trials. Empty if test_idx=False.
+			Ytr : np.ndarray
+				Training labels with shape (n_folds, n_trials_train).
+			Yte : np.ndarray
+				Test labels with shape (n_folds, n_trials_test).
+				Empty if test_idx=False.
+
+		Notes
+		-----
+		This method is essential for cross-condition generalization 
+		analysis, where the classifier is trained on one condition and 
+		tested on another. This approach tests whether learned patterns 
+		generalize across different experimental contexts.
+
+		The balancing strategy:
+		1. Determines minimum class count across both train and test 
+			sets
+		2. Randomly samples equal numbers of trials from each class
+		3. Creates multiple balanced folds for robust estimation
+		4. Ensures no overlap between training and test conditions
+
+		Examples
+		--------
+		Cross-condition decoding (train on condition A, 
+		test on condition B):
+
+		>>> train_idx = np.where(beh['condition'] == 'A')[0]
+		>>> test_idx = np.where(beh['condition'] == 'B')[0] 
+		>>> Xtr, Xte, Ytr, Yte = bdm.train_test_cross(
+		...     X, y, train_idx, test_idx)
+		>>> Xtr.shape  # (n_folds, n_trials_per_class*n_classes,
+		...  				n_channels, n_times)
+
+		Training-only preparation:
+
+		>>> Xtr, _, Ytr, _ = bdm.train_test_cross(X, y, train_idx, 
+		...     												False)
+		>>> Xte.size == 0  # True - no test data prepared
 		"""
 
 		if self.seed:
@@ -1480,27 +2123,84 @@ class BDM(FolderStructure):
 						test_tr:np.array) -> \
 						Tuple[np.array, np.array, np.array, np.array]:
 		"""
-		Based on training and test data 
-		(as returned by train_test_split) splits data into training and 
-		test data
+		Extract training and test data based on cross-validation fold 
+		indices.
+		
+		This method takes the trial indices generated by 
+		train_test_split anduses them to extract the corresponding data 
+		and labels for each fold. It properly handles both 3D and 4D 
+		data formats and organizes themfor efficient cross-validation 
+		training.
 
-		Args:
-			X: Input data [trials x channels x time] 
-				or [freq x trials x channels x time]
-			Y (np.array): decoding labels 
-			train_tr (np.array): indices of train trials per fold and 
-				unique label [folds, train labels, train trials]
-			test_tr (np.array): indices of test trials per fold and 
-			unique label [folds, test labels, test trials]
+		Parameters
+		----------
+		X : np.ndarray
+			Input EEG data with shape:
+			- (n_trials, n_channels, n_times) for 3D data  
+			- (n_freqs, n_trials, n_channels, n_times) for 4D data
+		Y : np.ndarray
+			Decoding labels corresponding to each trial in X.
+		train_tr : np.ndarray
+			Training trial indices with shape (n_folds, n_classes, 
+			n_train_trials).Output from train_test_split method.
+		test_tr : np.ndarray
+			Test trial indices with shape (n_folds, n_classes, 
+			n_test_trials). Output from train_test_split method.
 
-		Returns:
-			Xtr (array): Training data 
-			[nr folds x (freqs) x nr trials, elecs,time] 
-			Xte (array): Test data [nr folds x (freqs) x nr trials, elecs,time]
-			Ytr (array): training labels. Training label for trial epoch 
-				in Xtr [folds × trials]
-			Yte (array): test labels. Test label for each trial in Xte
-				[folds × trials]
+		Returns
+		-------
+		tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+			Xtr : np.ndarray
+				Training data organized by folds:
+				- (n_folds, n_train_total, n_channels, n_times)
+				 	for 3D input
+				- (n_folds, n_freqs, n_train_total, n_channels, n_times) 
+					for 4D input where 
+					n_train_total = n_classes * n_train_trials
+			Xte : np.ndarray
+				Test data with same structure as Xtr but for
+				  test trials.
+			Ytr : np.ndarray
+				Training labels with shape (n_folds, n_train_total).
+			Yte : np.ndarray
+				Test labels with shape (n_folds, n_test_total).
+
+		Notes
+		-----
+		This method bridges the gap between cross-validation index 
+		generation(train_test_split) and actual data organization 
+		for machine learning.
+		
+		Key operations:
+		1. Flattens class-wise trial indices into fold-wise arrays
+		2. Extracts corresponding data trials using advanced indexing
+		3. Organizes labels to match the flattened data structure
+		4. Handles both 3D (time-domain) and 4D (time-frequency) data
+
+		The output arrays are ready for direct use with scikit-learn
+		classifiers in the cross-validation loop.
+
+		Examples
+		--------
+		Standard 3D data processing:
+		
+		>>> X.shape  # (200, 64, 500) - trials, channels, times  
+		>>> train_tr.shape  # (10, 2, 18) - folds, classes, train trials
+		>>> test_tr.shape   # (10, 2, 2) - folds, classes, test trials
+		>>> (Xtr, Xte, 
+		... Ytr, Yte) = bdm.train_test_select(X, Y, train_tr, test_tr)
+		>>> Xtr.shape  # (10, 36, 64, 500) - folds, total_train_trials, 
+		... 								channels, times
+		>>> Ytr.shape  # (10, 36) - folds, total_train_trials
+
+		Time-frequency data (4D):
+		
+		>>> X.shape  # (5, 200, 64, 500) - freqs, trials, 
+		... 								channels, times
+		>>> Xtr, Xte, Ytr, Yte = bdm.train_test_select(X, Y, train_tr, 
+		... 													test_tr)
+		>>> Xtr.shape  # (10, 5, 36, 64, 500) - folds, freqs, trials, 
+		... 											channels, times
 		"""
 
 		# initialize train and test label arrays
@@ -1694,25 +2394,59 @@ class BDM(FolderStructure):
 		else:
 			return classification	
 
-	def cross_time_decoding(self, Xtr, Xte, Ytr, Yte, labels, GAT= False, X=[]):
+	def cross_time_decoding(self, Xtr: np.ndarray, Xte: np.ndarray, 
+		Ytr: np.ndarray, Yte: np.ndarray, 
+		labels: Union[np.ndarray, Tuple[np.ndarray, np.ndarray]], 
+		GAT: Union[bool, Tuple[Tuple[float, float], 
+						 Tuple[float, float]]] = False, 
+		X: Union[List, np.ndarray] = []
+		) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 		'''
-		Decoding across all time points, supporting both 3D and 4D 
-		input.
-
+		Performs multivariate decoding across time using pre-sliced
+		data.
+		
+		This function supports both within-time decoding (GAT=False) and 
+		generalization across time (GAT=True/tuple). When GAT is a 
+		tuple, the data should already be sliced to the specified time 
+		windows before calling this function.
+		
 		Args:
-			Xtr: Training data [folds x trials x features x time] or 
-				[folds x freq x trials x features x time]
-			Xte: Test data (same format as Xtr)
+			Xtr: Training data [folds x trials x features x time] for 3D 
+				input or [folds x freq x trials x features x time] for
+				4D input.
+				Data should be pre-sliced to desired time windows.
+			Xte: Test data (same format as Xtr). Should be pre-sliced to
+				desired time windows for testing.
 			Ytr: Training labels [folds x trials]
 			Yte: Test labels [folds x trials]
-			labels: Label set(s) for training and testing
-			GAT: If True, compute generalization across time
-			X: Optional raw data for PCA computation
+			labels: Label set(s) for training and testing. Can be single 
+				array for both train/test or tuple of (train_labels, 
+				test_labels)
+			GAT: Generalization Across Time parameter:
+				- False: Within-time decoding (train and test at same 
+					time points)
+				- True: Full generalization (train at each time, 
+					test at all times)
+				- Tuple: Custom time windows - data should be pre-sliced
+			X: Optional raw data for PCA computation when using 'all' 
+				PCA mode. Should match the dimensionality of Xtr/Xte.
 		
 		Returns:
-			class_acc: Classification accuracies
-			weights: Classifier weights
-			conf_matrix: Confusion matrix
+			Tuple containing:
+			- class_acc: Classification accuracies [freq x time_train 
+				x time_test]
+			- weights: Classifier weights [freq x time_train x time_test 
+				x features]
+			- conf_matrix: Confusion matrices [freq x time_train x 
+				time_test x n_labels x n_labels]
+
+		Notes:
+			- Input data dimensions are automatically detected (3D vs 4D)
+			- For GAT=False, time_test dimension will be 1
+			- For tuple GAT, time dimensions reflect the pre-sliced 
+				window sizes
+			- Standardization and PCA are applied if configured in class 
+				settings
 		'''
 
 		# set necessary parameters
@@ -1748,32 +2482,39 @@ class BDM(FolderStructure):
 		conf_matrix = np.zeros((N,nr_freq,nr_time_tr, nr_time_te,
 			  					len(labels[1]),len(labels[0])))
 
-
 		for n in range(N):
-			print(f'\rFold {n+1} out of {N} folds in run {self.run_info}', end='')
+			print(f'\rFold {n+1} out of {N} folds '
+				f'in run {self.run_info}', end='')
 			Ytr_ = Ytr[n]
 			Yte_ = Yte[n]
 
 			for freq in range(nr_freq):	
+				if self.tfr is not None:
+					print(f'\rFrequency {freq+1} out of {nr_freq} '
+						f'in run {self.run_info}', end='')
 				for tr_t in range(nr_time_tr):
 					# When GAT=False, we only need one iteration
 					te_time_points = range(nr_time_te) if GAT else [0]
 					for te_t in te_time_points:
 
 						Xtr_ = Xtr[n,freq,:,:,tr_t]
-						Xte_ = Xte[n,freq,:,:,te_t if GAT else tr_t]
+						Xte_ = Xte[n, freq, :, :, te_t if GAT else tr_t]
 
 						# Apply standardization if specified
-						if self.scale['standardize']:
-							scaler = StandardScaler(with_std=self.scale['scale'])
+						if self.scale:
+							scaler = StandardScaler(
+												with_std=True)
 							Xtr_ = scaler.fit_transform(Xtr_)
 							Xte_ = scaler.transform(Xte_)
 
 						if self.pca_components[0]:
 							# Show warning only once if data is not standardized
-							if not self.scale['standardize'] and tr_t == 0 and n == 0 and self.run_info == 1:
-								warnings.warn('It is recommended to standardize the data before '
-											'applying PCA correction')
+							first_iter= (tr_t == 0 and n == 0 and 
+							 								self.run_info == 1)
+							if not self.scale and first_iter:
+								warnings.warn('It is recommended to ' \
+								'standardize the data before applying PCA ' \
+								'correction')
 							
 							if self.pca_components[1] == 'across':
 								pca = PCA(n_components=self.pca_components[0])
@@ -1781,10 +2522,16 @@ class BDM(FolderStructure):
 								Xte_ = pca.transform(Xte_)
 							elif self.pca_components[1] == 'all':
 								if X != []:
-									X_ = X[..., tr_t] if X.ndim == 3 else X[freq, ..., tr_t]
-									if self.scale['standardize']:
-										X_ = StandardScaler().fit_transform(X_)
-									pca = PCA(n_components=self.pca_components[0])
+									if X.ndim == 3:
+										X_ = X[..., tr_t]
+									else:
+										X_ = X[freq, ..., tr_t]
+
+									if self.scale:
+										X_ = StandardScaler(
+											with_std=True).fit_transform(X_)
+									pca = PCA(
+										n_components=self.pca_components[0])
 									pca.fit(X_)
 									Xtr_ = pca.fit_transform(Xtr_)
 									Xte_ = pca.transform(Xte_)
@@ -1792,25 +2539,28 @@ class BDM(FolderStructure):
 										
 						# Train and test classifier
 						clf.fit(Xtr_,Ytr_)
-						scores = clf.predict_proba(Xte_) # get posteriar probability estimates
+						# Get posterior probability estimates
+						scores = clf.predict_proba(Xte_) 
 						predict = clf.predict(Xte_)
 
 						# Compute performance metrics
 						if bool(set(Ytr_)& set(Yte_)):
 							class_perf = self.computeClassPerf(scores, Yte_, 
 										  np.unique(Ytr_), predict) #
-							conf_m = confusion_matrix(Yte_, predict,labels=labels[0])
+							conf_m = confusion_matrix(Yte_, predict,
+								 							labels=labels[0])
 						else:
 							class_perf = 0
-							conf_m = self.get_fake_confusion_matrix(Yte_, predict) 
+							conf_m = self.get_fake_confusion_matrix(Yte_,
+											   						 predict) 
 
 						# store results
 						# TODO: create interpretable weights
 						class_acc[n, freq, tr_t, te_t] = class_perf
 						conf_matrix[n, freq, tr_t, te_t] = conf_m
 						if not self.pca_components[0]:
-							weights[n, freq, tr_t, te_t] = self.get_classifier_weights(
-							clf, Xtr_)
+							weights[n, freq, tr_t, te_t] = (
+								self.get_classifier_weights(clf, Xtr_))
 						# pairs = list(zip(Yte_, predict))
 
 		weights = np.mean(weights, axis=0)
@@ -1966,129 +2716,3 @@ class BDM(FolderStructure):
 
 		return max_trials
 
-
-
-
-	
-
-
-	def linearClassification(self, X, train_tr, test_tr, max_tr, labels, gat_matrix = False):
-		''' 
-		Arguments
-		- - - - - 
-		X (array): eeg data (trials X electrodes X time)
-		train_tr (array): trial indices per fold and unique label (folds X labels X trials)
-		test_tr (array): trial indices per fold and unique label (folds X labels X trials)
-		max_tr (int): max number unique labels
-		labels (array): decoding labels 
-		bdm_matrix (bool): If True, return an train X test time decoding matrix. Otherwise only
-							return the diagoanl of the matrix (standard decoding)
-		Returns
-		- - - -
-		class_acc
-		'''
-
-		N = self.nr_folds
-		nr_labels = np.unique(labels).size
-		steps = int(max_tr/N)
-
-		nr_elec, nr_time = X.shape[1], X.shape[2]
-		if gat_matrix:
-			nr_test_time = nr_time
-		else:
-			nr_test_time = 1	
-
-		lda = LinearDiscriminantAnalysis()
-
-		# set training and test labels
-		Ytr = np.hstack([[i] * (steps*(N-1)) for i in np.unique(labels)])
-		Yte = np.hstack([[i] * (steps) for i in np.unique(labels)])
-
-		class_acc = np.zeros((N,nr_time, nr_test_time))
-		label_info = np.zeros((N, nr_time, nr_test_time, nr_labels))
-
-		for n in range(N):
-			print('\r Fold {} out of {} folds'.format(n + 1,N),)
-			
-			for tr_t in range(nr_time):
-				for te_t in range(nr_test_time):
-					if not gat_matrix:
-						te_t = tr_t
-
-					Xtr = np.array([X[train_tr[n,l,:],:,tr_t] for l in range(nr_labels)]).reshape(-1,nr_elec) 
-					Xte = np.vstack([X[test_tr[n,l,:],:,te_t].reshape(-1,nr_elec) for l, lbl in enumerate(np.unique(labels))])
-
-					lda.fit(Xtr,Ytr)
-					predict = lda.predict(Xte)
-					
-					if not gat_matrix:
-						class_acc[n,tr_t, :] = sum(predict == Yte)/float(Yte.size)
-						label_info[n, tr_t, :] = [sum(predict == l) for l in np.unique(labels)]	
-					else:
-						class_acc[n,tr_t, te_t] = sum(predict == Yte)/float(Yte.size)
-						label_info[n, tr_t, te_t] = [sum(predict == l) for l in np.unique(labels)]	
-						#class_acc[n,t] = clf.fit(X = Xtr, y = Ytr).score(Xte,Yte)
-
-		class_acc = np.squeeze(np.mean(class_acc, axis = 0))
-		label_info = np.squeeze(np.mean(label_info, axis = 0))
-
-		return class_acc, label_info
-
-	def mneClassify(self, sj, to_decode, conditions, time = [-0.3, 0.8]):
-		'''
-		'''
-
-		clf = make_pipeline(StandardScaler(), LogisticRegression())
-		time_decod = SlidingEstimator(clf, n_jobs=1)	
-
-		# get eeg data
-		eeg = []
-		for session in range(2):
-			eeg.append(mne.read_epochs('/Users/dirk/Desktop/suppression/processed/subject-{}_ses-{}-epo.fif'.format(sj,session + 1)))
-
-
-		times = eeg[0].times
-		# select time window and electrodes	
-		s_idx, e_idx = eeg[0].time_as_index(time)	
-		picks = mne.pick_types(eeg[0].info, eeg=True, exclude='bads')
-
-		eeg = np.vstack((eeg[0]._data,eeg[1]._data))[:,picks,:][:,:,s_idx:e_idx]
-
-
-		# get behavior data
-		with open('/Users/dirk/Desktop/suppression/beh/processed/subject-{}_all.pickle'.format(sj),'rb') as handle:
-			beh = pickle.load(handle)
-
-
-		plt.figure(figsize = (20,20))
-		for i,cnd in enumerate(conditions):
-		
-			X = eeg[beh['condition'] == cnd]	
-			y = beh[to_decode][beh['condition'] == cnd]
-
-			scores = cross_val_multiscore(time_decod, X, y, cv=5, n_jobs=1)
-			plt.plot(times[s_idx:e_idx],scores.mean(axis = 0), color = ['r','g','b','y'][i], label = cnd)
-
-		plt.legend(loc = 'best')
-		plt.savefig('/Users/dirk/Desktop/suppression/bdm/figs/{}_{}_bdm.pdf'.format(to_decode,sj))	
-		plt.close()	
-
-if __name__ == '__main__':
-
-	project_folder = '/home/dvmoors1/big_brother/Dist_suppression'
-	os.chdir(project_folder) 
-
-	subject_id = [1,2,5,6,7,8,10,12,13,14,15,18,19,21,22,23,24]	
-	subject_id = [16]		
-	to_decode = 'target_loc'
-	if to_decode == 'target_loc':
-		conditions = ['DvTv_0','DvTv_3','DvTr_0','DvTr_3']
-	else:
-		conditions = ['DvTv_0','DvTv_3','DrTv_0','DrTv_3']
-
-	session = BDM('all_channels', to_decode, nr_folds = 10)
-
-	for sj in subject_id:
-		print(sj)
-		session.Classify(sj, conditions = conditions, bdm_matrix = True)
-		#session.Classify(sj, conditions = conditions, nr_perm = 500, bdm_matrix = True)

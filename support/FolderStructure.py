@@ -80,8 +80,8 @@ class FolderStructure(object):
 
         return path
 
-    def load_processed_eeg(self,sj:int,fname:str,preproc_name:str,
-                        eye_dict:dict=None,beh_file:bool=True,
+    def load_processed_epochs(self,sj:int,fname:str,preproc_name:str,
+                        eye_dict:dict=None,csv_file:bool=True,
                         excl_factor:dict=None)->\
                         Tuple[pd.DataFrame,mne.Epochs]:
         """
@@ -107,7 +107,7 @@ class FolderStructure(object):
             use_tracker (bool): should eye tracker data be used to 
             search eye movements. If not exclusion will be based on 
             step algorhytm applied to eog channel as specified in eye_ch
-            beh_file (bool, optional): Is epoch info stored in a 
+            csv_file (bool, optional): Is epoch info stored in a 
             seperate file or within epochs data. Defaults to True.
             excl_factor (dict, optional): This gives the option to 
 			exclude specific conditions from the data that is read in. 
@@ -375,10 +375,16 @@ class FolderStructure(object):
         all_files = []
         for name in bdm_names:
             if sjs == 'all':
-                files = sorted(glob.glob(self.folder_tracker(
-                    ext = ext,
-                    fname = f'sj_*_{name}.pickle')),
-                    key = lambda s: int(re.search(r'sj_(\d+)_', s).group(1)))
+                # First get all potential files
+                pattern = self.folder_tracker(ext=ext,
+                                            fname=f'sj_*{name}.pickle')
+                potential_files = glob.glob(pattern)
+                
+                # Then filter to only exact matches using regex
+                regex_pattern = rf'sj_(\d+)_{re.escape(name)}\.pickle$'
+                files = sorted([f for f in potential_files 
+                        if re.search(regex_pattern, os.path.basename(f))],
+                        key=lambda s: int(re.search(r'sj_(\d+)_', s).group(1)))
             else:
                 files = [self.folder_tracker(ext = ext,
                     fname = f'sj_{sj}_{name}.pickle')for sj in sjs]
@@ -386,7 +392,7 @@ class FolderStructure(object):
             if not files:
                 raise ValueError(f"No files found for analysis {name}")
             all_files.append(files)
-        
+
         # Check if we have matching files for each subject
         ref_subjects = [self._extract_subject_number(f) for f in all_files[0]]
         for files in all_files[1:]:

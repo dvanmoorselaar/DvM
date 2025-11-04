@@ -76,22 +76,20 @@ class ERP(FolderStructure):
         l_filter: Optional[float] = None, 
         h_filter: Optional[float] = None, 
         downsample: Optional[int] = None, 
+        laplacian: bool = False,
         report: bool = False
     ):
         """class constructor"""
 
-        # if filters are specified, filter data before trial averaging  
-        if l_filter is not None or h_filter is not None:
-            epochs.filter(l_freq = l_filter, h_freq = h_filter)
+
         self.sj = sj
+        self.l_filter = l_filter
+        self.h_filter = h_filter
         self.epochs = epochs
         self.df = df
         self.baseline = baseline
-        
-        if downsample is not None:
-            if downsample < int(epochs.info['sfreq']):
-                print('downsampling data')
-                self.epochs.resample(downsample)
+        self.downsample = downsample
+        self.laplacian = laplacian
         self.report = report
 
     def select_erp_data(self,excl_factor:dict=None,
@@ -135,6 +133,19 @@ class ERP(FolderStructure):
         # if specified remove trials matching specified criteria
         if excl_factor is not None:
             df, epochs, _ = trial_exclusion(df, epochs, excl_factor)
+
+        # if filters are specified, filter data before trial averaging  
+        if self.l_filter is not None or self.h_filter is not None:
+            epochs.filter(l_freq=self.l_filter, h_freq=self.h_filter)
+
+        # apply laplacian filter using mne defaults
+        if self.laplacian:
+            epochs = mne.preprocessing.compute_current_source_density(epochs)
+
+        if self.downsample is not None:
+            if self.downsample < int(epochs.info['sfreq']):
+                print('downsampling data')
+                epochs.resample(self.downsample)
 
         # check whether left stimuli should be 
         # artificially transferred to left hemifield
@@ -232,8 +243,12 @@ class ERP(FolderStructure):
         
         report = mne.Report(title='Single subject evoked overview')
         for cnd in evokeds.keys():
-            report.add_evokeds(evokeds=evokeds[cnd],titles=cnd)
-        
+            if self.laplacian:
+                #TODO: remove after updating mne
+                pass
+            else:
+                report.add_evokeds(evokeds=evokeds[cnd],titles=cnd)
+
         report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
                         
     def condition_erps(
@@ -343,7 +358,7 @@ class ERP(FolderStructure):
 
             evokeds[cnd] = self.create_erps(epochs, df, idx_c, time_oi, 
                                             erp_name, RT_split)
-        
+
         if self.report:
             self.generate_erp_report(evokeds,f'sj_{self.sj}_{name}'	)
 

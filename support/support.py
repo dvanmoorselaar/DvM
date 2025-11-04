@@ -359,7 +359,7 @@ def trial_exclusion(df, epochs, excl_factor):
 
 	return df, epochs, idx
 
-def get_time_slice(times, start_time, end_time, include_final = False, step = None):
+def get_time_slice(times, start_time, end_time, include_final = True, step = None):
 
 	# get start and end index
 	idx = [np.argmin(abs(times - t)) 

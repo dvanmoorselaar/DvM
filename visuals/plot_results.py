@@ -32,7 +32,7 @@ matplotlib.rcParams.update(params)
 meanlineprops = dict(linestyle='--', linewidth=1, color='black')
 medianlineprops = dict(linestyle='-', linewidth=1, color='black')
 
-def plot_time_course(x:np.array,y:np.array,
+def plot_timecourse(x:np.array,y:np.array,
 					show_SE:bool=False,smooth:bool=False,**kwargs):
 
 	if y.ndim > 1:
@@ -166,9 +166,14 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 			# Handle boolean mask results (ttest, fdr)
 			# Apply same smoothing for visual consistency
 			sig_mask_smooth = gaussian_filter(sig_mask.astype(float), sigma=1.0)
-			plt.contour(sig_mask_smooth, levels=[0.5], colors=color,
-						linestyles='dashed', linewidths=1,
-						extent=extent, **kwargs)
+			if sig_mask_smooth.max() > 0.5 and sig_mask_smooth.min() < 0.5:
+				plt.contour(sig_mask_smooth, levels=[0.5], colors=color,
+							linestyles='dashed', linewidths=1,
+							extent=extent, **kwargs)
+			elif sig_mask.any():  # If there are any significant points
+				# Use alternative visualization - highlight significant regions
+				plt.contourf(sig_mask.astype(float), levels=[0.5, 1.0], 
+							colors=[color], alpha=0.3, extent=extent, **kwargs)
 	
 	else:
 		# Get current line properties
@@ -195,7 +200,7 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 def plot_2d(Z:np.array,x_val:np.array=None,
 	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
 			nr_ticks_y:np.array=5, set_y_ticks:bool=True,
-			interpolation:str='bilinear', **kwargs):
+			interpolation:str='bilinear',cbar_label:str=None,**kwargs):
 
 	if Z.ndim > 2:
 		Z = Z.mean(axis=0)
@@ -214,9 +219,10 @@ def plot_2d(Z:np.array,x_val:np.array=None,
 		plt.xticks(np.linspace(x_lim[0],x_lim[1],nr_ticks_x))
 
 	if set_y_ticks:
+		if isinstance(y_val, list):
+			y_val = np.array(y_val)
 		if nr_ticks_y is None:
-			nr_ticks_y = 5
-
+			nr_ticks_y = 5 if len(y_val) > 5 else len(y_val)	
 		idx = np.linspace(0, len(y_val)-1, nr_ticks_y).astype(int)
 		ticks = y_val[idx]
 		if np.allclose(np.diff(y_val),np.diff(y_val)[0],rtol=1e-2, atol=1e-8):
@@ -232,9 +238,12 @@ def plot_2d(Z:np.array,x_val:np.array=None,
 	
 	# add colorbar
 	if colorbar:
-		plt.colorbar()
+		cbar = plt.colorbar()
+		if cbar_label:
+			cbar.set_label(cbar_label)
 
-def plot_erp_time_course(
+
+def plot_erp_timecourse(
 	erps: Union[list, dict], 
 	times: np.array, 
 	elec_oi: list, 
@@ -304,25 +313,37 @@ def plot_erp_time_course(
 		ls (str, optional): Line style for the ERP time course. 
 			Defaults to `'-'`.
 		**kwargs: Additional keyword arguments passed to the 
-			`plot_time_course` function.
+			`plot_timecourse` function.
 
 	Returns:
 		None: The function generates a plot but does not return 
 		any value.
 	"""
 
+	# Convert times from seconds to milliseconds if needed
+	time_diff = np.diff(times).mean()
+	if time_diff < 0.1:  # If average difference < 0.1, assume seconds
+		times = times * 1000
+		print(f"Times converted from seconds to milliseconds")
+		if window_oi is not None:
+			window_oi = [window_oi[0]*1000, window_oi[1]*1000] + window_oi[2:]	
+
 	if isinstance(erps, list):
 		erps = {'temp':erps}
 
 	if cnds is not None:
 		erps = {key:value for (key,value) in erps.items() if key in cnds}
-	
-	if colors is None or len(colors) < len(erps):
-		print('not enough colors specified. Using default colors')
-		colors = list(mcolors.TABLEAU_COLORS.values())
 
 	if isinstance(elec_oi[0],str): 
 		elec_oi = [elec_oi]
+
+	# Calculate the actual number of waveforms that will be plotted
+	n_waveforms_per_condition = 1 if lateralized else len(elec_oi)
+	total_waveforms = len(erps) * n_waveforms_per_condition
+
+	if colors is None or len(colors) < total_waveforms:
+		print('not enough colors specified. Using default colors')
+		colors = list(mcolors.TABLEAU_COLORS.values())
 	
 	for cnd in erps.keys():
 		# extract all time courses for the current condition
@@ -330,16 +351,33 @@ def plot_erp_time_course(
 		for c, elec in enumerate(elec_oi):
 			y_,_ = ERP.group_erp(erps[cnd],elec_oi = elec)
 			y.append(y_)
+		
+		# Auto-detect and convert volts to microvolts for all conditions
+		for i, y_ in enumerate(y):
+			typical_value = np.abs(y_).mean()
+			# Between 1 nV and 1 mV
+			if typical_value < 1e-3 and typical_value > 1e-9:  
+				y[i] = y_ * 1e6  # Convert volts to microvolts
+				if i == 0:  # Only print once per condition
+					print(f"Data for condition '{cnd}' converted from volts to" 
+		   			" microvolts" )		
 				
 		# set up timecourses to plot	
 		if lateralized:
 			y = [y[0] - y[1]]
-		labels = [cnd] if len(y) == 1 else ['contralateral','ipsilateral']
+		
+		# Create appropriate labels based on lateralization and number of conditions
+		if lateralized:
+			labels = [f'{cnd} (contra-ipsi)']
+		elif len(y) == 1:
+			labels = [cnd]
+		else:
+			labels = [f'{cnd} contra', f'{cnd} ipsi']
 
 		#do actual plotting
 		for i, y_ in enumerate(y):
 			color = colors.pop(0) 
-			plot_time_course(times,y_,show_SE,smooth,
+			plot_timecourse(times,y_,show_SE,smooth,
 							label=labels[i],color=color,ls=ls,**kwargs)
 
 	# clarify plot
@@ -415,6 +453,12 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 		elec_oi = [elec_oi]
 
 	times = tfr[cnds[0]][0].times
+	# Convert times from seconds to milliseconds if needed
+	time_diff = np.diff(times).mean()
+	if time_diff < 0.1:  # If average difference < 0.1, assume seconds
+		times = times * 1000
+		print(f"Times converted from seconds to milliseconds")
+
 
 	for cnd in cnds:
 		# get indices of frequencies of interest
@@ -441,40 +485,67 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 				else:
 					y_ = y_[:, freq_idx]
 			y.append(y_)
+
+		# Create appropriate labels based on lateralization and number of conditions
+		if lateralized:
+			labels = [f'{cnd} (contra-ipsi)']
+		elif len(y) == 1:
+			labels = [cnd]
+		else:
+			labels = [f'{cnd} contra', f'{cnd} ipsi']
 				
 		# set up timecourses to plot	
 		if lateralized:
 			y = [y[0] - y[1]]
-		labels = [cnd] if len(y) == 1 else ['contralateral','ipsilateral']
 			
 		#do actual plotting
 		for i, y_ in enumerate(y):
 			if timecourse == '2d':
-				plot_2d(y_, x_val=times, y_val=freqs, colorbar=True)
+				plot_2d(y_, x_val=times, y_val=freqs, cbar_label='Power (au)',
+						colorbar=True)
 				if stats:		
 					plot_significance(times, y_, 0, color='white', stats=stats,
 							y_val=freqs, **kwargs)
 			else:
 				color = colors.pop(0) 
-				plot_time_course(times,y_.mean(axis = 1),show_SE,smooth,
+				plot_timecourse(times,y_.mean(axis = 1),show_SE,smooth,
 						label=labels[i],color=color,ls=ls,**kwargs)
 				if stats:		
 					plot_significance(times,y_.mean(axis = 1),0,
 									color=color,stats=stats,
 									smooth=smooth,**kwargs)
 
+	if show_legend and timecourse == '1d':
+		handles, labels = plt.gca().get_legend_handles_labels()
+		by_label = dict(zip(labels, handles))
+		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
+		prop={'size': 7},frameon=False)
+
+
+	plt.xlabel('Time (ms)')
+	if timecourse == '2d':
+		plt.ylabel('Frequency (Hz)')
+	else:
+		plt.ylabel('Power (au)')
+	
 	sns.despine(offset = offset_axes)
 				
-def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d',
-						 colors:list=None,
+def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d',
+						colors:list=None,
 						show_SE:bool=False,smooth:bool=False,method:str='auc',
 						chance_level:float=0.5,stats:Union[str,bool]='perm',
+						freq_oi: Union[int,Tuple] = None,
 						onset_times:Union[list,bool]=[0],offset_axes:int=10,
 						show_legend:bool=True,ls = '-',**kwargs):
 
 	if isinstance(bdms, dict):
 		bdms = [bdms]	
 	times = bdms[0]['info']['times']
+	# Convert times from seconds to milliseconds if needed
+	time_diff = np.diff(times).mean()
+	if time_diff < 0.1:  # If average difference < 0.1, assume seconds
+		times = times * 1000
+		print(f"Times converted from seconds to milliseconds")
 	
 	if cnds is None:
 		cnds = [key for key in bdms[0] if 'info' not in key]
@@ -484,7 +555,7 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d
 		f'condition only {cnds[0]}')
 		cnds = [cnds[0]]
 
-	if colors is None or len(colors) < len(cnds):
+	if colors is None or len(colors) < len(cnds) and timecourse == '1d':
 		print('not enough colors specified. Using default colors')
 		colors = list(mcolors.TABLEAU_COLORS.values())
 
@@ -496,7 +567,7 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d
 		if timecourse == '1d':
 			y_label = method
 			# do actual plotting
-			plot_time_course(times,y,show_SE,smooth,
+			plot_timecourse(times,y,show_SE,smooth,
 							label=cnd,color=color,ls=ls)
 			if stats:		
 				plot_significance(times,y,chance_level,
@@ -507,15 +578,18 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d
 				y_range = bdms[0]['info']['freqs']	
 				y_label = 'Frequency (Hz)'
 				y_ticks = True
-			else:
+			elif timecourse == '2d_GAT':
+				times = bdms[0]['info']['test_times']
 				y_range = times
 				y_label = 'Train time (ms)'
 				y_ticks = False
 			# Remove colorbar from kwargs if present
 			plot_2d(y,x_val=times,y_val=y_range,colorbar=True,
-		   				set_y_ticks=y_ticks,**kwargs)
+		   				set_y_ticks=y_ticks,cbar_label=method,**kwargs)
+			
 			if stats:
-				print('Statistical testing not implemented for 2d timecourse')
+				plot_significance(times, y, 0, color='white', stats=stats,
+								y_val=y_range, **kwargs)				
 
 	# fine tune plot	
 	if show_legend:
@@ -528,15 +602,18 @@ def plot_bdm_time_course(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d
 		for t in onset_times:
 			plt.axvline(t,color = 'black',ls='--',lw=1)
 	
-	plt.xlabel('Time (ms)')
+	if timecourse == '2d_GAT':
+		plt.xlabel('Test time (ms)')
+	else:
+		plt.xlabel('Time (ms)')
 	plt.ylabel(y_label)
 	if timecourse == '1d':
 		plt.axhline(chance_level, color = 'black', ls = '--', lw=1)
 
 	sns.despine(offset = offset_axes)
 
-def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
-						show_SE:bool=False,smooth:bool=False,
+def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
+						show_SE:bool=False,smooth:bool=False,timecourse:str='1d',
 						output:str='raw_slopes',stats:Union[str,bool]='perm',
 						onset_times:Union[list,bool]=[0],offset_axes:int=10,
 						show_legend:bool=True,avg_bins:bool=False,**kwargs):
@@ -545,16 +622,28 @@ def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 		ctfs = [ctfs]
 	times = ctfs[0]['info']['times']
 
+	# Convert times from seconds to milliseconds if needed
+	time_diff = np.diff(times).mean()
+	if time_diff < 0.1:  # If average difference < 0.1, assume seconds
+		times = times * 1000
+		print(f"Times converted from seconds to milliseconds")
+
 	if cnds is None:
 		cnds = [key for key in ctfs[0] if 'info' not in key]
+
+	if timecourse != '1d' and len(cnds) > 1:
+		print('2d timecourse only supports one condition. Plotting first ' \
+		f'condition only {cnds[0]}')
+		cnds = [cnds[0]]
 
 	if isinstance(output, str):
 		output = [output]
 
-	if colors is None or len(colors) < len(cnds):
+	if colors is None or len(colors) < len(cnds) and timecourse == '1d':
 		print('not enough colors specified. Using default colors')
 		colors = list(mcolors.TABLEAU_COLORS.values())
 
+	ylabel = 'CTF slope (au)'
 	for c, cnd in enumerate(cnds):
 		color = colors[c] 
 		for o, out in enumerate(output):
@@ -565,56 +654,70 @@ def plot_ctf_time_course(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 			else:
 				label = cnd
 
-			if y.ndim > 2 and avg_bins:
-				y = y[:,:,~np.all(y == 0, axis=(0,1))].mean(axis=-1)
-			if y.ndim > 2:
-				for b in range(y.shape[-1]):
-					y_ = y[:,:,b]
-					if not np.all(y_ == 0):
-						bin_label = f'{label} - bin_{b}'
-						plot_time_course(times,y_,show_SE,smooth,
-									label=bin_label,color=colors[b],
-									ls=['-','--'][o])
-			else:
-				plot_time_course(times,y,show_SE,smooth,
-								label=label,color=color,ls=['-','--'][o])
+			# do actual plotting
+			if timecourse == '1d':
+				if y.ndim > 2 and avg_bins:
+					y = y[:,:,~np.all(y == 0, axis=(0,1))].mean(axis=-1)
+				if y.ndim > 2:
+					for b in range(y.shape[-1]):
+						y_ = y[:,:,b]
+						if not np.all(y_ == 0):
+							bin_label = f'{label} - bin_{b}'
+							plot_timecourse(times,y_,show_SE,smooth,
+										label=bin_label,color=colors[b],
+										ls=['-','--'][o])
+				else:
+					plot_timecourse(times,y,show_SE,smooth,
+									label=label,color=color,ls=['-','--'][o])
 
-			if stats:		
-				plot_significance(times,y,0,
-					 			color=color,stats=stats,
-								smooth=smooth,**kwargs)
-			# if stats:
-			# 	if c == 0:
-			# 		y_ = np.stack([ctf[cnd][out] for cnd in cnds 
-			# 												for ctf in ctfs])
-					
-			# 		if y_.ndim > 2 and avg_bins:
-			# 			y_ = y_[:,:,~np.all(y_ == 0, axis=(0,1))].mean(axis=-1)				
-			# 		y_ = np.reshape(y_,(len(cnds),-1,y_.shape[-1]))
-			# 		y_min = np.mean(y_, axis = 1).min()
-			# 		y_max = np.mean(y_, axis = 1).max()
-			# 		step = (y_max - y_min)/20
-
-				
-			# 	marker_y = y_min + np.abs(step*c)
-			# 	plot_significance(times,y,stats=stats,
-			# 					color=color,marker_y=marker_y,
-			# 					ls=['-','--'][o])
+				if stats:		
+					plot_significance(times,y,0,
+									color=color,stats=stats,
+									smooth=smooth,**kwargs)
+			elif timecourse == '2d_tfr':
+				freqs = ctfs[0]['info']['freqs']	
+				y_range = [np.mean(band) for band in freqs]
+				ylabel = 'Frequency (Hz)'
+				y_ticks = True
+				plot_2d(y,x_val=times,y_val=y_range,colorbar=True,
+		   				set_y_ticks=y_ticks,cbar_label='CTF slope',**kwargs)
 			
+				if stats:
+					plot_significance(times, y, 0, color='white', stats=stats,
+									y_val=y_range, **kwargs)	
+			elif timecourse == '2d_ctf':
+				if y.shape[1]> 1:
+					Warning('2d CTF timecourse only supports single output.' \
+					' Plotting first output only.')
+					y = y[:,0]
+				else:
+					y = np.squeeze(y,axis=1)
+				if y.ndim > 3:
+					Warning('2d CTF timecourse only supports single channel.' \
+					'Individual channels will be averaged.')
+					y = y.mean(axis=-2)
+				if y.shape[-1]%2 == 0:
+					y = np.concatenate([y, y[:, :, 0:1] ], axis=2)
+				y = np.swapaxes(y,1,2)
+				y_range = np.linspace(-180,180,y.shape[1])
+				ylabel = 'Channel offset (deg)'
+				plot_2d(y,x_val=times,y_val=y_range,colorbar=True,
+		   				set_y_ticks=False,cbar_label='Channel response',**kwargs)
+
 	# fine tune plot	
 	if show_legend:
 		handles, labels = plt.gca().get_legend_handles_labels()
 		by_label = dict(zip(labels, handles))
 		plt.legend(by_label.values(), by_label.keys(),loc = 'best',
 		prop={'size': 7},frameon=False)
-
-	if onset_times:
-		for t in onset_times:
-			plt.axvline(t,color = 'black',ls='--',lw=1)
 	
 	plt.xlabel('Time (ms)')
-	plt.ylabel(output)
-	plt.axhline(0, color = 'black', ls = '--', lw=1)
+	plt.ylabel(ylabel)
+	if timecourse == '1d':
+		if onset_times:
+			for t in onset_times:
+				plt.axvline(t,color = 'black',ls='--',lw=1)
+		plt.axhline(0, color = 'black', ls = '--', lw=1)
 
 	sns.despine(offset = offset_axes)
 	

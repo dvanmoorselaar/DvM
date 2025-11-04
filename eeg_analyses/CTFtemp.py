@@ -32,6 +32,7 @@ from scipy.signal import hilbert
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 from scipy.ndimage.measurements import label
+from visuals.plot_results import plot_ctf_timecourse
 
 from support.support import select_electrodes, trial_exclusion, \
 							get_time_slice,baseline_correction
@@ -50,12 +51,13 @@ class CTF(BDM):
 	def __init__(self,sj:int,epochs:mne.Epochs,beh:pd.DataFrame, 
 				to_decode:str,nr_bins:int,nr_chans:int,shift_bins:int=0,
 				nr_iter:int=10,nr_folds:int=3,elec_oi:Union[str,list]='all',
-				sin_power = 7,delta:bool=False,method:str='Foster',
-				avg_ch:bool=True,ctf_param:Union[str,bool]='slope',
-				power:str='band',min_freq:int=4,max_freq:int=40,
-				num_frex:int=25,freq_scaling:str='log',slide_window:int=0,
+				downsample:int=128,sin_power:int=7,delta:bool=False,
+				method:str='Foster',avg_ch:bool=True,
+				ctf_param:Union[str,bool]='slope',power:str='band',
+				min_freq:int=4,max_freq:int=40,num_frex:int=25,
+				freq_scaling:str='log',slide_window:int=0,
 				laplacian:bool=False,pca_cmp:int=0,
-				filter:int=None,VEP:bool=False,
+				filter:int=None,VEP:bool=False,report:bool=False,
 				baseline:Optional[tuple]=None,seed:Union[int, bool] = 42213):
 		''' 
 		
@@ -93,6 +95,13 @@ class CTF(BDM):
 		self.shift_bins = shift_bins		# shift of channel position
 
 		# specify model parameters
+		self.sfreq = epochs.info['sfreq']
+		if self.sfreq % downsample != 0:
+			warnings.warn(f"Warning: sfreq ({self.sfreq}) is not evenly "
+				 f"divisible by downsample ({downsample}). This will result in"
+                 f" inexact downsampling. Consider using a downsample value "
+                 f"that evenly divides {self.sfreq} ")
+		self.downsample = downsample
 		self.method = method
 		self.nr_bins = nr_bins													# nr of spatial locations 
 		self.nr_chans = nr_chans 												# underlying channel functions coding for spatial location
@@ -110,6 +119,7 @@ class CTF(BDM):
 		self.laplacian = laplacian
 		self.pca=pca_cmp
 		self.filter = filter	
+		self.report = report
 		
 	def calculate_basis_set(self,nr_bins:int,nr_chans:int, 
 			 				sin_power:int=7,delta:bool=False)->np.array:
@@ -191,10 +201,65 @@ class CTF(BDM):
 		
 		return basisset	
 	
-	def spatial_ctf(self,pos_labels:dict ='all',cnds:dict=None, 
+	def generate_ctf_report(self,ctf:dict,ctf_param,freqs:Union[str, dict],
+						 info:mne.Info,
+						 report_name: str):
+		
+		report_name = self.folder_tracker(['ctf', 'report'],
+										f'{report_name}.h5')
+		
+		report = mne.Report(title='Single subject ctf overview')
+
+		for cnd in ctf.keys():
+			if cnd == 'info':
+				continue
+
+			section = "Condition: " + cnd	
+			#TODO: add section after update mne (so that cnd info is displayed)
+			# get ctf slope
+			output = [f'{d}_slopes' for d in ['raw','T','E'] 
+			 						if f'{d}_slopes' in ctf_param[cnd].keys()]
+
+			if len(freqs) == 1:
+				fig, ax = plt.subplots()
+				plot_ctf_timecourse(ctf_param,cnds = [cnd],
+											colors=['black']
+											,timecourse = '1d',
+											output=output,stats=False)
+				report.add_figure(fig,
+							title = f'CTF slope over time: {cnd}',
+							caption = f'CTF slope for {cnd} condition')
+				plt.close()
+			else:
+				for out in output:
+					fig, ax = plt.subplots()
+					plot_ctf_timecourse(ctf_param,cnds = [cnd],
+											colors=['black']
+											,timecourse = '2d_tfr',
+											output=out,stats=False)
+					report.add_figure(fig,
+						title = f'CTF slope over time: {cnd}, {out}',
+						caption = f'CTF slope for {cnd} condition')
+					plt.close()
+
+			# get ctf tuning functions
+			#TODO: add that multiple frequencies can be plotted in a list
+			for to in ['E','T','raw']:
+				if f'C2_{to}' in ctf[cnd].keys():
+					fig, ax = plt.subplots()
+					plot_ctf_timecourse(ctf,cnds = [cnd],
+										colors=['black'],timecourse = '2d_ctf',
+										output=f'C2_{to}',stats=False)
+					report.add_figure(fig,
+						title = f'Channel response {to}: {cnd}',
+						caption = f'CTF tuning function over time')
+					plt.close()
+			
+		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
+
+	def spatial_ctf(self,pos_labels:dict ='all',cnds:dict=None,
 					excl_factor:dict=None,window_oi:tuple=(None,None),
-					freqs:dict='main_param',
-					downsample:int = 1,GAT:bool=False, 
+					freqs:dict='main_param',GAT:bool=False, 
 					nr_perm:int= 0,collapse:bool=False,name:int='main'):
 		"""
 		calculate spatially based channel tuning functions across 
@@ -256,6 +321,13 @@ class CTF(BDM):
 											headers, excl_factor)
 
 		# set params
+		sfreq = epochs.info['sfreq']
+		downsample = int(sfreq // self.downsample)
+		actual_sfreq = sfreq / downsample
+		if abs(actual_sfreq - self.downsample) > 1:
+			print(f"Warning: Actual sampling frequency ({actual_sfreq}) "
+		 	"is not equal to desired downsample ({self.downsample}).")	
+
 		nr_itr = self.nr_iter * self.nr_folds
 		ctf_name = f'{self.sj}_{name}'
 		nr_perm += 1
@@ -282,8 +354,17 @@ class CTF(BDM):
 	
 		if type(cnds) == dict:
 			train_cnds, test_cnds = self.check_cnds_input(cnds)
+
 			if test_cnds is not None:
-				self.cross = True
+				# check for overlap between train and test conditions
+				overlap = set(train_cnds) & set(test_cnds)
+				if overlap:
+					print(f"Warning: Found overlapping conditions between "
+						  f"train and test: {overlap}. Training will be done "
+						  f"on a subset of the data to match trial counts.")
+					self.cross = 'cross_cv'
+				else:
+					self.cross = True
 				nr_itr = self.nr_iter
 		else:
 			train_cnds = ['all_data']
@@ -350,9 +431,15 @@ class CTF(BDM):
 						if self.cross:
 							test_idx = cnds == te_cnd
 							test_bins = np.unique(pos_bins[test_idx])
+							if self.cross == 'cross_cv':
+								trial_limit = max_tr
+							else:
+								trial_limit = None
 							(train_idx, 
-							test_idx) = self.train_test_cross(pos_bins, cnd_idx,
-															test_idx, self.nr_iter)
+							test_idx) = self.train_test_cross(pos_bins, 
+										  					cnd_idx,test_idx, 
+															self.nr_iter,
+															trial_limit)
 						else:
 							(train_idx, 
 							test_idx) = self.train_test_split(pos_bins,
@@ -432,26 +519,51 @@ class CTF(BDM):
 		times_oi = epochs.times[tois][::downsample]
 		if self.slide_wind > 0:
 			times_oi = times_oi[:-self.slide_wind]
-		if self.ctf_param:
-			print('get ctf tuning params')
-			ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
-					  							data_type, GAT,
-												avg_ch=self.avg_ch,
-												test_bins=test_bins)
-			
-			ctf_param.update({'info':{'times':times_oi}})
+		
+		print('get ctf tuning params')
+		ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
+											data_type, GAT,
+											avg_ch=self.avg_ch,
+											test_bins=test_bins)
+		
+		ctf_param.update({'info':{'times':times_oi,
+							'freqs':freqs,}})
 
+		if self.ctf_param:
 			with open(self.folder_tracker(['ctf',self.to_decode], 
 					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
 				print('saving ctf params')
 				pickle.dump(ctf_param, handle)
 
-		ctf.update({'info':{'times':times_oi}})
+		# save ctf data
+		print('saving ctf data')
+		ctfs = {}
+		for cnd in ctf.keys():
+			ctfs[cnd] = {}
+			for key in ['C2_E','C2_T','C2_raw']:
+				if key in ctf[cnd].keys():
+					# extract non-permuted data
+					data = ctf[cnd][key][0]
+
+					if self.avg_ch:
+						# average across channels
+						data = data.mean(axis = -2)
+
+					ctfs[cnd][key] = data	
+
+		ctfs.update({'info':{'times':times_oi, 'freqs':freqs}})
+
+		# generate report
+		if self.report:
+			self.generate_ctf_report(ctfs,ctf_param,freqs,info = epochs.info,
+									report_name = ctf_name)
+
 		with open(self.folder_tracker(['ctf',self.to_decode], 
 				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
 			print('saving ctfs')
-			pickle.dump(ctf, handle)
+			pickle.dump(ctfs, handle)
 
+		# TODO: add saving of weights and permutations and add to report
 		with open(self.folder_tracker(['ctf',self.to_decode], 
 				fname = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
 			pickle.dump(info, handle)
@@ -872,8 +984,9 @@ class CTF(BDM):
 		return C2_E, W_E, C2_T, W_T
 
 	def train_test_cross(self, pos_bins: np.array,train_idx:np.array,
-						test_idx:np.array,
-						nr_iter:int)->Tuple[np.array, np.array]:
+						test_idx:np.array,nr_iter:int,
+						trial_limit:Union[int, None] = None
+						)->Tuple[np.array, np.array]:
 		"""
 		selects trial indices for the train and the test set
 
@@ -899,6 +1012,10 @@ class CTF(BDM):
 		train_idx = np.arange(pos_bins.size)[train_idx]
 		bins,  counts = np.unique(train_bins, return_counts=True)
 		min_obs = min(counts)
+        # Apply trial limit if specified (for overlapping train/test conditions)
+		if trial_limit is not None:
+			min_obs = min(min_obs, trial_limit)
+
 		train_idx = [np.random.choice(train_idx[train_bins==b],min_obs,False) 
 															for b in bins]
 		
@@ -917,28 +1034,45 @@ class CTF(BDM):
 		
 		train_idx = np.stack(split_arrays)
 
-		# select test data (ensure that number of bins is balanced)
+		# now create test set per iteration
 		test_bins = pos_bins[test_idx]
 		idx = np.arange(pos_bins.size)[test_idx]
-		bins,  counts = np.unique(test_bins, return_counts=True)
-		min_obs = min(counts)
-		idx = [np.random.choice(idx[test_bins==b],min_obs,False) 
-															for b in bins]
-		# add new axis so that trial indexing does not crash
-		if bins.size == np.unique(train_bins).size:											
-			test_idx = np.stack(idx)[None,:,None,:]
-		else:
-			test_idx = np.zeros((np.unique(train_bins).size, min_obs),
-								dtype = int)
-			bin_cnt = 0
-			for bin in np.unique(train_bins):
-				if bin in bins:
-					test_idx[int(bin)] = idx[bin_cnt]
-					bin_cnt += 1
-			test_idx = test_idx[None,:,None,:]
+		test_idx = []
+		for itr in range(nr_iter):
+			if trial_limit is not None:
+				# get selected train indices and remove from test set
+				used_train_indices = train_idx[itr].flatten()
+				available_idx = np.setdiff1d(idx, used_train_indices)
+				available_test_bins = pos_bins[available_idx]
+			else:
+				available_idx = idx
+				available_test_bins = test_bins
 
-		#TODO: check whether test data needs to be split up in iterations
-		test_idx = np.tile(test_idx, (nr_iter, 1, 1, 1))
+			bins,  counts = np.unique(available_test_bins, return_counts=True)
+			min_obs_test = min(counts)
+
+			# handle case where test bins do not match all train bins
+			train_bins_unique = np.unique(train_bins)
+			if bins.size == train_bins_unique.size:
+				# all bins present - simple case
+				selected_test_idx = [np.random.choice(
+								available_idx[available_test_bins==b], 
+                                min_obs_test, False) for b in bins]
+				selected_test_idx = np.array(selected_test_idx)
+			else:
+				# some bins missing - need to pad with zeros
+				selected_test_idx = np.zeros((train_bins_unique.size, 
+								               min_obs_test), dtype=int)
+				bin_cnt = 0
+				for bin_idx, bin_val in enumerate(train_bins_unique):
+					if bin_val in bins:
+						mask = available_test_bins == bin_val
+						selected_test_idx[bin_idx] = np.random.choice(
+							available_idx[mask], min_obs_test, False)
+						bin_cnt += 1
+	
+			test_idx.append(np.array(selected_test_idx)[:, None, :])
+		test_idx = np.stack(test_idx)
 
 		return train_idx, test_idx	
 
@@ -1408,7 +1542,7 @@ class CTF(BDM):
 				if avg_ch:
 					# check whether ctfs contains unfitted bins
 					if test_bins.size < self.nr_bins:
-						signal_ctfs = signal_ctfs[:,:,test_bins]
+						signal_ctfs = signal_ctfs[:,:,test_bins.astype(int)]
 					signal_ctfs = signal_ctfs.mean(axis = -2)
 					params = self.extract_ctf_params(signal_ctfs, params,
 					 								signal, p)

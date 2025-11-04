@@ -190,16 +190,24 @@ class TFR(FolderStructure):
 			
 		current_hash = self._get_wavelet_params_hash()
 		
-		if (self.wavelets is None or self.frex is None or 
-			self._wavelet_params_hash != current_hash):
-			
-			s_freq = self.epochs.info['sfreq']
-			nr_time = self.epochs.times.size
-			self.wavelets, self.frex = self.create_morlet(
-				self.min_freq, self.max_freq, self.num_frex, 
-				self.cycle_range, self.freq_scaling, 
-				nr_time, s_freq, self.normalize_wavelets)
-			self._wavelet_params_hash = current_hash
+		if self.method == 'wavelet':
+			if (self.wavelets is None or self.frex is None or 
+				self._wavelet_params_hash != current_hash):
+				
+				s_freq = self.epochs.info['sfreq']
+				nr_time = self.epochs.times.size
+				self.wavelets, self.frex = self.create_morlet(
+					self.min_freq, self.max_freq, self.num_frex, 
+					self.cycle_range, self.freq_scaling, 
+					nr_time, s_freq, self.normalize_wavelets)
+				self._wavelet_params_hash = current_hash
+		elif self.method == 'hilbert':
+			if (self.freq_bands is None or self.frex is None or 
+				self._wavelet_params_hash != current_hash):
+
+				self.freq_bands = self.create_freq_bands()
+				self.frex = [(low + high)/2 for low, high in self.freq_bands]
+				self._wavelet_params_hash = current_hash
 
 	def select_tfr_data(
 		self, 
@@ -493,8 +501,87 @@ class TFR(FolderStructure):
 							
 		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
 
-	def compute_tfrs(self, epochs: mne.Epochs, output:str = 'power'):
+	def compute_tfrs(
+		self, 
+		epochs: mne.Epochs, 
+		output: str = 'power',
+		for_decoding: bool = False,
+		cnd_idx: Optional[list] = None
+	) -> np.ndarray:
 		
+		"""
+		Compute time-frequency representations with optional baseline correction 
+		and induced power calculation.
+
+		This function performs time-frequency decomposition on EEG epochs with 
+		support for different power types (total, evoked, induced) and applies 
+		appropriate baseline correction depending on the intended use case.
+		For decoding analyses, it uses percent change from baseline (or raw power 
+		if no baseline), while for visualization/statistics it uses decibel 
+		conversion with log baseline correction.
+
+		Args:
+			epochs (mne.Epochs): Preprocessed EEG data segmented into epochs.
+				The data is used for time-frequency decomposition.
+			output (str, optional): Type of output to compute. Supported values:
+				- 'power': Compute instantaneous power (magnitude squared)
+				- 'phase': Compute instantaneous phase (cosine of phase angle)
+				Defaults to 'power'.
+			for_decoding (bool, optional): Whether the output will be used for 
+				classification/decoding analysis. When True, applies percent 
+				change baseline correction (or raw power if no baseline) which 
+				preserves linear relationships needed for most classifiers. 
+				When False, applies log-based decibel conversion for 
+				visualization/statistics. Defaults to False.
+			cnd_idx (Optional[list], optional): List of trial indices for each 
+				condition when computing induced power (self.power='induced'). 
+				Each element should be an array of trial indices belonging to 
+				the same condition. Required when self.power='induced' to enable 
+				condition-specific evoked response subtraction. Defaults to None.
+
+		Returns:
+			np.ndarray: Time-frequency representation with shape 
+				(nr_frequencies, nr_epochs, nr_channels, nr_time) for epoched 
+				data or (nr_frequencies, nr_channels, nr_time) for averaged 
+				data. The exact shape depends on the input epochs and whether 
+				baseline correction was applied.
+
+		Notes:
+			- Power types (controlled by self.power):
+				* 'total': Standard power computation without evoked subtraction
+				* 'induced': Subtracts condition-specific evoked response from 
+				  each trial before TFR computation (requires cnd_idx parameter)
+				* 'evoked': Computes power of the averaged evoked response
+			- For decoding (for_decoding=True): Uses percent change from baseline 
+			when self.baseline is specified, or raw power when no baseline.
+			This preserves the linear feature space needed for classification.
+			- For statistics/visualization (for_decoding=False): Uses decibel 
+			conversion (10*log10(power/baseline)) when baseline is specified.
+			- The baseline period is defined by self.baseline tuple (start, end) 
+			in seconds.
+			- Power computation: real²+ imag² of the complex analytic signal.
+			- Phase computation: cosine of the phase angle of the analytic signal.
+
+		Raises:
+			ValueError: If self.power='induced' but cnd_idx is not provided, or 
+				if an unsupported output type is specified.	
+		"""
+
+		if self.power == 'induced':
+			if cnd_idx is None:
+				raise ValueError("cnd_idx must be provided when "
+					 "power is 'induced'")
+
+		if self.power == 'induced':
+			# subtract condition specific evoked from each trial
+			print('Calculating induced power: subtracting condition specific ' \
+			'evoked from each trial')
+			for idx in cnd_idx:
+				evoked = epochs[idx].average()
+				epochs[idx]._data = epochs[idx].subtract_evoked(evoked)._data
+
+		# Ensure wavelets are generated TFR decomposition
+		self._ensure_wavelets()
 		# get data
 		raw_conv = self.tfr_loop(epochs)
 		raw_conv = raw_conv.astype(np.complex64, copy=False)
@@ -507,12 +594,19 @@ class TFR(FolderStructure):
 
 		# apply baseline (trial specific)
 		if output == 'power' and self.baseline is not None:
-			print('Applying TFR baseline correction')
 			s,e = self.baseline
 			base_idx = get_time_slice(epochs.times,s,e)
 			base = X[..., base_idx].mean(axis=-1, keepdims=True)
-			X = 10*(np.log10(X+1e-12)-np.log(base+1e-12))
 
+			if for_decoding:
+				print('Applying percent change baseline for decoding')
+				X = (X - base) / base
+			else:
+				print('Applying TFR baseline correction')
+				X = 10*(np.log10(X+1e-12)-np.log10(base+1e-12))
+		elif output == 'power' and for_decoding:
+			print('Using raw power for decoding (no baseline)')	
+		
 		# make sure freqs are the first dim
 		X = np.swapaxes(X, 0, 1)
 
