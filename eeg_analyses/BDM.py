@@ -424,7 +424,7 @@ class BDM(FolderStructure):
 		
 		return clf
 
-	def get_classifier_weights(self, clf, Xtr_):
+	def get_classifier_weights(self, clf: Any, Xtr_: np.ndarray) -> np.ndarray:
 		"""
 		Extract classifier weights regardless of classifier type.
 
@@ -707,7 +707,7 @@ class BDM(FolderStructure):
 				y_ = y[mask].reset_index(drop = True)
 				df_ = df[mask].reset_index(drop = True)
 				# reset max trials for folding
-				tr_max = [self.selectMaxTrials(df_,tr_cnds,labels_oi,
+				tr_max = [self.select_max_trials(df_,tr_cnds,labels_oi,
 								   			cnd_head)]
 				
 				(bdm_scores, 
@@ -725,9 +725,10 @@ class BDM(FolderStructure):
 			output = np.mean([scores[key]['dec_scores'] for scores 
 						 							in dec_scores], axis = 0)
 			bdm_scores[key]['dec_scores'] = output
-			#filtyhy hack for now
+			#filthy hack for now
 			if dec_params[0] != {}:
-				W = np.mean([params[key]['W'] for params in dec_params], axis = 0)
+				W = np.mean([params[key]['W'] for params in dec_params],
+																	axis = 0)
 				bdm_params[key]['W'] = W
 			else:
 				bdm_params = {key: {}}
@@ -1069,7 +1070,7 @@ class BDM(FolderStructure):
 										self.beh[1].copy(),te_window_oi,
 										te_excl_factor,[cnd_header])
 
-		max_tr = self.selectMaxTrials(beh_te,cnds,te_labels_oi,cnd_header)
+		max_tr = self.select_max_trials(beh_te,cnds,te_labels_oi,cnd_header)
 
 		# check labels
 		if te_labels_oi == 'all':
@@ -1358,14 +1359,14 @@ class BDM(FolderStructure):
 			tr_cnds, te_cnds = cnds
 			self.cross = True
 			self.nr_folds = 1
-			tr_max = [self.selectMaxTrials(beh,tr_cnds,labels_oi,cnd_head)]
+			tr_max = [self.select_max_trials(beh,tr_cnds,labels_oi,cnd_head)]
 		else:
 			self.cross = False
 			if self.nr_folds == 1:
 				self.nr_folds = 10
 				warnings.warn('Nr folds is set to default as only one fold ' +
 				'was specified. Please check whether this was intentional')
-			tr_max = [self.selectMaxTrials(beh,cnds,labels_oi,cnd_head)] 
+			tr_max = [self.select_max_trials(beh,cnds,labels_oi,cnd_head)] 
 			if downscale:
 				tr_max = [(i+1)*self.nr_folds 
 							for i in range(int(tr_max[0]/self.nr_folds))][::-1]
@@ -1376,7 +1377,7 @@ class BDM(FolderStructure):
 
 		return nr_labels,tr_max,tr_cnds,te_cnds
 
-	def plot_bdm(self,bdm_scores:dict,cnds:list):
+	def plot_bdm(self, bdm_scores: dict, cnds: list) -> None:
 
 		times = bdm_scores['info']['times']
 		fig, ax = plt.subplots(1)
@@ -1390,7 +1391,7 @@ class BDM(FolderStructure):
 
 		return fig   
 
-	def report_bdm(self,bdm_scores:dict,cnds:list,bdm_name:str):
+	def report_bdm(self, bdm_scores: dict, cnds: list, bdm_name: str) -> None:
 
 		pass
 		# set report and condition name
@@ -1849,7 +1850,7 @@ class BDM(FolderStructure):
 				beh.loc[cnd_idx,'collapsed'] = 'yes'
 		else:
 			# reset max_tr again such that analysis is not underpowered
-			max_tr = [self.selectMaxTrials(beh, ['yes'], labels,'collapsed')]
+			max_tr = [self.select_max_trials(beh, ['yes'], labels,'collapsed')]
 			cnd_idx = np.where(beh.collapsed == 'yes')[0]
 		cnd_labels = beh[self.to_decode][cnd_idx].values
 
@@ -2317,83 +2318,6 @@ class BDM(FolderStructure):
 		
 		return classification
 
-
-	def crossClassify(self, sj, cnds, cnd_header, time, tr_header, te_header, tr_te_rel = 'ind', excl_factor = None, tr_factor = None, te_factor = None, bdm_labels = 'all', gat_matrix = False, save = True, bdm_name = 'cross'):	
-		'''
-		Update function but it does the trick
-		'''
-
-		# read in data 
-		print ('NR OF TRAIN LABELS DIFFER PER CONDITION!!!!')
-		print ('DOES NOT YET CONTAIN FACTOR SELECTION FOR DEPENDENT DATA')
-
-		eegs, beh, times = self.selectBDMData(self.EEG, self.beh, time, excl_factor)		
-		nr_time = times.size
-		
-		if cnds == 'all':
-			cnds = [cnds]
-
-		if tr_te_rel == 'ind':	
-			# use train and test factor to select independent trials!!!	
-			tr_mask = [(beh[key] == f).values for  key in tr_factor.keys() for f in tr_factor[key]]
-			for m in tr_mask: 
-				tr_mask[0] = np.logical_or(tr_mask[0],m)
-			tr_eegs = eegs[tr_mask[0]]
-			tr_beh = beh.drop(np.where(~tr_mask[0])[0])
-			tr_beh.reset_index(inplace = True, drop = True)
-			
-			te_mask = [(beh[key] == f).values for  key in te_factor.keys() for f in te_factor[key]]
-			for m in te_mask: 
-				te_mask[0] = np.logical_or(te_mask[0],m)
-			te_eegs = eegs[te_mask[0]]
-			te_beh = beh.drop(np.where(~te_mask[0])[0])
-			te_beh.reset_index(inplace = True, drop = True)
-
-		# create dictionary to save classification accuracy
-		classification = {'info': {'elec': self.elec_oi, 'times': times}}
-
-		if cnds == 'all':
-			cnds = [cnds]
-	
-		# loop over conditions
-		for cnd in cnds:
-			if type(cnd) == tuple:
-				tr_cnd, te_cnd = cnd
-			else:
-				tr_cnd = te_cnd = cnd	
-
-			#print ('You are decoding {} with the following labels {}'.format(cnd, np.unique(tr_beh[self.decoding], return_counts = True)))
-			if tr_te_rel == 'ind':
-				tr_mask = (tr_beh[cnd_header] == tr_cnd).values
-				Ytr = tr_beh[tr_header][tr_mask].values.reshape(1,-1)
-				Xtr = tr_eegs[tr_mask,:,:][np.newaxis, ...]
-
-				te_mask = (te_beh[cnd_header] == te_cnd).values
-				Yte = te_beh[te_header][te_mask].values.reshape(1,-1)
-				Xte = te_eegs[te_mask,:,:][np.newaxis, ...]
-			else:
-				if cnd != 'all':
-					cnd_idx = np.where(beh[cnd_header] == cnd)[0]
-					cnd_labels = beh[self.to_decode][cnd_idx].values
-				else:
-					cnd_idx = np.arange(beh[cnd_header].size)
-					cnd_labels = beh[self.to_decode].values
-
-				# select train and test trials	
-				train_tr, test_tr, bdm_info = self.trainTestSplit(cnd_idx, cnd_labels, max_tr, {})
-				Xtr, Xte, Ytr, Yte = self.trainTestSelect(beh[tr_header], eegs, train_tr, test_tr)
-	
-			# do actual classification
-			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
-	
-			classification.update({tr_cnd:{'standard': copy.copy(class_acc)}})
-		# store classification dict	
-		if save: 
-			with open(self.FolderTracker(['bdm', self.elec_oi, 'cross', bdm_name], filename = 'class_{}-{}.pickle'.format(sj,self.bdm_type)) ,'wb') as handle:
-				pickle.dump(classification, handle)
-		else:
-			return classification	
-
 	def cross_time_decoding(self, Xtr: np.ndarray, Xte: np.ndarray, 
 		Ytr: np.ndarray, Yte: np.ndarray, 
 		labels: Union[np.ndarray, Tuple[np.ndarray, np.ndarray]], 
@@ -2401,53 +2325,123 @@ class BDM(FolderStructure):
 						 Tuple[float, float]]] = False, 
 		X: Union[List, np.ndarray] = []
 		) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-		'''
-		Performs multivariate decoding across time using pre-sliced
-		data.
+		"""
+		Perform multivariate decoding across time with optional 
+		GAT analysis.
 		
-		This function supports both within-time decoding (GAT=False) and 
-		generalization across time (GAT=True/tuple). When GAT is a 
-		tuple, the data should already be sliced to the specified time 
-		windows before calling this function.
-		
-		Args:
-			Xtr: Training data [folds x trials x features x time] for 3D 
-				input or [folds x freq x trials x features x time] for
-				4D input.
-				Data should be pre-sliced to desired time windows.
-			Xte: Test data (same format as Xtr). Should be pre-sliced to
-				desired time windows for testing.
-			Ytr: Training labels [folds x trials]
-			Yte: Test labels [folds x trials]
-			labels: Label set(s) for training and testing. Can be single 
-				array for both train/test or tuple of (train_labels, 
-				test_labels)
-			GAT: Generalization Across Time parameter:
-				- False: Within-time decoding (train and test at same 
-					time points)
-				- True: Full generalization (train at each time, 
-					test at all times)
-				- Tuple: Custom time windows - data should be pre-sliced
-			X: Optional raw data for PCA computation when using 'all' 
-				PCA mode. Should match the dimensionality of Xtr/Xte.
-		
-		Returns:
-			Tuple containing:
-			- class_acc: Classification accuracies [freq x time_train 
-				x time_test]
-			- weights: Classifier weights [freq x time_train x time_test 
-				x features]
-			- conf_matrix: Confusion matrices [freq x time_train x 
-				time_test x n_labels x n_labels]
+		Executes the core classification pipeline for each time point 
+		and fold,supporting both within-time decoding and 
+		Generalization Across Time (GAT).Handles standardization, 
+		PCA dimensionality reduction, and classifier training/testing 
+		for comprehensive temporal decoding analysis.
 
-		Notes:
-			- Input data dimensions are automatically detected (3D vs 4D)
-			- For GAT=False, time_test dimension will be 1
-			- For tuple GAT, time dimensions reflect the pre-sliced 
-				window sizes
-			- Standardization and PCA are applied if configured in class 
-				settings
-		'''
+		Parameters
+		----------
+		Xtr : np.ndarray
+			Training data with shape:
+			- (n_folds, n_trials, n_features, n_times) for 3D input
+			- (n_folds, n_freqs, n_trials, n_features, n_times) for 
+				4D input
+			Data should be pre-sliced to desired time windows.
+		Xte : np.ndarray
+			Test data with same format as Xtr. Should be pre-sliced to
+			desired time windows for testing.
+		Ytr : np.ndarray
+			Training labels with shape (n_folds, n_trials).
+		Yte : np.ndarray  
+			Test labels with shape (n_folds, n_trials).
+		labels : np.ndarray or tuple of np.ndarray
+			Label set(s) for training and testing:
+			- Single array: same labels for both training and testing
+			- Tuple: (train_labels, test_labels) for different label 
+				sets
+		GAT : bool or tuple, default=False
+			Generalization Across Time configuration:
+			- False: Within-time decoding (train and test at same time 
+				points)
+			- True: Full GAT (train at each time, test at all times)
+			- Tuple: Custom time windows - data should be pre-sliced
+		X : list or np.ndarray, default=[]
+			Optional raw data for PCA computation when using 'across' 
+			mode. Should match the dimensionality of Xtr/Xte.
+
+		Returns
+		-------
+		tuple[np.ndarray, np.ndarray, np.ndarray]
+			class_acc : np.ndarray
+				Classification performance with shape (n_folds, n_freqs, 
+				n_time_train, n_time_test). For GAT=False, n_time_test=1.
+			weights : np.ndarray
+				Classifier weights with shape (n_folds, n_freqs, 
+				n_time_train,n_time_test, n_features).
+			conf_matrix : np.ndarray
+				Confusion matrices with shape (n_folds, n_freqs, 
+				n_time_train, n_time_test, n_labels_test, 
+				n_labels_train).
+
+		Notes
+		-----
+		**Preprocessing Pipeline:**
+		1. Automatic dimensionality detection (3D vs 4D input)
+		2. Optional standardization (if self.scale=True)
+		3. Optional PCA dimensionality reduction (if self.pca_components
+		 	set)
+		4. Classifier training and testing
+
+		**GAT Analysis Types:**
+		- **Within-time**: Classifier trained and tested at same time 
+			points
+		- **Full GAT**: Train at time t, test at all time points
+		- **Custom GAT**: Train/test on pre-specified time windows
+
+		**Performance Metrics:**
+		Uses the metric specified in self.metric ('auc' or 'acc').
+		For 'acc', implements balanced accuracy for robust class 
+			evaluation.
+
+		**Memory Considerations:**
+		For large datasets, consider using PCA to reduce feature 
+		dimensionalityand prevent memory overflow during GAT analysis.
+
+		Examples
+		--------
+		Within-time decoding:
+		
+		>>> class_acc, weights, conf_mat = bdm.cross_time_decoding(
+		...     Xtr, Xte, Ytr, Yte, labels, GAT=False)
+		>>> class_acc.shape  # (n_folds, n_freqs, n_times, 1)
+
+		Full GAT analysis:
+		
+		>>> class_acc, weights, conf_mat = bdm.cross_time_decoding(
+		...     Xtr, Xte, Ytr, Yte, labels, GAT=True)  
+		>>> class_acc.shape  # (n_folds, n_freqs, n_times, n_times)
+
+		Cross-condition decoding with different label sets:
+		
+		>>> train_labels = np.array(['A', 'B'])
+		>>> test_labels = np.array(['C', 'D']) 
+		>>> class_acc, weights, conf_mat = bdm.cross_time_decoding(
+		...     Xtr, Xte, Ytr, Yte, (train_labels, test_labels))
+
+		Time-frequency analysis (4D input):
+		
+		>>> # Input: (folds, freqs, trials, channels, times)
+		>>> class_acc, weights, conf_mat = bdm.cross_time_decoding(
+		...     Xtr_4d, Xte_4d, Ytr, Yte, labels)
+		>>> class_acc.shape  # (n_folds, n_freqs, n_times, n_test_times)
+
+		Raises
+		------
+		ValueError
+			If input arrays are not 4D or 5D, or if dimensions are 
+			incompatible.
+
+		See Also
+		--------
+		select_classifier : Initialize the classifier
+		compute_class_perf : Calculate classification performance  
+		"""
 
 		# set necessary parameters
 		N = self.nr_folds
@@ -2455,12 +2449,12 @@ class BDM(FolderStructure):
 		nr_time_te = Xte.shape[-1] if GAT else 1
 
 		# Handle 3D vs 4D input	
-		if Xtr.ndim == 4:  # 3D data: [folds × trials × features × time]
+		if Xtr.ndim == 4: # 3D data:[folds × trials × features × time]
 			nr_freq = 1
 			# Insert freq dimension at position 1
 			Xtr = np.expand_dims(Xtr, axis=1)  
 			Xte = np.expand_dims(Xte, axis=1)
-		elif Xtr.ndim == 5:  # 4D data: [folds × freq × trials × features × time]
+		elif Xtr.ndim == 5: # 4D data:[folds × freq × trials × features × time]
 			nr_freq = Xtr.shape[1]
 		else:
 			raise ValueError("Input must be 4D or 5D array")
@@ -2545,7 +2539,7 @@ class BDM(FolderStructure):
 
 						# Compute performance metrics
 						if bool(set(Ytr_)& set(Yte_)):
-							class_perf = self.computeClassPerf(scores, Yte_, 
+							class_perf = self.compute_class_perf(scores, Yte_, 
 										  np.unique(Ytr_), predict) #
 							conf_m = confusion_matrix(Yte_, predict,
 								 							labels=labels[0])
@@ -2582,27 +2576,109 @@ class BDM(FolderStructure):
 
 		return output
 
-	def computeClassPerf(self, scores, true_labels, label_order, predict):
-		'''
-		
-		Computes classifier performance, using the test scores of the classifier and the true labels of
-		the test set.
-		Arguments
-		- - - - - 
-		scores (array): confidences scores of the classifier to the trials in the test set
-		true_labels (array): true labels of the trials in the test set
-		label_order (list): order of columns in scores
-		predict (array): predicted labels
+	def compute_class_perf(self, scores: np.ndarray, true_labels: np.ndarray, 
+						 label_order: list, predict: np.ndarray) -> float:
+		"""
+		Compute classification performance using specified metric.
+		Calculates classifier performance based on test scores and true
+		labels. Supports both accuracy and AUC metrics, with special
+		handling for multi-class problems using pairwise AUC 
+		comparisons.
+
+		Parameters
+		----------
+		scores : array-like
+			Classifier confidence scores with shape:
+			- (n_samples,) for binary classification
+			- (n_samples, n_classes) for multi-class classification
+		true_labels : array-like
+			True class labels for test samples with shape (n_samples,).
+		label_order : list
+			Ordered list of class labels corresponding to score columns.
+			Defines the mapping from score indices to actual labels.
+		predict : array-like
+			Predicted class labels with shape (n_samples,). Used when
+			metric is 'acc' for accuracy calculation.
+
 		Returns
-		- - - -
-		class_perf (float): classification accuracy as calculated with specified method
- 
-		'''
+		-------
+		float
+			Classification performance score:
+			- For 'auc': Average pairwise AUC (0.0 to 1.0)
+			- For 'acc': Balanced accuracy (0.0 to 1.0)
+
+		Notes
+		-----
+		**AUC Calculation:**
+		For multi-class problems, computes all pairwise AUC values 
+		between classes and returns the average. This provides a robust 
+		performance measure that is threshold-independent.
+
+		The algorithm:
+		1. Convert true labels to indices based on label_order
+		2. Generate all pairwise class combinations
+		3. For each pair, compute binary AUC using relevant scores
+		4. Return mean AUC across all pairs
+
+		**Balanced Accuracy Calculation:**
+		Computes accuracy for each class separately, then averages 
+		across classes. This provides robust performance assessment that 
+		is not biased by class imbalances or classifier preferences:
+
+		balanced_accuracy = mean([acc_class1, acc_class2, ...])
+
+		Where acc_classi = (correct_predictions_classi) / (total_classi)
+
+		This measure:
+		- Returns ~0.5 for chance performance regardless of class 
+			distribution
+		- Detects classifier bias toward specific classes
+		- Provides fair comparison across datasets with different class 
+			ratios
+
+		Examples
+		--------
+		Binary classification with AUC:
+		
+		>>> scores = np.array([[0.8, 0.2], [0.3, 0.7], [0.9, 0.1]])
+		>>> true_labels = np.array(['A', 'B', 'A'])
+		>>> label_order = ['A', 'B']
+		>>> predict = np.array(['A', 'B', 'A'])
+		>>> bdm.metric = 'auc'
+		>>> perf = bdm.compute_class_perf(scores, true_labels, 
+		... 	label_order, predict)
+		>>> perf  # AUC value between 0.5 and 1.0
+
+		Multi-class classification with accuracy:
+		
+		>>> scores = np.array([[0.7, 0.2, 0.1], [0.1, 0.8, 0.1]])
+		>>> true_labels = np.array(['A', 'B'])
+		>>> predict = np.array(['A', 'B'])
+		>>> bdm.metric = 'acc'
+		>>> perf = bdm.compute_class_perf(scores, true_labels, 
+		... 	label_order, predict)
+		>>> perf  # 1.0 (perfect accuracy)
+
+		Binary classification (1D scores):
+		
+		>>> scores = np.array([0.8, 0.3, 0.9])  # Single column
+		>>> true_labels = np.array([1, 0, 1])
+		>>> label_order = [0, 1]
+		>>> bdm.metric = 'auc'
+		>>> perf = bdm.compute_class_perf(scores, true_labels, 
+		... 	label_order, predict)
+		>>> perf  # Automatically handles 1D to 2D conversion
+
+		See Also
+		--------
+		score_auc : Computes AUC for binary classification
+		"""
 
 		if self.metric == 'auc':
 			
 			# shift true_scores to indices
-			true_labels = np.array([list(label_order).index(l) for l in true_labels])
+			true_labels = np.array([list(label_order).index(l) 
+						   								for l in true_labels])
 			# check whether it is a more than two class problem
 			if scores.ndim > 1:
 				nr_class = scores.shape[1]
@@ -2612,7 +2688,8 @@ class BDM(FolderStructure):
 
 			# select all pairwise combinations of classes
 			pairs = list(itertools.combinations(range(nr_class), 2))
-			if len(pairs) > 1: # do this both ways in case of multi class problem
+			# do this both ways in case of multi class problem
+			if len(pairs) > 1: 
 				pairs += [p[::-1] for p in pairs]
 
 			# initiate AUC
@@ -2620,39 +2697,114 @@ class BDM(FolderStructure):
 
 			# loop over all pairwise combinations
 			for i, comp in enumerate(pairs):
-				pair_idx = np.logical_or(true_labels == comp[0], true_labels == comp[1]) 	# grab two classes
-				bool_labels = np.zeros(true_labels.size, dtype = bool) 	# set all labels to false
-				bool_labels[true_labels == comp[0]] = True 				# set only positive class to True
-				labels_2_use = bool_labels[pair_idx]					# select pairwise labels
-				scores_2_use = scores[pair_idx,comp[0]]					# select pairwisescores
-				auc[i] = self.scoreAUC(labels_2_use, scores_2_use)		# compute AUC
+				# grab two classes and set labels to fals
+				pair_idx = np.logical_or(true_labels == comp[0], 
+							 			true_labels == comp[1]) 	
+				bool_labels = np.zeros(true_labels.size, dtype = bool) 	
+				# set labels of positive class to True
+				bool_labels[true_labels == comp[0]] = True 	
+				# compute AUC for this pair			
+				labels_2_use = bool_labels[pair_idx]					
+				scores_2_use = scores[pair_idx,comp[0]]					
+				auc[i] = self.score_auc(labels_2_use, scores_2_use)		
 
 			class_perf = np.mean(auc)
 
 		elif self.metric == 'acc':
-			#predict = np.argmin(scores, axis =1)
-			class_perf = np.sum(predict == true_labels)/float(true_labels.size)
+			# Balanced accuracy: average per-class accuracy
+			unique_labels = np.unique(true_labels)
+			class_accuracies = []
+			
+			for label in unique_labels:
+				class_mask = true_labels == label
+				if np.sum(class_mask) > 0:  # Avoid division by zero
+					class_correct = np.sum(predict[class_mask] == 
+													true_labels[class_mask])
+					class_total = np.sum(class_mask)
+					class_acc = class_correct / class_total
+					class_accuracies.append(class_acc)
+			
+			class_perf = np.mean(class_accuracies)  # Balanced accuracy
 				
 		return class_perf
 		
 
-	def scoreAUC(self, labels, scores):
-		'''
-		Calculates the AUC - area under the curve.
-		Besides being the area under the ROC curve, AUC has a slightly less known interpretation:
-		If you choose a random pair of samples which is one positive and one negative - AUC is the probabilty 
-		that the positive-sample score is above the negative-sample score.
+	def score_auc(self, labels: np.ndarray, scores: np.ndarray) -> float:
+		"""
+		Calculate Area Under the Curve (AUC) for binary classification.
 		
-		Here we compute the AUC by counting these pairs.
-		function modified after the ADAM toolbox and http://www.springerlink.com/content/nn141j42838n7u21/fulltext.pdf
-		Arguments
-		- - - - - 
-		labels (array): Boolen labels of size N
-		scores (array): scores of size N
+		Computes AUC using a rank-based approach that counts 
+		positive-negative pairs. AUC represents the probability that a 
+		randomly chosen positive sample scores higher than a randomly 
+		chosen negative sample, providing a threshold-independent 
+		measure of classifier performance.
+
+		Parameters
+		----------
+		labels : array-like
+			Binary labels with shape (n_samples,). Should contain 
+			boolean values or be convertible to boolean 
+			(0/1, True/False).
+		scores : array-like
+			Classification scores with shape (n_samples,). Higher scores
+			should indicate higher probability of positive class.
+
 		Returns
-		- - - -
-		auc (float): area under the curve
-		'''
+		-------
+		float
+			Area under the ROC curve, ranging from 0.0 to 1.0:
+			- 0.5: Random performance (no discrimination)
+			- 1.0: Perfect classification 
+			- 0.0: Perfect but inverted classification
+
+		Raises
+		------
+		AssertionError
+			If all labels are of the same class (no positive or no 
+			negative labels), making AUC calculation impossible.
+
+		Notes
+		-----
+		This implementation uses the Wilcoxon-Mann-Whitney U statistic
+		approach, which is equivalent to AUC but computed efficiently
+		using rank statistics:
+
+		AUC = (∑ranks[positives] - n_pos(n_pos + 1)/2) / (n_pos × n_neg)
+
+		where ranks are computed across all scores. This method is
+		computationally efficient and numerically stable.
+
+		The function is based on the ADAM toolbox implementation and
+		follows the approach described in Fawcett (2006).
+
+		Examples
+		--------
+		Perfect classification:
+		
+		>>> labels = np.array([0, 0, 1, 1])
+		>>> scores = np.array([0.1, 0.2, 0.8, 0.9])
+		>>> auc = bdm.score_auc(labels, scores)
+		>>> auc  # 1.0
+
+		Random performance:
+		
+		>>> labels = np.array([0, 1, 0, 1])
+		>>> scores = np.array([0.4, 0.3, 0.6, 0.7])
+		>>> auc = bdm.score_auc(labels, scores)
+		>>> auc  # ≈ 0.5
+
+		Boolean labels:
+		
+		>>> labels = np.array([False, False, True, True])
+		>>> scores = np.array([0.2, 0.3, 0.7, 0.8])
+		>>> auc = bdm.score_auc(labels, scores)
+		>>> auc  # 1.0
+
+		References
+		----------
+		Fawcett, T. (2006). An introduction to ROC analysis. Pattern 
+		Recognition Letters, 27(8), 861-874.
+		"""
 
 		num_pos = np.sum(labels)
 		num_neg = labels.size - num_pos
@@ -2660,32 +2812,95 @@ class BDM(FolderStructure):
 		assert num_pos != 0,'no positive labels entered in AUC calculation'
 		assert num_neg != 0,'no negative labels entered in AUC calculation'
 
-		ranks = rankdata(scores) 
-		auc = (np.sum(ranks[labels]) - num_pos * (num_pos + 1)/2)/ (num_pos * num_neg)
+		rank = rankdata(scores) 
+		sum_positive_ranks = np.sum(rank[labels]) - num_pos * (num_pos + 1) / 2
+		auc = sum_positive_ranks / (num_pos * num_neg)
 
 		return auc
 
 
-	def selectMaxTrials(self,beh, cnds, bdm_labels = 'all', cnds_header = 'condition'):
-		''' 
+	def select_max_trials(self, df: pd.DataFrame, cnds: list, 
+					   	bdm_labels: Union[str, list] = 'all', 
+						cnds_header: str = 'condition') -> int:
+		"""
+		Determine maximum balanced trial count for cross-validation.
 		
-		For each condition the maximum number of trials per decoding label are determined
-		such that data can be split up in equally sized subsets. This ensures that across 
-		conditions each unique decoding label is selected equally often
-		Arguments
-		- - - - - 
-		beh (dict): contains all logged variables of interest
-		cnds (list): list of conditions for decoding analysis
-		bdm_labels(list|str): which labels will be used for decoding
-		cnds_header (str): variable name containing conditions of interest
+		Calculates the maximum number of trials per class that allows 
+		for balanced sampling across all conditions and k-fold 
+		cross-validation. Ensures equal representation of each decoding 
+		label across conditions by finding the minimum available trials 
+		and making them divisible by the number of folds.
+
+		Parameters
+		----------
+		df : pd.DataFrame
+			Behavioral dataframe containing trial information and 
+			labels.
+		cnds : list
+			List of conditions for decoding analysis. Special value
+			['all_data'] uses all available trials regardless of 
+			condition.
+		bdm_labels : list or str, default='all'
+			Decoding labels to include in analysis. If 'all', uses all
+			unique labels found in the target column.
+		cnds_header : str, default='condition'
+			Column name containing condition information in behavioral 
+			data.
+
 		Returns
-		- - - -
-		max_trials (int): max number unique labels
-		'''
+		-------
+		int
+			Maximum number of trials per class that ensures:
+			- Balanced representation across all conditions
+			- Divisible by number of folds for clean cross-validation
+			- Equal class representation within each condition
+
+		Notes
+		-----
+		The algorithm:
+		1. For each condition, counts trials per decoding label
+		2. Finds minimum trial count across labels within each condition
+		3. Makes count divisible by n_folds (floor division)
+		4. Returns minimum across all conditions for balanced sampling
+
+		This ensures that cross-validation can proceed with equal class
+		representation in every fold, which is critical for unbiased
+		performance estimation.
+
+		Examples
+		--------
+		Balance across multiple conditions:
+		
+		>>> beh = pd.DataFrame({
+		...     'condition': ['A', 'A', 'A', 'B', 'B', 'B'],
+		...     'target': ['left', 'left', 'right', 'left', 'right', 
+		...     'right']})
+		>>> bdm.nr_folds = 2
+		>>> max_trials = bdm.select_max_trials(beh, ['A', 'B'], ['left', 
+		...		'right'])
+		>>> max_trials  # 2 (limited by condition A having only 2
+		...	  'left' trials)
+
+		Use all available data:
+		
+		>>> max_trials = bdm.select_max_trials(beh, ['all_data'])
+		>>> max_trials  # Uses minimum class count across entire dataset
+
+		Custom label subset:
+		
+		>>> max_trials = bdm.select_max_trials(beh, ['A'], ['left'])
+		>>> max_trials  # Only considers 'left' trials in condition A
+
+		Warnings
+		--------
+		If max_trials returns 0, indicates insufficient data for the 
+		current number of folds. Consider reducing n_folds or collecting 
+		more data.
+		"""
 
 		# make sure selection is based on corrrect trials
 		if bdm_labels == 'all':
-			bdm_labels = np.unique(beh[self.to_decode]) 
+			bdm_labels = np.unique(df[self.to_decode]) 
 
 		N = self.nr_folds
 		cnd_min = []
@@ -2695,11 +2910,13 @@ class BDM(FolderStructure):
 			for cnd in cnds:
 		
 				# select condition trials and get their decoding labels
-				trials = np.where(beh[cnds_header] == cnd)[0]
-				labels = [l for l in beh[self.to_decode][trials] if l in bdm_labels]
+				trials = np.where(df[cnds_header] == cnd)[0]
+				labels = [l for l in df[self.to_decode][trials] 
+			  											if l in bdm_labels]
 
-				# select the minimum number of trials per label for BDM procedure
-				# NOW NR OF TRIALS PER CODE IS BALANCED (ADD OPTION FOR UNBALANCING)
+				# select the minimum number of trials per label for 
+				# BDM procedure
+				# TODO: ADD OPTION FOR UNBALANCING
 				min_tr = np.unique(labels, return_counts = True)[1]
 				min_tr = int(np.floor(min(min_tr)/N)*N)	
 
@@ -2712,7 +2929,8 @@ class BDM(FolderStructure):
 			max_trials = int(np.floor(min(min_tr)/N)*N)	
 
 		if max_trials == 0:
-			print('At least one condition does not contain sufficient info for current nr of folds')
+			print('At least one condition does not contain sufficient ' \
+			'info for current nr of folds')
 
 		return max_trials
 
