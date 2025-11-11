@@ -66,6 +66,9 @@ from sklearn.metrics import roc_auc_score, confusion_matrix
 from support.support import select_electrodes, trial_exclusion, get_time_slice
 from scipy.stats import rankdata
 from eeg_analyses.TFR import TFR
+from visuals.plot_results import plot_bdm_timecourse
+from IPython import embed
+import warnings
 
 warnings.simplefilter('default')
 
@@ -140,8 +143,9 @@ class BDM(FolderStructure):
 		#TODO: check whether this is correct
 		- mode: 'across' (fit on train+test) or 'all' 
 			(fit on train only)
-	montage : str, default='biosemi64'
-		EEG montage for visualization in reports.
+	montage : str, default=None
+		EEG montage for visualization in reports. If not specified, a
+		montage will be inferred from the EEG data.
 	output_params : bool, default=False
 		Whether to save classifier weights and confusion matrices.
 	baseline : tuple, optional
@@ -217,8 +221,9 @@ class BDM(FolderStructure):
 				avg_runs:int=1,avg_trials:int=1,
 				sliding_window:tuple=(1,True,False),
 				scale:bool=False, 
-				pca_components:tuple=(0,'across'),montage:str='biosemi64',
+				pca_components:tuple=(0,'across'),montage:str=None,
 				output_params:Optional[bool]=False,
+				report:bool=False,
 				baseline:Optional[tuple]=None, 
 				seed:Union[int, bool] = 42213,min_freq:Optional[float]=None,
 				max_freq:Optional[float]=None,**tfr_kwargs):
@@ -273,6 +278,9 @@ class BDM(FolderStructure):
 			EEG montage for visualization.
 		output_params : bool, default=False
 			Whether to save classifier weights and confusion matrices.
+		report : bool, default=False
+			Whether to automatically generate MNE reports with decoding
+			performance plots and topographical activation patterns.
 		baseline : tuple, optional
 			Baseline correction window in seconds.
 		seed : int or bool, default=42213
@@ -294,8 +302,8 @@ class BDM(FolderStructure):
 
 		Notes
 		-----
-		The data_type parameter becomes immutable after initialization to
-		prevent inconsistent analysis configurations.
+		The data_type parameter becomes immutable after initialization 
+		to prevent inconsistent analysis configurations.
 		"""	
 
 		self.sj = sj
@@ -319,6 +327,7 @@ class BDM(FolderStructure):
 		self.baseline = baseline
 		self.seed = seed
 		self.output_params = output_params
+		self.report = report
 		self.cross = False
 
 		# data type is immutable after initialization
@@ -418,7 +427,14 @@ class BDM(FolderStructure):
 		elif self.classifier == 'GNB':
 			clf = GaussianNB()
 		elif self.classifier == 'svm':
-			clf = CalibratedClassifierCV(LinearSVC())
+			# SVM requires feature scaling for optimal performance with EEG data
+			if not self.scale:
+				warnings.warn("SVM performance is poor without feature scaling. "
+							"Consider setting scale=True or use LDA instead.", 
+							UserWarning)
+			clf = CalibratedClassifierCV(LinearSVC(random_state=self.seed, 
+												 max_iter=5000,
+												 dual=False))
 		else:
 			raise ValueError('Classifier not correctly defined.')
 		
@@ -450,7 +466,8 @@ class BDM(FolderStructure):
 		-----
 		Different classifiers store weights in different attributes:
 		- LDA: use coef_ attribute
-		- CalibratedClassifierCV (SVM): extract from base_estimator.coef_
+		- CalibratedClassifierCV (SVM): extract from 
+		base_estimator.coef_
 		- Other classifiers: return zeros with warning
 
 		The weights represent the contribution of each feature 
@@ -467,6 +484,7 @@ class BDM(FolderStructure):
 			weights = np.zeros(Xtr_.shape[1])
 			warnings.warn('Classifier weights not available for this \n' +
 			'classifier type')
+
 		return weights
 
 	def classify(self,cnds:dict=None,window_oi:tuple=None,
@@ -652,9 +670,8 @@ class BDM(FolderStructure):
 			bdm_scores['info']['times'] = train_times
 
 		# create report (specific to unpermuted data)
-		if not GAT:
-			pass
-			#self.report_bdm(bdm_scores, cnds, bdm_name)
+		if self.report:
+			self.report_bdm(bdm_scores, bdm_params, cnds, bdm_name)
 
 		# store classification dict	
 		if save: 
@@ -859,10 +876,11 @@ class BDM(FolderStructure):
 							Xte = Xte[..., te_idx]
 							(class_acc[run, p], 
 							weights[run, p],
-							conf_matrix[run,p]) = self.cross_time_decoding(Xtr,Xte, 
-																		Ytr, Yte, 
-																		labels, 
-																		GAT, X)
+							conf_matrix[run,p]) = self.cross_time_decoding(Xtr,
+													  				Xte, Ytr, 
+																	Yte, 
+																	labels,
+																	GAT, X)
 
 							self.seed += 1 # update seed used for cross validation
 							self.run_info += 1
@@ -877,15 +895,17 @@ class BDM(FolderStructure):
 							cnd_inf = str(tr_cnd)
 							if te_cnd is not None:
 								cnd_inf += f'_{te_cnd}'
-							#W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
+
+							W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
+							
 							dec_scores = copy.copy(np.squeeze(mean_class[0]))
 							bdm_scores.update({cnd_inf:{'dec_scores': 
 								   			dec_scores}, 
 												'bdm_info': bdm_info})
-							if self.output_params:
-								bdm_params.update({cnd_inf:{'W':W, 
-												'conf_matrix':copy.copy(conf_M[0])
-												}})
+
+							bdm_params.update({cnd_inf:{'W':W, 
+											'conf_matrix':copy.copy(conf_M[0])
+											}})
 
 						else:
 							bdm_scores[cnd_inf]['{}-nrlabels'.format(n)] = \
@@ -1152,15 +1172,15 @@ class BDM(FolderStructure):
 		# select the data
 		(X, 
 		_,
-		beh, 
-		times) = self.select_bdm_data(self.epochs[0].copy(),self.beh[0].copy(),
+		df, 
+		times) = self.select_bdm_data(self.epochs[0].copy(),self.df[0].copy(),
 									window_oi, excl_factor, [])
 		
 		# limit to labels of interest
 		if labels_oi == 'all':
-			labels_oi = np.unique(beh[self.to_decode])		
+			labels_oi = np.unique(df[self.to_decode])		
 		mask = np.in1d(beh[self.to_decode], labels_oi)
-		y = beh[self.to_decode][mask].reset_index(drop = True)
+		y = df[self.to_decode][mask].reset_index(drop = True)
 		X = X[mask]
 		cnd_idx = np.arange(y.size)
 
@@ -1325,7 +1345,7 @@ class BDM(FolderStructure):
 		
 		return 	X,y,df, times
 
-	def set_bdm_param(self,y:np.array,beh:pd.DataFrame,cnds:list,cnd_head:str,
+	def set_bdm_param(self,y:np.array,df:pd.DataFrame,cnds:list,cnd_head:str,
 					labels_oi:Union[str,list],downscale:bool)-> \
 						Tuple[int,list,list,str]:
 		"""
@@ -1334,7 +1354,7 @@ class BDM(FolderStructure):
 
 		Args:	
 			y (np.array): decoding labels
-			beh (pd.DataFrame): behavioral parameters per epoch
+			df (pd.DataFrame): behavioral parameters per epoch
 			cnds (list): list with condition info.
 			cnd_head (str): column name with conditon info
 			labels_oi (str | list): labels used for decoding
@@ -1359,14 +1379,14 @@ class BDM(FolderStructure):
 			tr_cnds, te_cnds = cnds
 			self.cross = True
 			self.nr_folds = 1
-			tr_max = [self.select_max_trials(beh,tr_cnds,labels_oi,cnd_head)]
+			tr_max = [self.select_max_trials(df,tr_cnds,labels_oi,cnd_head)]
 		else:
 			self.cross = False
 			if self.nr_folds == 1:
 				self.nr_folds = 10
 				warnings.warn('Nr folds is set to default as only one fold ' +
 				'was specified. Please check whether this was intentional')
-			tr_max = [self.select_max_trials(beh,cnds,labels_oi,cnd_head)] 
+			tr_max = [self.select_max_trials(df,cnds,labels_oi,cnd_head)] 
 			if downscale:
 				tr_max = [(i+1)*self.nr_folds 
 							for i in range(int(tr_max[0]/self.nr_folds))][::-1]
@@ -1377,73 +1397,138 @@ class BDM(FolderStructure):
 
 		return nr_labels,tr_max,tr_cnds,te_cnds
 
-	def plot_bdm(self, bdm_scores: dict, cnds: list) -> None:
+	def report_bdm(self, bdm_scores: dict, bdm_params: dict, 
+					cnds: list, bdm_name: str) -> None:
+		"""
+		Generate comprehensive MNE report with decoding scores and 
+		activation patterns.
+		
+		Creates an HTML report that systematically includes:
+		1. Professional decoding performance visualizations using 
+		plot_bdm_timecourse
+		2. Topographical activation patterns (only when all electrodes 
+		are used)
+		
+		Parameters
+		----------
+		bdm_scores : dict
+			Dictionary containing decoding results with structure:
+			{condition: {'dec_scores': scores}, 
+			'info': {'times': time_points}}
+		bdm_params : dict
+			Dictionary containing classifier weights and additional 
+			analysis results with structure: 
+			{condition: {'W': activation_patterns, 'conf_matrix': ...}}
+			The 'W' field contains Haufe-transformed activation 
+			patterns.
+		cnds : list
+			List of condition names to include in the report.
+		bdm_name : str
+			Base name for the report file generation.
 
-		times = bdm_scores['info']['times']
-		fig, ax = plt.subplots(1)
-		plt.ylabel(self.metric)
-		plt.xlabel('Time (ms')
-		# loop over all specified conditins
-		for cnd in cnds:
-			X = bdm_scores[cnd]['dec_scores']
-			plt.plot(times, X, label = cnd)
-		plt.legend(loc='best')
+		Notes
+		-----
+		Report generation follows a systematic approach:
+		
+		**Always included:**
+		- Decoding performance time courses using plot_bdm_timecourse
+		
+		**Conditionally included (only when self.elec_oi == 'all'):**
+		- Topographical maps of Haufe-transformed activation patterns
+		- Spatial visualization across multiple time points
+		- Separate topography sections for each condition
+		- Interactive topographical plots with proper electrode 
+		positioning
+		
+		**Dependencies:**
+		- Requires plot_bdm_timecourse from visuals.plot_results module
+		- Automatic montage detection from epochs or explicit 
+		montage specification
+		- MNE-compatible electrode positioning for spatial 
+		visualizations
+		
+		Examples
+		--------
+		Generate report after BDM analysis:
+		
+		>>> bdm_scores, bdm_params = bdm.classify(...)
+		>>> cnds = ['face', 'object']
+		>>> bdm.report_bdm(bdm_scores, cnds, 'face_vs_object_analysis')
+		"""
 
-		return fig   
+		# Set up report paths and names
+		report = mne.Report(title='Single subject BDM overview')
+		report_path = self.set_folder_path() + ['report']
+		report_name = self.folder_tracker(report_path, 
+									f'{bdm_name}.html')
 
-	def report_bdm(self, bdm_scores: dict, cnds: list, bdm_name: str) -> None:
+		# Determine if topographical plotting is possible
+		plot_topographies = (self.elec_oi == 'all')
+		if not plot_topographies:
+			print("Info: Topographical plots will be skipped "
+			"(not all electrodes used)")
+		else:
+			montage = None
+			if isinstance(self.epochs, list):
+				epochs_obj = self.epochs[0]
+			else:
+				epochs_obj = self.epochs
+			if self.montage is None:
+				try:
+					# Try to get montage from epochs object
+					montage = epochs_obj.get_montage()
+				except:
+					print("Warning: No montage found in epochs object and " \
+					"none specified. Topographical plots will be skipped.")
+					plot_topographies = False
+			else:
+				# Use explicitly specified montage
+				print(f"Using specified montage: {self.montage}")
+				montage = mne.channels.make_standard_montage(self.montage)
 
-		pass
-		# set report and condition name
-		# if self.elec_oi != 'all':
-		# 	return None
+		# Add decoding performance plots
+		plt.figure()
+		plot_bdm_timecourse(bdm_scores, stats=False)
+		report.add_figure(plt.gcf(), title='Decoding Performance')
 
-		# name_info = bdm_name.split('_')
-		# report_name = name_info[-1]
-		# report_path = self.set_folder_path()
-		# report_name = self.folder_tracker(report_path,
-		# 								f'report_{report_name}.h5')
+		# plot topography
+		if plot_topographies:
+			print("Preparing topographical plotting setup...")
+			sfreq = epochs_obj.info['sfreq'] 
+			info = mne.create_info(
+					ch_names=montage.ch_names,
+					sfreq=min(epochs_obj.info['sfreq'], self.downsample),
+					ch_types='eeg'
+				)
+			info.set_montage(montage)
 
-		# # create fake info object (so that weights can be plotted in report)
-		# montage = mne.channels.make_standard_montage(self.montage)
-		# n_elec = len(montage.ch_names)
-		# info = mne.create_info(ch_names=montage.ch_names,sfreq=self.downsample,
-        #                        ch_types='eeg')
-		# t_min = bdm_scores['info']['times'][0]
+			# loop over all conditions to plot W
+			for cnd in bdm_params.keys():
+				if 'W' in bdm_params[cnd]:
+					W = bdm_params[cnd]['W']
+					if W.shape[0] > 1:
+						print('only first frequency will be used for ' \
+						'topographical plots')
+					if W.shape[2] > 1:
+						print('only first test time point will be used for ' \
+						'topographical plots')
+					W = W[0, :, 0, :]  # (nr_times, nr_elec)
 
-		# # loop over all specified conditins
-		# for cnd in cnds:
+					# Create evoked object for topographical visualization
+					W_evoked = mne.EvokedArray(
+						W.T, 
+						info, 
+						tmin=bdm_scores['info']['times'][0],
+						nave=1,  # Number of averaged epochs (for info)
+						comment=f'{cnd}_activation_patterns'
+					)
 
-		# 	# set condition name
-		# 	cnd_name = '_'.join(map(str, name_info[:-1] + [cnd]))
-	
-		# 	# create fake ekoked array
-		# 	W = bdm_scores[cnd]['W']
-		# 	W_evoked = mne.EvokedArray(W.T, info, tmin = t_min)
-		# 	W_evoked.set_montage(montage)
+					report.add_evokeds(evokeds=W_evoked,
+						   				 titles=f'Weights {cnd}')
 
-		# 	# check whether report exists
-		# 	if os.path.isfile(report_name):
-		# 		with mne.open_report(report_name) as report:
-		# 			# if section exists delete it first
-		# 			report.remove(title=cnd_name)
-		# 			report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
-		# 		 				  n_time_points=30)
-		# 		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
-		# 				overwrite = True)
-		# 	else:
-		# 		report = mne.Report(title='Single subject evoked overview')
-		# 		report.add_evokeds(evokeds=W_evoked,titles=cnd_name,	
-		# 		 				n_time_points=30)
-		# 		report.save(report_name)
-		# 		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html')
-
-		# name = '_'.join(map(str, name_info[:-1]))
-
-		# report.add_figure(self.plot_bdm(bdm_scores, cnds), 
-        #                         title = name, section = 'bdm_scores')
-		# report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
-		# 				overwrite = True)
+		# Save report
+		report.save(report_name, overwrite=True)
+		print(f"Report saved to: {report_name}")
 			
 	def set_folder_path(self) -> list:
 		"""
@@ -1623,7 +1708,7 @@ class BDM(FolderStructure):
 
 		return output
 
-	def average_trials(self,epochs:mne.Epochs,beh:pd.DataFrame,
+	def average_trials(self,epochs:mne.Epochs,df:pd.DataFrame,
 				beh_headers:list) -> Tuple[np.array, pd.DataFrame]:
 		"""
 		Reduce data dimensionality by averaging trials within 
@@ -1639,7 +1724,7 @@ class BDM(FolderStructure):
 		----------
 		epochs : mne.Epochs
 			Epoched EEG data with shape (n_trials, n_channels, n_times).
-		beh : pd.DataFrame
+		df : pd.DataFrame
 			Behavioral data containing condition and label information
 			for each trial.
 		beh_headers : list
@@ -1654,7 +1739,7 @@ class BDM(FolderStructure):
 		tuple[mne.Epochs, pd.DataFrame]
 			epochs : mne.Epochs
 				Averaged epoched data with reduced trial count.
-			beh : pd.DataFrame
+			df : pd.DataFrame
 				Updated behavioral dataframe corresponding to averaged 
 				trials.
 
@@ -1699,25 +1784,25 @@ class BDM(FolderStructure):
 			avg_trials = self.avg_trials
 
 		if avg_trials == 1:
-			return epochs, beh
+			return epochs, df
 
 		print(f'Averaging across {avg_trials} trials')
 		# initiate condition and label list
 		cnds, labels, X = [], [], []
 
 		# slice beh
-		beh = beh.loc[:,[h for h in beh_headers if h is not None]]
+		df = df.loc[:,[h for h in beh_headers if h is not None]]
 		if beh.shape[-1] == 1:
 			cnd_header = 'condition'
-			beh['condition'] = 'all_data'
+			df['condition'] = 'all_data'
 		else:
 			cnd_header = beh_headers[1]	
-			if beh.shape[-1] == 3:
+			if df.shape[-1] == 3:
 				split_header = beh_headers[-1]
 				split = []
 
 		# loop over each label and condition pair
-		options = dict(beh.apply(lambda col: col.unique()))
+		options = dict(df.apply(lambda col: col.unique()))
 		keys, values = zip(*options.items())
 		for var_combo in [dict(zip(keys, v)) \
 			for v in itertools.product(*values)]:
@@ -1732,28 +1817,28 @@ class BDM(FolderStructure):
 						df_filt += f' and {k} == {v}'
 
 			# select subset of data and average across random selection
-			avg_idx = beh.query(df_filt).index.values
+			avg_idx = df.query(df_filt).index.values
 			random.shuffle(avg_idx)
 			avg_idx = [avg_idx[i:i+avg_trials] 
 						for i in np.arange(0,avg_idx.size, avg_trials)]
 			X += [epochs._data[idx].mean(axis = 0) for idx in avg_idx]
 			labels  += [var_combo[self.to_decode]] * len(avg_idx)
 			cnds += [var_combo[cnd_header]] * len(avg_idx)
-			if beh.shape[-1] == 3:
+			if df.shape[-1] == 3:
 				split += [var_combo[split_header]] * len(avg_idx)
 
 		# set data
 		epochs._data = np.stack(X)
-		if beh.shape[-1] == 3:
-			beh = pd.DataFrame.from_dict({cnd_header:cnds,
+		if df.shape[-1] == 3:
+			df = pd.DataFrame.from_dict({cnd_header:cnds,
 								self.to_decode:labels, split_header:split})
 		else:
-			beh = pd.DataFrame.from_dict({cnd_header:cnds,
+			df = pd.DataFrame.from_dict({cnd_header:cnds,
 								self.to_decode:labels})
 
-		return epochs, beh
+		return epochs, df
 
-	def get_condition_labels(self,beh:pd.DataFrame,cnd_header:str,
+	def get_condition_labels(self,df:pd.DataFrame,cnd_header:str,
 				cnd:str,max_tr:list,labels:Union[str,list]='all', 
 				collapse:bool=False)->\
 				Tuple[pd.DataFrame,np.array,np.array,np.array,list]:
@@ -1768,7 +1853,7 @@ class BDM(FolderStructure):
 
 		Parameters
 		----------
-		beh : pd.DataFrame
+		df : pd.DataFrame
 			Behavioral dataframe containing trial information and 
 			labels.
 		cnd_header : str
@@ -1793,7 +1878,7 @@ class BDM(FolderStructure):
 		Returns
 		-------
 		tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, list]
-			beh : pd.DataFrame
+			df : pd.DataFrame
 				Updated behavioral dataframe (may include 'collapsed' 
 				column).
 			cnd_idx : np.ndarray
@@ -1843,16 +1928,16 @@ class BDM(FolderStructure):
 
 		# get condition indices
 		if cnd == 'all_data':
-			cnd_idx = np.arange(beh.shape[0])
+			cnd_idx = np.arange(df.shape[0])
 		elif cnd != 'collapsed':
-			cnd_idx = np.where(beh[cnd_header] == cnd)[0]
+			cnd_idx = np.where(df[cnd_header] == cnd)[0]
 			if collapse:
-				beh.loc[cnd_idx,'collapsed'] = 'yes'
+				df.loc[cnd_idx,'collapsed'] = 'yes'
 		else:
 			# reset max_tr again such that analysis is not underpowered
-			max_tr = [self.select_max_trials(beh, ['yes'], labels,'collapsed')]
-			cnd_idx = np.where(beh.collapsed == 'yes')[0]
-		cnd_labels = beh[self.to_decode][cnd_idx].values
+			max_tr = [self.select_max_trials(df, ['yes'], labels,'collapsed')]
+			cnd_idx = np.where(df.collapsed == 'yes')[0]
+		cnd_labels = df[self.to_decode][cnd_idx].values
 
 		# make sure that labels that should not be in analysis are excluded
 		# if not already done so
@@ -1870,7 +1955,7 @@ class BDM(FolderStructure):
 		print ('\nThe difference between the highest and the lowest')
 		print (f'number of observations per class is {diff}')
 
-		return beh, cnd_idx, cnd_labels, labels, max_tr
+		return df, cnd_idx, cnd_labels, labels, max_tr
 
 	def train_test_split(self,idx:np.array,labels:np.array,max_tr:int, 
 						bdm_info: dict) -> Tuple[np.array, np.array, dict]:
@@ -2235,88 +2320,119 @@ class BDM(FolderStructure):
 
 		return Xtr, Xte, Ytr, Yte	
 
-	def set_bdm_weights(self, W, Xtr, nr_elec, nr_time):
-		#TODO: add docstring
-		#TODO: make it work with GAT
-		# stack all training data
-		if  W.ndim > 2:
-			W =  False
-		else:
-			Xtr = Xtr.reshape(-1,nr_elec, nr_time)
-			W = np.stack([np.matmul(np.cov(Xtr[...,i].T),W[i]) 
-					for i in range(nr_time)])
-
-		return W
-
-	def localizerClassify(self, sj, loc_beh, loc_eeg, cnds, cnd_header, time, tr_header, te_header, collapse = False, loc_excl = None, test_excl = None, gat_matrix = False, save = True):
-		"""Training and testing is done on seperate/independent data files
-		
-		Arguments:
-			sj {int} -- Subject number
-			loc_beh {DataFrame} -- DataFrame that contains labels necessary for training the model
-			loc_eeg {object} -- EEG data used to train the model (MNE Epochs object)
-			cnds {list} -- List of conditions. Decoding is done for each condition seperately
-			cnd_header {str} -- Name of column that contains condition info in test behavior file
-			time {tuple} -- Time window used for decoding
-			tr_header {str} -- Name of column that contains training labels
-			te_header {[type]} -- Name of column that contains testing labels
-		
-		Keyword Arguments:
-			collapse {bool} -- If True also run analysis collapsed across all conditions
-			loc_excl {dict| None} -- Option to exclude trials from localizer. See Classify for more info (default: {None})
-			test_excl {[type]} -- Option to exclude trials from (test) analysis. See Classify for more info (default: {None})
-			gat_matrix {bool} -- If set to True, a generalization across time matrix is created (default: {False})
-			save {bool} -- Determines whether output is saved (via standard file organization) or returned (default: {True})
-		
-		Returns:
-			classification {dict} -- Decoding output (for each condition seperately)
+	def set_bdm_weights(self, W: np.ndarray, Xtr: np.ndarray, 
+					  nr_elec: int, nr_time: int) -> Union[np.ndarray, bool]:
 		"""
-
-		# set up localizer data 
-		tr_eegs, tr_beh, times = self.selectBDMData(loc_eeg, loc_beh, time, loc_excl)
-		# set up test data
-		te_eegs, te_beh, times = self.selectBDMData(self.EEG, self.beh, time, test_excl)
+		Transform classifier weights to interpretable activation 
+		patterns.
 		
-		# create dictionary to save classification accuracy
-		classification = {'info': {'elec': self.elec_oi, 'times':times}}
+		Implements the Haufe et al. (2014) transformation to convert
+		classifier weights (backward model) into activation patterns 
+		(forward model) that are directly interpretable as neural 
+		sources. This enables meaningful topographical visualization of 
+		the neural activity underlying decoding.
 
-		# specify training parameters (fixed for all testing conditions)
-		tr_labels = tr_beh[tr_header].values
-		min_nr_tr_labels = min(np.unique(tr_labels, return_counts = True)[1])
-		# make sure training is not biased towards a label
-		tr_idx = np.hstack([random.sample(np.where(tr_beh[tr_header] == label )[0], 
-							k = min_nr_tr_labels) for label in np.unique(tr_labels)])
-		Ytr = tr_beh[tr_header][tr_idx].values.reshape(1,-1)
-		Xtr = tr_eegs[tr_idx,:,:][np.newaxis, ...]
+		Parameters
+		----------
+		W : np.ndarray
+			Classifier weights with shape (nr_freq, nr_train, nr_test, 
+			nr_elec). Within the BDM toolbox, weights are always 4D, 
+			where dimensions can be 1 for different analysis types:
+			- Broadband EEG: nr_freq = 1
+			- Within-time decoding: nr_train = 1 
+			- Single test time: nr_test = 1
+		Xtr : np.ndarray
+			Training data with shape (n_trials, nr_elec, nr_time).
+		nr_elec : int
+			Number of electrodes/channels.
+		nr_time : int
+			Number of training time points.
 
-		if collapse:
-			cnds += ['collapsed']
+		Returns
+		-------
+		np.ndarray
+			Transformed activation patterns with same shape as input 
+			weights (nr_freq, nr_train, nr_test, nr_elec).
 
-		# loop over all conditions
-		for cnd in cnds:
-
-			# set condition mask
-			if cnd != 'collapsed':
-				test_mask = (te_beh[cnd_header] == cnd).values
-			else:
-				test_mask =  np.array(np.sum(
-					[(beh[cnd_header] == c).values for c in cnds], 
-					axis = 0), dtype = bool)	
-			# specify testing parameters
-			Yte = te_beh[te_header][test_mask].values.reshape(1,-1)
-			Xte = te_eegs[test_mask,:,:][np.newaxis, ...]
-	
-			# do actual classification
-			class_acc, label_info = self.crossTimeDecoding(Xtr, Xte, Ytr, Yte, np.unique(Ytr), gat_matrix)
-
-			classification.update({cnd:{'standard': copy.copy(class_acc)}})
+		Notes
+		-----
+		The Haufe transformation computes:
+		A = Σ_X @ W
 		
-		# store classification dict	
-		if save: 
-			with open(self.FolderTracker(['bdm',self.elec_oi, 'cross'], fname = 'class_{}-{}.pickle'.format(sj,te_header)) ,'wb') as handle:
-				pickle.dump(classification, handle)
+		Where:
+		- A: activation patterns (interpretable)
+		- Σ_X: data covariance matrix computed from training data
+		- W: classifier weights (not directly interpretable)
 		
-		return classification
+		After the Haufe transformation, spatial normalization is applied
+		by subtracting the mean across electrodes and dividing by the 
+		standard deviation across electrodes. This creates Z-score 
+		normalized topographies with mean=0 and std=1, enabling direct
+		comparison of spatial distributions across subjects and 
+		conditions.
+		
+		For BDM analysis, the transformation is applied separately for 
+		each (frequency, training_time) combination, using the 
+		appropriate training data time point for covariance computation.
+
+		References
+		----------
+		Haufe, S., Meinecke, F., Görgen, K., Dähne, S., Haynes, J. D., 
+		Blankertz, B., & Bießmann, F. (2014). On the interpretation of 
+		weight vectors of linear models in multivariate neuroimaging. 
+		NeuroImage, 87, 96-110.
+
+		Examples
+		--------
+		Broadband EEG, within-time decoding:
+		
+		>>> W = np.random.randn(1, 1, 1, 64) # (freq, train, test, elec)
+		>>> Xtr = np.random.randn(100, 64, 1)  # (trials, elec, time)
+		>>> A = bdm.set_bdm_weights(W, Xtr, 64, 1)
+		>>> A.shape  # (1, 1, 1, 64) - activation patterns
+
+		Full time-frequency GAT analysis:
+		
+		>>> W = np.random.randn(5, 20, 30, 64)  # (freq, train, test, 
+		... # elec)
+		>>> Xtr = np.random.randn(100, 64, 20)  # (trials, elec, 
+		... # train_times)
+		>>> A = bdm.set_bdm_weights(W, Xtr, 64, 20)
+		>>> A.shape  # (5, 20, 30, 64) - activation patterns
+		"""
+		# Reshape training data for proper covariance computation
+		Xtr = Xtr.reshape(-1, nr_elec, nr_time)
+		
+		# Extract dimensions from 4D weight array
+		nr_freq, nr_train, nr_test, _ = W.shape
+		activation_patterns = np.zeros_like(W)
+		
+		# Apply Haufe transformation for each (frequency, training_time) 
+		# combination
+		for freq in range(nr_freq):
+			for train_t in range(nr_train):
+				# Compute covariance matrix using training 
+				cov_matrix = np.cov(Xtr[..., train_t].T)  # (nr_elec, nr_elec)
+				
+				# Transform weights for all test times at this freq/train_time
+				for test_t in range(nr_test):
+					activation_patterns[freq, train_t, test_t, :] = np.matmul(
+						cov_matrix, W[freq, train_t, test_t, :]
+					)
+		
+		# Apply spatial normalization to create Z-score topographies
+		for freq in range(nr_freq):
+			for train_t in range(nr_train):
+				for test_t in range(nr_test):
+					pattern = activation_patterns[freq, train_t, test_t, :]
+					# Subtract mean and divide by std across electrodes
+					mean_pattern = np.mean(pattern)
+					std_pattern = np.std(pattern)
+					if std_pattern > 0:  # Avoid division by zero
+						activation_patterns[freq, train_t, test_t, :] = (
+							pattern - mean_pattern) / std_pattern
+		
+		return activation_patterns
 
 	def cross_time_decoding(self, Xtr: np.ndarray, Xte: np.ndarray, 
 		Ytr: np.ndarray, Yte: np.ndarray, 
@@ -2370,7 +2486,8 @@ class BDM(FolderStructure):
 		tuple[np.ndarray, np.ndarray, np.ndarray]
 			class_acc : np.ndarray
 				Classification performance with shape (n_folds, n_freqs, 
-				n_time_train, n_time_test). For GAT=False, n_time_test=1.
+				n_time_train, n_time_test). 
+				For GAT=False, n_time_test = 1.
 			weights : np.ndarray
 				Classifier weights with shape (n_folds, n_freqs, 
 				n_time_train,n_time_test, n_features).
@@ -2530,7 +2647,6 @@ class BDM(FolderStructure):
 									Xtr_ = pca.fit_transform(Xtr_)
 									Xte_ = pca.transform(Xte_)
 
-										
 						# Train and test classifier
 						clf.fit(Xtr_,Ytr_)
 						# Get posterior probability estimates
@@ -2818,7 +2934,6 @@ class BDM(FolderStructure):
 
 		return auc
 
-
 	def select_max_trials(self, df: pd.DataFrame, cnds: list, 
 					   	bdm_labels: Union[str, list] = 'all', 
 						cnds_header: str = 'condition') -> int:
@@ -2924,7 +3039,7 @@ class BDM(FolderStructure):
 
 			max_trials = min(cnd_min)
 		elif cnds == ['all_data']:
-			labels = [l for l in beh[self.to_decode] if l in bdm_labels]
+			labels = [l for l in df[self.to_decode] if l in bdm_labels]
 			min_tr = np.unique(labels, return_counts = True)[1]
 			max_trials = int(np.floor(min(min_tr)/N)*N)	
 
