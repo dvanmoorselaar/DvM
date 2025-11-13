@@ -120,8 +120,13 @@ class BDM(FolderStructure):
 		- 'auc': Area Under Curve (ROC)
 		- 'acc': Classification accuracy
 	elec_oi : str or list, default='all'
-		Electrodes of interest. Can be predefined subset name or list
-		of electrode names.
+		Electrode selection criteria:
+		- 'all': Use all available electrodes in ch_names
+		- 'posterior': Posterior electrodes (parietal, 
+		   occipital regions)
+		- 'frontal': Frontal electrodes (prefrontal, frontal regions)
+		- 'central': Central electrodes (motor, somatosensory regions)
+		- list: Specific electrode names to select
 	downsample : int, default=128
 		Target sampling frequency for computational efficiency.
 	avg_runs : int, default=1

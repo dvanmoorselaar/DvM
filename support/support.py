@@ -14,6 +14,110 @@ from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
+def select_electrodes(ch_names: Union[list, np.ndarray],
+						elec_oi: Union[list, str] = 'all') -> np.ndarray:
+	"""
+	Select subset of electrodes based on available channels and 
+	electrode groupings.
+
+	Parameters
+	----------
+	ch_names : list or np.ndarray
+		List of all electrode names in EEG object (MNE format).
+	elec_oi : list or str, default='all'
+		Electrode selection criteria:
+		- 'all': Use all available electrodes in ch_names
+		- 'posterior': Posterior electrodes (parietal, occipital regions)
+		- 'frontal': Frontal electrodes (prefrontal, frontal regions)  
+		- 'central': Central electrodes (motor, somatosensory regions)
+		- list: Specific electrode names to select
+
+	Returns
+	-------
+	np.ndarray
+		Indices of selected electrodes that exist in ch_names.
+
+	Notes
+	-----
+	The function automatically detects which electrodes are available in 
+	the dataset and only selects those that exist. Regional groupings 
+	are defined based on standard 10-20 electrode naming conventions and 
+	will work across different EEG systems (32, 64, 128+ channels).
+	
+	For unknown electrode names, the function will issue a warning but
+	continue with available electrodes.
+	"""
+
+	if isinstance(elec_oi, str):
+		if elec_oi == 'all':
+			# Use all available electrodes
+			elec_oi = list(ch_names)
+			
+		elif elec_oi == 'posterior':
+			# Posterior electrodes: parietal, occipital, and posterior temporal
+			posterior_electrodes = [
+				# Occipital
+				'Oz', 'O1', 'O2', 'Iz',
+				# Parietal-Occipital  
+				'POz', 'PO3', 'PO4', 'PO7', 'PO8', 'PO1', 'PO2', 'PO5', 'PO6',
+				# Parietal
+				'Pz', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6',
+				'P7', 'P8', 'P9', 'P10',
+				# Central-Parietal
+				'CPz', 'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6',
+				# Posterior temporal
+				'TP7', 'TP8', 'TP9', 'TP10'
+			]
+			elec_oi = posterior_electrodes
+			
+		elif elec_oi == 'frontal':
+			# Frontal electrodes: prefrontal, frontal, and frontal-central
+			frontal_electrodes = [
+				# Prefrontal
+				'Fpz', 'Fp1', 'Fp2', 
+				# Anterior frontal
+				'AFz', 'AF3', 'AF4', 'AF7', 'AF8', 'AF1', 'AF2', 'AF5', 'AF6',
+				# Frontal
+				'Fz', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 
+				'F10',
+				# Frontal-Central
+				'FCz', 'FC1', 'FC2', 'FC3', 'FC4', 'FC5', 'FC6',
+				# Frontal-Temporal
+				'FT7', 'FT8', 'FT9', 'FT10'
+			]
+			elec_oi = frontal_electrodes
+			
+		elif elec_oi == 'central':
+			# Central electrodes: motor and somatosensory regions
+			central_electrodes = [
+				'Cz', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
+				'T7', 'T8', 'T9', 'T10'  # Temporal electrodes
+			]
+			elec_oi = central_electrodes
+			
+			
+	# Filter elec_oi to only include electrodes that exist in ch_names
+	available_electrodes = [e for e in elec_oi if e in ch_names]
+	
+	if not available_electrodes:
+		warnings.warn(f'None of the specified electrodes found in channel \
+					names. 'f'Available channels: {list(ch_names)[:10]}...')
+		return np.array([], dtype=int)
+		
+	# Log how many electrodes were found vs requested
+	if len(available_electrodes) != len(elec_oi) and isinstance(elec_oi, list):
+		missing = set(elec_oi) - set(available_electrodes)
+		if len(missing) <= 5:  # Only show if reasonable number
+			print(f'Note: {len(missing)} requested electrodes not found: '
+				  f'{list(missing)}')
+
+		else:
+			print(f'Note: {len(missing)} requested electrodes not found in dataset')
+			
+	picks = mne.pick_channels(ch_names, include=available_electrodes)
+
+	return picks	
+
 
 def baseline_correction(X:np.array,times:np.array,baseline:tuple) -> np.array:
 	"""
@@ -544,54 +648,7 @@ def cnd_time_shift(EEG, beh, cnd_info, cnd_header):
 	return EEG
 
 
-def select_electrodes(ch_names: Union[list, np.ndarray], elec_oi: Union[list, str]=  'all') -> np.ndarray:
-	"""Allows picking a subset of all electrodes, filtered by available channels.
 
-	Args:
-		ch_names: List of all electrodes in EEG object (MNE format)
-		elec_oi: Description of subset of electrodes to be used.
-				Can be 'all', 'post', 'frontal', 'middle', 'eye', 'tracker'
-				or a specific list of electrode names.
-
-	Returns:
-		picks: Indices of selected electrodes that exist in ch_names
-	"""
-
-	if isinstance(elec_oi, str):
-		if elec_oi == 'all':
-			elec_oi = ['Fp1', 'AF7','AF3','F1','F3','F5','F7',
- 					'FT7','FC5','FC3','FC1','C1','C3','C5','T7','TP7',
-					 'CP5','CP3','CP1','P1','P3','P5','P7','P9','PO7',
-					 'PO3', 'O1','Iz','Oz','POz','Pz','CPz','Fpz','Fp2',
-					 'AF8','AF4','AFz','Fz','F2','F4','F6','F8','FT8',
-					 'FC6','FC4','FC2','FCz','Cz','C2','C4','C6','T8',
-					 'TP8','CP6','CP4','CP2','P2','P4','P6','P8','P10',
-					 'PO8','PO4','O2']
-		elif elec_oi == 'post':
-			elec_oi  = ['Iz','Oz','O1','O2','PO7','PO8',
-					'PO3','PO4','POz','Pz','P9','P10',
-					'P7','P8','P5','P6','P3','P4','P1','P2','Pz',
-					'TP7','CP5','CP3','CP1','CPz','CP2','CP4','CP6','TP8']
-		elif elec_oi == 'frontal':
-			elec_oi  = ['Fp1','Fpz','Fp2','AF7','AF3','AFz','AF4',
-					'AF8','F7','F5','F3','F1','Fz','F2','F4','F6','F8',
-					'FT7','FC5','FC3','FC1','FCz','FC2','FC4','FC6','FT8']
-		elif elec_oi == 'mid':
-			elec_oi  = ['T7','C5','C3','C1','Cz','C2','C4','C6','T8']	
-		elif elec_oi == 'eye':
-			elec_oi  = ['V_up','V_do','H_r', 'H_l']	
-		elif elec_oi == 'tracker':
-			elec_oi  = ['x','y']	
-
-	# Filter elec_oi to only include electrodes that exist in ch_names
-	elec_oi = [e for e in elec_oi if e in ch_names]
-	if not elec_oi:
-		warnings.warn('None of the specified electrodes found in channel names')
-		return np.array([], dtype=int)
-			
-	picks = mne.pick_channels(ch_names, include = elec_oi)
-
-	return picks	
 
 
 
