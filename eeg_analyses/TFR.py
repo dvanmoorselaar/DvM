@@ -1,5 +1,58 @@
 """
-analyze EEG data
+Time-Frequency Representation (TFR) Analysis for EEG Data.
+
+This module provides comprehensive functionality for time-frequency 
+decomposition analysis of EEG data. It implements wavelet-based and 
+Hilbert transform-based methods for extracting spectral power and phase 
+information across time and frequency domains.
+
+The module supports multiple time-frequency analysis methods including:
+- Morlet wavelet convolution with customizable parameters
+- Hilbert transform for broadband analysis  
+- Baseline correction and normalization procedures
+- Condition-based analysis with statistical testing
+- Integration with MNE-Python data structures
+
+Key Features
+------------
+- Flexible frequency specification (linear/logarithmic scaling)
+- Customizable wavelet parameters for temporal-spectral resolution 
+  trade-offs
+- Multiple baseline correction methods (condition-specific or averaged)
+- Spatial filtering options (Laplacian filtering)
+- Automated report generation with visualizations
+- Memory-efficient processing with optional downsampling
+
+Classes
+-------
+TFR : Main time-frequency analysis class
+    Provides complete pipeline for TFR analysis from raw epochs to 
+    statistical results with visualization support.
+
+Notes
+-----
+This implementation follows established practices from Cohen (2014) 
+"Analyzing Neural Time Series Data" and integrates with the MNE-Python 
+ecosystem for comprehensive EEG analysis workflows.
+
+References
+----------
+Cohen, M. X. (2014). Analyzing neural time series data: theory and 
+practice. MIT press.
+
+Examples
+--------
+Basic time-frequency analysis:
+
+>>> tfr = TFR(sj=1, epochs=epochs, df=behavioral_data, 
+...           min_freq=4, max_freq=40, num_frex=25)
+>>> tfr_results = tfr.compute_tfrs(conditions={'condition': ['A', 'B']})
+
+Custom wavelet parameters:
+
+>>> tfr = TFR(sj=1, epochs=epochs, df=behavioral_data,
+...           cycle_range=(4, 12), freq_scaling='linear')
+>>> tfr.condition_tfrs(conditions=['encoding', 'retrieval'])
 
 Created by Dirk van Moorselaar on 13-06-2018.
 Copyright (c) 2018 DvM. All rights reserved.
@@ -29,101 +82,110 @@ from IPython import embed
 
 class TFR(FolderStructure):
 	"""
-	The TFR class supports functionality for time-frequency 
-	decomposition (TFR) analysis on EEG data.
-	It provides methods for ....
-	TODO: UPDATE DOCSTRING!!!!!
+	Time-frequency representation analysis for EEG data.
+	
+	Provides comprehensive functionality for time-frequency 
+	decomposition of EEG data using wavelet convolution or Hilbert 
+	transform methods. Supports flexible frequency specification, 
+	baseline correction, condition-based analysis, and automated 
+	visualization.
+	
+	This class inherits from FolderStructure for file management and 
+	output organization capabilities.
 
-	This class inherits from FolderStructure, which provides 
-	functionality for managing file paths and saving outputs. 
-
-	Args:
-		sj (int): Subject identifier.
-		df (pd.DataFrame): Behavioral data associated with the 
-			EEG epochs.
-		epochs (mne.Epochs): Preprocessed EEG data segmented 
-			into epochs.
-		min_freq (int, optional): Minimum frequency (in Hz) for the 
-			time-frequency analysis. Defaults to 4 Hz.
-		max_freq (int, optional): Maximum frequency (in Hz) for the 
-			time-frequency analysis. Can not be higher than Nyquist 
-			frequency.Defaults to 40 Hz.
-		num_frex (int, optional): Number of frequencies to analyze 
-			between `min_freq` and `max_freq`. In general 20-30 
-			frequencies provide a reasonable number to cover a broad 
-			frequency range (e.g., 4-60 Hz), while also generating 
-			nice-looking plots. Defaults to 25.
-		cycle_range (tuple, optional): Range of cycles to use for the 
-			wavelet analysis. The tuple specifies the minimum and 
-			maximum number of cycles. The number of cycles of the 
-			Gaussiantaper define its width, and thus the width of the 
-			wavelet. This parameter controls the trade-off between 
-			temporal and frequency precision. Specifying a range 
-			(i.e., a tuple) makes sure that that the cycles increase in 
-			the same number of steps as the frequency of the wavelets. 
-			Defaults to (3,10).
-		freq_scaling (str, optional): Scaling method for the frequency 
-			axis. Supported values are `'log'` (logarithmic scaling) 
-			and `'linear'`. If main results are expected in lower 
-			frequency bands logarithmic scale is adviced, whereas linear 
-			scale is advised for expected results in higher frequency 
-			bands. Defaults to 'log'.Defaults to `'log'`.
-		baseline (tuple, optional): Time range (start, end) in seconds 
-			for baseline correction. If None, no baseline correction is 
-			applied. Defaults to None.
-		base_method (str, optional): Method for baseline correction. 
-			Specifies whether DB conversion is condition specific 
-			('cnd_spec') or averaged across conditions ('cnd_avg'). 
-			Defaults to condition specific baselining. 
-		method (str, optional): Method for time-frequency analysis. 
-			Supported values are `'wavelet'` and `'morlet'`. 
-			Defaults to `'wavelet'`.
-			TODO: Check MORLET functionality
-		downsample (int, optional): Factor by which to downsample the
-			time-frequency data. Defaults to 1 (no downsampling).
-		laplacian (bool, optional): If True, applies a Laplacian spatial 
-			filter to the EEG data before time-frequency analysis. 
-			Defaults to False.
-		normalize_wavelets (bool, optional): Whether to normalize
-			wavelets to unit energy for consistent amplitude scaling 
-			across frequencies. Recommended for most applications. 
-			Defaults to True.
-
-	Attributes:
-		sj (int): Subject identifier.
-		df (pd.DataFrame): Behavioral data associated with the 
-			EEG epochs.
-		epochs (mne.Epochs): Preprocessed EEG data segmented into 
-			epochs.
-		min_freq (int): Minimum frequency (in Hz) for the time-frequency 
-			analysis.
-		max_freq (int): Maximum frequency (in Hz) for the time-frequency 
-			analysis.
-		num_frex (int): Number of frequencies to analyze between
-			`min_freq` and `max_freq`.
-		cycle_range (tuple): Range of cycles to use for the wavelet 
-			analysis.
-		freq_scaling (str): Scaling method for the frequency axis 
-			(`'log'` or `'linear'`).
-		baseline (tuple): Time range (start, end) in seconds for 
-			baseline correction.
-		base_method (str): Method for baseline correction 
-			(condition specific or condition averaged).
-		method (str): Method for time-frequency analysis
-			(`'wavelet'` or `'hilbert'`).
-		downsample (int): Factor by which to downsample the 	
-			time-frequency data.
-		laplacian (bool): Indicates whether a Laplacian spatial filter 
-			is applied.
-		wavelets (np.ndarray): Morlet wavelets used for time-frequency 
-			analysis (if `method='wavelet'`).
-		frex (np.ndarray): Array of frequencies corresponding to the 
-			wavelets (if `method='wavelet'`).
-
-	Returns:
-		None: This is the constructor method and does not 
-		return a value.
-
+	Parameters
+	----------
+	sj : int
+		Subject identifier for file naming and organization.
+	epochs : mne.Epochs
+		Preprocessed EEG data segmented into epochs. Should contain 
+		clean, artifact-free data ready for time-frequency analysis.
+	df : pd.DataFrame
+		Behavioral data corresponding to the EEG epochs. Must have 
+		same number of rows as epochs.
+	min_freq : int, default=4
+		Minimum frequency in Hz for time-frequency analysis. 
+		Should be above 1 Hz for stable wavelet analysis.
+	max_freq : int, default=40
+		Maximum frequency in Hz for time-frequency analysis. 
+		Cannot exceed Nyquist frequency (sampling_rate / 2).
+	num_frex : int, default=25
+		Number of frequencies between min_freq and max_freq. 
+		Typical range is 20-30 for good frequency resolution 
+		without excessive computation time.
+	cycle_range : tuple of int, default=(3, 10)
+		Range of cycles for wavelet construction as (min_cycles,
+		max_cycles). Controls temporal-frequency resolution trade-off. 
+		Lower cycles give better temporal resolution, higher cycles give 
+		better frequency resolution.
+	freq_scaling : {'log', 'linear'}, default='log'
+		Frequency axis scaling method:
+		- 'log': Logarithmic spacing (recommended for lower frequencies)
+		- 'linear': Linear spacing (recommended for higher frequencies)
+	baseline : tuple of float, optional
+		Time range (start, end) in seconds for baseline correction.
+		If None, no baseline correction is applied.
+	base_method : {'trial_spec', 'cnd_avg'}, default='trial_spec'
+		Baseline correction method:
+		- 'cnd_spec': Condition-specific baseline correction 
+		  (recommended by Cohen 2014)
+		- 'trial_spec': Trial-specific baseline correction
+		- 'cnd_avg': Condition-averaged baseline correction
+	method : {'wavelet', 'hilbert'}, default='wavelet'
+		Time-frequency decomposition method:
+		- 'wavelet': Morlet wavelet convolution
+		- 'hilbert': Hilbert transform (broadband analysis)
+	power : {'total', 'evoked', 'induced'}, default='total'
+		Type of power to compute:
+		- 'total': Total power (evoked + induced)
+		- 'evoked': Evoked power (phase-locked activity)
+		- 'induced': Induced power (non-phase-locked activity)
+	downsample : int, default=1
+		Temporal downsampling factor. Values > 1 reduce temporal 
+		resolution but speed up analysis and reduce memory usage.
+	laplacian : bool, default=False
+		TODO: check at which point during preprocessing to apply
+		Whether to apply Laplacian spatial filtering before analysis.
+		Helps reduce volume conduction effects.
+	normalize_wavelets : bool, default=True
+		Whether to normalize wavelets to unit energy. Recommended 
+		for consistent amplitude scaling across frequencies.
+	report : bool, default=False
+		Whether to generate automated HTML reports with visualizations.
+	
+	Examples
+	--------
+	Basic time-frequency analysis:
+	
+	>>> tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=40)
+	>>> results = tfr.compute_tfrs(conditions=['condition_A', 
+	...   'condition_B'])
+	
+	Custom wavelet parameters with baseline correction:
+	
+	>>> tfr = TFR(sj=1, epochs=epochs, df=df, 
+	...           cycle_range=(4, 12), baseline=(-0.2, 0))
+	>>> tfr.condition_tfrs(conditions=['encoding', 
+	...   'retrieval'])
+	
+	High-frequency analysis with linear scaling:
+	
+	>>> tfr = TFR(sj=1, epochs=epochs, df=df, 
+	...           min_freq=20, max_freq=80, freq_scaling='linear')
+	>>> results = tfr.compute_tfrs()
+	
+	Notes
+	-----
+	Time-frequency analysis reveals how spectral power changes over 
+	time, providing insights into neural oscillations and their 
+	functional roles. The choice of wavelet parameters (cycles) 
+	determines the temporal-frequency resolution trade-off: more cycles 
+	give better frequency resolution but poorer temporal resolution.
+	
+	References
+	----------
+	Cohen, M. X. (2014). Analyzing neural time series data: theory and 
+	practice. MIT press.
 	"""
 
 	def __init__(
@@ -145,8 +207,16 @@ class TFR(FolderStructure):
 		normalize_wavelets: bool = True,
 		report: bool = False
 	):
-		"""class constructor"""
-
+		"""
+		Initialize TFR analysis object.
+		
+		Sets up time-frequency analysis parameters and validates input 
+		data. Creates wavelets if using wavelet method, or prepares 
+		frequency bands for Hilbert transform method.
+		
+		Parameters are documented in the class docstring above.
+		"""
+		
 		self.sj = sj
 		self.df = df
 		self.epochs = epochs
@@ -167,15 +237,26 @@ class TFR(FolderStructure):
 		# Initialize wavelets as None - will be generated when needed
 		self.wavelets = None
 		self.frex = None
-		self._wavelet_params_hash = None  # Track when wavelets need regeneration
+		# Track when wavelets need regeneration
+		self._wavelet_params_hash = None  
 		
 		if self.method == 'hilbert':
 			self.freq_bands = self.create_freq_bands()
 			self.frex = [(low + high)/2 for low, high in self.freq_bands]
 
 	def _get_wavelet_params_hash(self):
-		"""Generate a hash of current wavelet parameters to 
-		detect changes."""
+		"""
+		Generate hash of current wavelet parameters for change 
+		detection.
+		
+		Creates MD5 hash from all parameters that affect wavelet 
+		generation to detect when wavelets need to be regenerated.
+		
+		Returns
+		-------
+		str
+			MD5 hash string representing current parameter state.
+		"""
 		import hashlib
 		params = (self.min_freq, self.max_freq, self.num_frex, 
 				 self.cycle_range, self.freq_scaling, self.normalize_wavelets,
@@ -183,8 +264,14 @@ class TFR(FolderStructure):
 		return hashlib.md5(str(params).encode()).hexdigest()
 	
 	def _ensure_wavelets(self):
-		"""Ensure wavelets are generated and up-to-date 
-		with current parameters."""
+		"""
+		Ensure wavelets are generated and up-to-date with current 
+		parameters.
+		
+		Checks if wavelets need regeneration based on parameter changes 
+		and creates new wavelets/frequency bands as needed. Handles both 
+		waveletand Hilbert transform methods.
+		"""
 		if self.method != 'wavelet':
 			return
 			
@@ -217,45 +304,54 @@ class TFR(FolderStructure):
 		cnds: dict = None
 	) -> Tuple[mne.Epochs, pd.DataFrame]:
 		"""
-		Selects time-frequency (TF) data and applies initial data 
-		transformation steps.
+		Select and preprocess data for time-frequency analysis.
 
-		This function performs the following optional preprocessing 
-		steps in order:
-			1. Excludes trials based on behavioral data.
-			2. Applies a Laplacian spatial filter to the EEG data.
-			3. Flips the topography of trials based on 
-				specified criteria.
-			4. Selects electrodes of interest for further analysis.
+		Applies optional preprocessing steps including trial exclusion,
+		spatial filtering, topography flipping, and electrode selection
+		in preparation for TFR analysis.
 
-		Args:
-			elec_oi (Union[str, list]): Electrodes of interest. 
-				Can be specified as:
-					- A list of electrode names (e.g., `['O1', 'O2']`).
-					- A string referring to a subset of electrodes 
-						(e.g., `'all'`, `'frontal'`).
-			excl_factor (dict, optional): Dictionary specifying 
-				behavioral factors to exclude.Keys are column names in 
-				the behavioral DataFrame, and values are lists of 
-				values to exclude. For example, `{'cnd': [1, 2]}` 
-				excludes trials where the condition is 1 or 2. 
-				Defaults to None.
-			topo_flip (dict, optional): Dictionary specifying 
-				criteria for flipping the topography of trials. 
-				Keys are column names in the behavioral DataFrame, and 
-				values specify the conditions to flip. For example, 
-				`{'cnd': 'left'}` flips the topography of all trials 
-				where the condition is `'left'`. Defaults to None.
-			cnds (dict, optional): Conditions for condition-specific
-				evoked subtraction when calculating induced power.
-				Format: {column_name: [cond1, cond2]}.
-
-		Returns:
-			Tuple[mne.Epochs, pd.DataFrame]: 
-				- `epochs`: Epoched EEG data after applying the 
-					specified transformations.
-				- `df`: Behavioral DataFrame with parameters 
-					corresponding to each epoch.
+		Parameters
+		----------
+		elec_oi : str or list
+			Electrode selection criteria:
+			- 'all': Use all available electrodes in ch_names
+			- 'posterior': Posterior electrodes (parietal, occipital 
+			regions)
+			- 'frontal': Frontal electrodes (prefrontal, frontal 
+			   regions)
+			- 'central': Central electrodes (motor, somatosensory 
+			   regions)
+			- list: Specific electrode names to select
+		excl_factor : dict, optional
+			Trial exclusion criteria as 
+			{column_name: [values_to_exclude]}. Trials matching any 
+			specified values will be removed.
+		topo_flip : dict, optional
+			Topography flipping criteria as 
+			{column_name: condition_value}. Flips electrode positions 
+			for specified trials (e.g., for lateralization analysis).
+		cnds : dict, optional
+			#TODO: Document condition specification for induced power 
+			# analysis
+			
+		Returns
+		-------
+		epochs : mne.Epochs
+			Preprocessed EEG epochs after applying transformations.
+		df : pd.DataFrame
+			Behavioral data frame corresponding to remaining epochs.
+			
+		Notes
+		-----
+		Processing steps applied in order:
+		1. Trial exclusion based on behavioral criteria
+		2. Laplacian spatial filtering (if self.laplacian=True)
+		3. Topography flipping for lateralization analysis
+		4. Electrode selection and data reduction
+		
+		For lateralization analysis without explicit topography 
+		specification, assumes all stimuli are presented in the right 
+		visual field.
 		"""	
 		
 		# get local copy of data
@@ -289,15 +385,30 @@ class TFR(FolderStructure):
 		return epochs, df
 	
 	def create_freq_bands(self) -> list:
-		"""Creates frequency bands for Hilbert transform.
+		"""
+		Create frequency bands for Hilbert transform analysis.
 		
-		Uses same frequency spacing as wavelet method (linear or log) 
-		to create overlapping frequency bands. Band edges are placed 
-		halfway between center frequencies.
+		Generates overlapping frequency bands with the same frequency 
+		spacing as the wavelet method (linear or logarithmic). Band 
+		edges are positioned halfway between adjacent center frequencies 
+		to ensure consistent frequency coverage.
+
+		Returns
+		-------
+		list of tuple
+			List of (low_freq, high_freq) tuples defining each frequency 
+			band. Length equals self.num_frex.
+			
+		Notes
+		-----
+		This method is used when self.method='hilbert' to create 
+		frequency bands that match the center frequencies used in 
+		wavelet analysis, ensuring comparable results between methods.
 		
-		Returns:
-			list: List of tuples containing (low_freq, high_freq) for 
-			each band
+		Edge handling:
+		- First band: Extended downward by half the frequency step
+		- Last band: Extended upward by half the frequency step
+		- Minimum frequency capped at 0.1 Hz to avoid filtering issues
 		"""
 		# Get center frequencies using same spacing as wavelets
 		if self.freq_scaling == 'log':
@@ -313,13 +424,15 @@ class TFR(FolderStructure):
 		freq_bands = []
 		for i in range(len(center_freqs)):
 			if i == 0:  # First band
-				low_freq = center_freqs[0] - (center_freqs[1] - center_freqs[0])/2
+				freq_step = center_freqs[1] - center_freqs[0]
+				low_freq = center_freqs[0] - freq_step / 2
 				low_freq = max(0.1, low_freq)  # Avoid too low frequencies
 			else:
 				low_freq = (center_freqs[i-1] + center_freqs[i])/2
 				
 			if i == len(center_freqs)-1:  # Last band
-				high_freq = center_freqs[-1] + (center_freqs[-1] - center_freqs[-2])/2
+				freq_step = center_freqs[-1] - center_freqs[-2]
+				high_freq = center_freqs[-1] + freq_step / 2
 			else:
 				high_freq = (center_freqs[i] + center_freqs[i+1])/2
 				
@@ -339,53 +452,72 @@ class TFR(FolderStructure):
 		normalize_wavelets: bool = True
 	) -> Tuple[np.array, np.array]:
 		"""
-		Creates Morlet wavelets for time-frequency (TF) decomposition.
-		(based on Ch 12, 13 of Mike X Cohen, Analyzing neural time 
-		series data)
+		Create Morlet wavelets for time-frequency decomposition.
+		
+		Generates a bank of complex Morlet wavelets optimized for EEG 
+		time-frequency analysis. Implementation follows Cohen (2014) 
+		methodology with proper normalization and frequency scaling.
+		
+		Parameters
+		----------
+		min_freq : int
+			Minimum frequency in Hz for wavelet bank.
+		max_freq : int  
+			Maximum frequency in Hz for wavelet bank.
+		num_frex : int
+			Number of wavelets to create between min_freq and max_freq.
+		cycle_range : tuple of int
+			Range of cycles as (min_cycles, max_cycles). Controls 
+			temporal-frequency resolution trade-off.
+		freq_scaling : {'log', 'linear'}
+			Frequency spacing method:
+			- 'log': Logarithmic spacing (better for lower frequencies)
+			- 'linear': Linear spacing (uniform frequency resolution)
+		nr_time : int
+			Number of time points for wavelet construction. Should match
+			or exceed epoch length for proper convolution.
+		s_freq : float
+			Sampling frequency in Hz.
+		normalize_wavelets : bool, default=True
+			Whether to normalize wavelets to unit energy for consistent 
+			amplitude scaling across frequencies.
+			
+		Returns
+		-------
+		wavelets : np.ndarray
+			Complex Morlet wavelets with shape 
+			(n_frequencies, n_timepoints). Each row contains one wavelet 
+			in the frequency domain.
+		frex : np.ndarray  
+			Center frequencies corresponding to each wavelet.
+			
+		Raises
+		------
+		ValueError
+			If freq_scaling is not 'log' or 'linear'.
+			
+		Notes
+		-----
+		Morlet wavelets are Gaussian-windowed complex exponentials that 
+		provide optimal time-frequency resolution for oscillatory 
+		signals. The number of cycles determines the temporal-frequency 
+		precision:
+		
+		- Low cycles (e.g., 3): Good temporal resolution, poor frequency 
+		  resolution
+		- High cycles (e.g., 10): Poor temporal resolution, 
+		  good frequency resolution
+		
+		The wavelets are generated in the frequency domain and 
+		normalized  according to Cohen (2014) standards when 
+		normalize_wavelets=True.
+		
+		References
+		----------
+		Cohen, M. X. (2014). Analyzing neural time series data: theory
+		and practice. MIT press.
+		""" 
 
-		This function generates a set of Morlet wavelets for 
-		time-frequency analysis based on the specified frequency range, 
-		scaling method, and sampling frequency. 
-		The wavelets are constructed to ensure that the lowest frequency 
-		wavelet tapers to zero, making them suitable 
-		for TF decomposition.
-
-		Args:
-			min_freq (int): Lower bound of the frequency range (in Hz).
-			max_freq (int): Upper bound of the frequency range (in Hz).
-			num_frex (int): Number of frequencies to generate between 
-				`min_freq` and `max_freq`.
-			cycle_range (tuple): Range of cycles for the wavelets. The 
-				tuple specifies the minimum and maximum number of cycles 
-				(e.g., `(3, 10)`).
-			freq_scaling (str): Specifies how frequencies are spaced. 
-				Supported values are:
-					- `'log'`: Logarithmic scaling.
-					- `'linear'`: Linear scaling.
-			nr_time (int): Number of time points for the wavelets. This 
-				should be long enough to ensure that the lowest 
-				frequency wavelet tapers to zero. Typically, this 
-				can be equivalent to the number of time points in the 
-				epoched data.
-			s_freq (float): Sampling frequency (in Hz).
-			normalize_wavelets (bool, optional): Whether to normalize 
-				wavelets to unit energy (Cohen-style normalization). 
-				This ensures consistent amplitude scaling across 
-				frequencies and is recommended for most applications. 
-				Defaults to True.
-
-		Raises:
-			ValueError: If an unsupported frequency scaling option is 
-			specified.
-
-		Returns:
-			Tuple[np.array, np.array]: 
-				- `wavelets` (np.array): Complex Morlet wavelets for 
-					each frequency. The shape is `(num_frex, nr_time)`.
-				- `frex` (np.array): Array of frequencies corresponding 
-					to the wavelets.
-		"""
-	
 		# setup wavelet parameters (gaussian width and time)
 		if freq_scaling == 'log':
 			frex = np.logspace(np.log10(min_freq), np.log10(max_freq), 
@@ -449,7 +581,6 @@ class TFR(FolderStructure):
 				column corresponds to a time point.
 		"""
 
-
 		# Perform convolution in frequency domain
 		m = ifft(X * fft(wavelet, l_conv), l_conv)
 		m = m[:nr_time * nr_epochs + nr_time - 1]
@@ -510,61 +641,76 @@ class TFR(FolderStructure):
 	) -> np.ndarray:
 		
 		"""
-		Compute time-frequency representations with optional baseline correction 
-		and induced power calculation.
+		Compute time-frequency representations with optional baseline 
+		correction and induced power calculation.
 
-		This function performs time-frequency decomposition on EEG epochs with 
-		support for different power types (total, evoked, induced) and applies 
-		appropriate baseline correction depending on the intended use case.
-		For decoding analyses, it uses percent change from baseline (or raw power 
-		if no baseline), while for visualization/statistics it uses decibel 
-		conversion with log baseline correction.
+		This function performs time-frequency decomposition on EEG 
+		epochs with support for different power types (total, evoked, 
+		induced) and applies appropriate baseline correction depending 
+		on the intended use case. For decoding analyses, it uses percent 
+		change from baseline (or raw power if no baseline), while for 
+		visualization/statistics it uses decibel conversion with log 
+		baseline correction.
 
 		Args:
-			epochs (mne.Epochs): Preprocessed EEG data segmented into epochs.
+			epochs (mne.Epochs): Preprocessed EEG data segmented into 
+				epochs.
 				The data is used for time-frequency decomposition.
-			output (str, optional): Type of output to compute. Supported values:
-				- 'power': Compute instantaneous power (magnitude squared)
-				- 'phase': Compute instantaneous phase (cosine of phase angle)
+			output (str, optional): Type of output to compute. 
+				Supported values:
+				- 'power': Compute instantaneous power 
+				  (magnitude squared)
+				- 'phase': Compute instantaneous phase (cosine of 
+				  phase angle)
 				Defaults to 'power'.
-			for_decoding (bool, optional): Whether the output will be used for 
-				classification/decoding analysis. When True, applies percent 
-				change baseline correction (or raw power if no baseline) which 
-				preserves linear relationships needed for most classifiers. 
-				When False, applies log-based decibel conversion for 
+			for_decoding (bool, optional): Whether the output will be 
+			    used for classification/decoding analysis. When True, 
+				applies percent change baseline correction (or raw power 
+				if no baseline) which preserves linear relationships 
+				needed for most classifiers. When False, applies 
+				log-based decibel conversion for
 				visualization/statistics. Defaults to False.
-			cnd_idx (Optional[list], optional): List of trial indices for each 
-				condition when computing induced power (self.power='induced'). 
-				Each element should be an array of trial indices belonging to 
-				the same condition. Required when self.power='induced' to enable 
-				condition-specific evoked response subtraction. Defaults to None.
+			cnd_idx (Optional[list], optional): List of trial indices 
+			    for each condition when computing induced power 
+				(self.power='induced'). Each element should be an array 
+				of trial indices belonging to the same condition. 
+				Required when self.power='induced' to enable 
+				condition-specific evoked response subtraction. 
+				Defaults to None.
 
 		Returns:
 			np.ndarray: Time-frequency representation with shape 
-				(nr_frequencies, nr_epochs, nr_channels, nr_time) for epoched 
-				data or (nr_frequencies, nr_channels, nr_time) for averaged 
-				data. The exact shape depends on the input epochs and whether 
-				baseline correction was applied.
+				(nr_frequencies, nr_epochs, nr_channels, nr_time) for 
+				epoched data or (nr_frequencies, nr_channels, nr_time) 
+				for averaged data. Shape depends on input epochs
+				structure and the power type (evoked vs. epoched data).
 
 		Notes:
 			- Power types (controlled by self.power):
-				* 'total': Standard power computation without evoked subtraction
-				* 'induced': Subtracts condition-specific evoked response from 
-				  each trial before TFR computation (requires cnd_idx parameter)
-				* 'evoked': Computes power of the averaged evoked response
-			- For decoding (for_decoding=True): Uses percent change from baseline 
-			when self.baseline is specified, or raw power when no baseline.
-			This preserves the linear feature space needed for classification.
-			- For statistics/visualization (for_decoding=False): Uses decibel 
-			conversion (10*log10(power/baseline)) when baseline is specified.
-			- The baseline period is defined by self.baseline tuple (start, end) 
-			in seconds.
-			- Power computation: real²+ imag² of the complex analytic signal.
-			- Phase computation: cosine of the phase angle of the analytic signal.
+				* 'total': Standard power computation without evoked 
+				   subtraction
+				* 'induced': Subtracts condition-specific evoked 
+				   response from each trial before TFR computation 
+				   (requires cnd_idx parameter)
+				* 'evoked': Computes power of the averaged evoked 
+				   response
+			- For decoding (for_decoding=True): Uses percent change from 
+			baseline when self.baseline is specified, or raw power when 
+			no baseline. This preserves the linear feature space needed 
+			for classification.
+			- For statistics/visualization (for_decoding=False): Uses 
+			decibel conversion (10*log10(power/baseline)) when baseline 
+			is specified.
+			- The baseline period is defined by self.baseline tuple 
+			(start, end) in seconds.
+			- Power computation: real²+ imag² of the complex analytic 
+			signal.
+			- Phase computation: cosine of the phase angle of the 
+			analytic signal.
 
 		Raises:
-			ValueError: If self.power='induced' but cnd_idx is not provided, or 
-				if an unsupported output type is specified.	
+			ValueError: If self.power='induced' but cnd_idx is not 
+			provided, or if an unsupported output type is specified.	
 		"""
 
 		if self.power == 'induced':
@@ -574,7 +720,7 @@ class TFR(FolderStructure):
 
 		if self.power == 'induced':
 			# subtract condition specific evoked from each trial
-			print('Calculating induced power: subtracting condition specific ' \
+			print('Calculating induced power: subtracting condition specific '\
 			'evoked from each trial')
 			for idx in cnd_idx:
 				evoked = epochs[idx].average()
@@ -624,55 +770,156 @@ class TFR(FolderStructure):
 		name: str = 'main'
 	):
 		"""
-		Performs time-frequency (TFR) decomposition for specified 
-		conditions with optional lateralization.
+		Compute condition-specific time-frequency representations with 
+		optional lateralization analysis.
 
-		This function computes time-frequency representations (TFRs) 
-		for specified conditions and electrodes of interest. It supports 
-		lateralization handling via topography flipping (`topo_flip`). 
-		The function also supports baseline correction, downsampling, and 
-		condition-specific trial selection. The output is saved in a 
-		format compatible with MNE-Python.
+		This is the primary analysis method for computing time-frequency 
+		decompositions across experimental conditions. It supports 
+		sophisticated preprocessing including lateralization handling, 
+		spatial filtering, trial exclusion, and condition-specific 
+		baseline correction. Results are automatically saved in 
+		MNE-compatible format for further analysis and visualization.
 
-		Args:
-			pos_labels (dict): Dictionary specifying the position labels 
-				for stimuli of interest. For example, 
-				`{'target_loc': [2, 6]}` specifies the column name 
-				(`'target_loc'`) and the values corresponding to 
-				left and right hemifield stimuli. Note: lateralized 
-				TFRs are optional when `topo_flip` is defined, as 
-				topography flipping can handle lateralization.
-			cnds (dict, optional): Dictionary specifying conditions for 
-				TFR decomposition. The key should be the column name in 
-				the behavioral data, and the value should be a list of 
-				condition labels. For example, `{'cnd': ['A', 'B']}` 
-				processes conditions `'A'` and `'B'`. If None, all 
-				trials are processed. Defaults to None.
-			elec_oi (list, optional): Electrodes of interest. Can be 
-				`'all'` to include all electrodes or a list of electrode 
-				names (e.g., `['O1', 'O2']`). Defaults to `'all'`.
-			midline (dict, optional): Dictionary specifying trials where 
-				another stimulus of interest is presented on the 
-				vertical midline. The key should be the column name, and 
-				the value should be a list of labels. Defaults to None.
-			topo_flip (dict, optional): Dictionary specifying criteria 
-				for flipping the topography of certain trials. The key 
-				should be the column name in the behavioral data, and 
-				the value should be a list of labels indicating trials 
-				to flip. Defaults to None.
-			window_oi (tuple, optional): Time window of interest 
-				(start, end) in seconds. If specified, the TFR is 
-				cropped to this window. Defaults to None.
-			excl_factor (dict, optional): Dictionary specifying criteria 
-				for excluding trials from the analysis. For example, 
-				`{'cnd': ['exclude']}` excludes all trials where the 
-				condition is `'exclude'`. Defaults to None.
-			name (str, optional): Name used for saving the TFR output. 
-				Defaults to `'main'`.
+		The method implements a complete TFR analysis pipeline:
+		1. Data preprocessing (trial exclusion, spatial filtering)
+		2. Condition-specific trial selection and lateralization
+		3. Time-frequency decomposition (wavelet or Hilbert)
+		4. Baseline correction (trial- or condition-specific)
+		5. Temporal downsampling and windowing
+		6. Output formatting and file saving
 
-		Returns:
-			None: The function saves the computed TFR to disk in
-				MNE-compatible format.
+		Parameters
+		----------
+		pos_labels : dict
+			Position labels for lateralized stimuli analysis. Dictionary 
+			mapping column names to position values, e.g., 
+			{'target_loc': [2, 6]} where values correspond to left and 
+			right hemifield stimulus positions. Used to select trials 
+			for lateralization analysis. Can be None if no 
+			position-based selection is needed.
+		cnds : dict, optional
+			Experimental conditions for TFR analysis. Dictionary with 
+			column name as key and list of condition labels as values, 
+			e.g., {'condition': ['encoding', 'retrieval']}. Each 
+			condition will be processed separately. If None, all trials 
+			are analyzed as a single condition. Default is None.
+		elec_oi : {'all', list}, default='all'
+		elec_oi : str or list
+			Electrode selection criteria:
+			- 'all': Use all available electrodes in ch_names
+			- 'posterior': Posterior electrodes (parietal, occipital 
+			regions)
+			- 'frontal': Frontal electrodes (prefrontal, frontal 
+			   regions)
+			- 'central': Central electrodes (motor, somatosensory 
+			   regions)
+			- list: Specific electrode names to select
+		midline : dict, optional
+			Trials with stimuli on the vertical midline for 
+			lateralization analysis. Dictionary specifying column name 
+			and values for midline trials, e.g., {'target_loc': [0]}. 
+			These trials are typically excluded from lateralization 
+			comparisons. Default is None.
+		topo_flip : dict, optional
+			Topography flipping specification for lateralization 
+			analysis. Dictionary mapping column name to condition 
+			values that require electrode position flipping, e.g., 
+			{'stimulus_side': ['left']}. Enables combining left and 
+			right stimuli by flipping left-stimulus topographies to 
+			match right-stimulus electrode positions. Default is None.
+		window_oi : tuple of float, optional
+			Time window of interest in seconds as (start, end). If 
+			specified, TFR output is cropped to this temporal window 
+			to reduce memory usage and focus analysis. E.g., (0.0, 1.0) 
+			for 0-1 second post-stimulus. Default is None (full epoch).
+		excl_factor : dict, optional
+			Trial exclusion criteria for data cleaning. Dictionary 
+			mapping column names to lists of values to exclude, e.g., 
+			{'response_accuracy': ['incorrect'], 'artifact': [True]}. 
+			Trials matching any exclusion criteria are removed before 
+			TFR analysis. Default is None.
+		name : str, default='main'
+			Analysis name for output file identification. Used in 
+			filename generation for saved TFR objects. Should be 
+			descriptive of the analysis (e.g., 'alpha_lateralization', 
+			'gamma_encoding').
+
+		Returns
+		-------
+		None
+			This method does not return data directly. Instead, it saves 
+			condition-specific TFR results to disk in MNE-Python 
+			AverageTFR format. Files are saved in the TFR analysis 
+			directory with names following the pattern: 
+			'sj_{subject}_{name}_{condition}-tfr.h5'.
+
+		Notes
+		-----
+		**Processing Pipeline:**
+		
+		1. **Data Selection**: Applies electrode selection,
+		   trial exclusion, and topography flipping as specified
+		2. **Lateralization**: If pos_labels provided, selects trials 
+		   based on stimulus positions for lateralization analysis
+		3. **Condition Processing**: For each condition, performs TFR 
+		   decomposition using the specified method (wavelet or Hilbert)
+		4. **Baseline Correction**: Applies baseline normalization using 
+		   the method specified in self.base_method
+		5. **Output**: Saves results as MNE AverageTFR objects for 
+		   compatibility with MNE analysis workflows
+
+		**Lateralization Analysis:**
+		When pos_labels is provided, the method assumes a standard 
+		lateralization paradigm where stimuli are presented in left 
+		and right visual fields. Combined with topo_flip, this enables 
+		analysis of lateralized neural responses by aligning electrode 
+		positions relative to stimulus location.
+
+		**Memory Management:**
+		Large datasets can be reduced in memory usage by:
+		- Using window_oi to crop temporal dimension
+		- Setting downsample > 1 to reduce temporal resolution  
+		- Selecting specific electrodes with elec_oi
+
+		**File Organization:**
+		Output files are organized in the project's TFR directory 
+		structure. Each condition generates a separate file to enable 
+		flexible downstream analysis and comparison.
+
+		Examples
+		--------
+		Basic condition comparison:
+
+		>>> tfr.condition_tfrs(
+		...     pos_labels=None,
+		...     cnds={'task': ['encoding', 'retrieval']},
+		...     window_oi=(0.0, 2.0)
+		... )
+
+		Lateralization analysis:
+
+		>>> tfr.condition_tfrs(
+		...     pos_labels={'target_location': [1, 2]},  # left, right
+		...     topo_flip={'target_location': [1]},   # flip left trials
+		...     cnds={'condition': ['attend', 'ignore']},
+		...     elec_oi=['P7', 'P8', 'PO7', 'PO8']
+		... )
+
+		High-frequency analysis with artifact exclusion:
+
+		>>> tfr.condition_tfrs(
+		...     pos_labels=None,
+		...     cnds={'stimulus': ['faces', 'houses']},
+		...     excl_factor={'muscle_artifact': [True], 
+		...                  'response_time': ['too_fast']},
+		...     name='gamma_categorization'
+		... )
+
+		See Also
+		--------
+		compute_tfrs : Lower-level TFR computation method
+		select_tfr_data : Data preprocessing and selection
+		baseline_tfr : Baseline correction implementation
 		"""
 		
 		# get data
@@ -773,30 +1020,38 @@ class TFR(FolderStructure):
 
 	def tfr_loop(self, epochs: mne.Epochs) -> np.array:
 		"""
-		TODO: check hilbert convolution
-		Generates a time-frequency (TF) matrix for each channel.
+		# TODO: check hilbert method
+		Perform time-frequency decomposition across all channels.
 
-		This function performs time-frequency decomposition for each 
-		channel in the provided EEG epochs. It supports wavelet-based 
-		decomposition and computes the analytic signal for each 
-		frequency and channel. The resulting TF matrix contains the 
-		time-frequency representation for each trial, frequency, 
-		channel, and time point.
+		Helper method that applies the specified time-frequency method 
+		(wavelet or Hilbert) to each EEG channel independently. Handles 
+		both individual epochs and averaged evoked responses.
 
-		Args:
-			epochs (mne.Epochs): Preprocessed EEG data segmented into 
-				epochs. The data is used for time-frequency 
-				decomposition.
+		Parameters
+		----------
+		epochs : mne.Epochs
+			Preprocessed EEG data segmented into epochs. Can be either 
+			individual trial data or averaged evoked responses.
 
-		Returns:
-			np.array: A 4D NumPy array containing the time-frequency 
-			decomposition per trial. The shape of the array is 
-			`(nr_epochs, nr_frequencies, nr_channels, nr_time)`, where:
-				- `nr_epochs`: Number of trials in the input data.
-				- `nr_frequencies`: Number of frequencies used for 
-					decomposition.
-				- `nr_channels`: Number of EEG channels.
-				- `nr_time`: Number of time points in each trial.
+		Returns
+		-------
+		np.ndarray
+			Complex-valued time-frequency representation with shape 
+			(n_epochs, n_frequencies, n_channels, n_times). Contains 
+			the analytic signal for each trial, frequency, channel, 
+			and time point.
+
+		Notes
+		-----
+		The method supports two decomposition approaches:
+		
+		- **Wavelet convolution**: Uses precomputed Morlet wavelets 
+		  for frequency-domain convolution
+		- **Hilbert transform**: Applies bandpass filtering followed 
+		  by Hilbert transform for each frequency band
+		
+		Memory efficiency is optimized by converting output to 
+		complex64 precision and processing channels sequentially.
 		"""
 
 		# # Ensure wavelets are up-to-date before processing
@@ -854,13 +1109,35 @@ class TFR(FolderStructure):
 	def save_to_mne_format(self,tfr:dict,epochs:mne.Epochs,
 						tfr_name:str):
 		"""
-		convert tfr data to mne container for time-frequency data
-		(i.e, epochsTFR or AvereageTFR)
+		Save TFR results to MNE-Python compatible format.
 
-		Args:
-			tfr (dict): dictionary with tfr data
-			epochs (mne.Epochs): epoched eeg data (linked to beh)
-			tfr_name (str): name of tfr analysis
+		Converts internal TFR dictionary format to MNE AverageTFR 
+		objects and saves each condition as a separate .h5 file. 
+		Handles proper axis ordering and metadata preservation for 
+		MNE compatibility.
+
+		Parameters
+		----------
+		tfr : dict
+			TFR results dictionary containing 'power', 'times', 
+			'frex', 'ch_names', and 'cnd_cnt' keys with 
+			condition-specific power arrays.
+		epochs : mne.Epochs
+			Original EEG epochs object containing channel information 
+			and metadata for constructing MNE objects.
+		tfr_name : str
+			Base filename for saved TFR files. Each condition will be 
+			saved as '{tfr_name}_{condition}-tfr.h5'.
+
+		Notes
+		-----
+		Files are saved in the project's TFR directory structure 
+		using the folder_tracker system. Each condition generates 
+		a separate MNE AverageTFR file for independent loading and 
+		analysis.
+
+		The method handles axis reordering to match MNE's expected 
+		format: (..., n_channels, n_frequencies, n_times).
 		"""
 
 		# set output parameters
@@ -886,36 +1163,87 @@ class TFR(FolderStructure):
 	def baseline_tfr(self,tfr:dict,base:dict,method:str,
 		 			elec_oi:str='all') -> dict:
 		"""
-		Apply baseline correction via decibel conversion. 
+		Apply baseline correction to time-frequency power data.
 
-		For 'trial_spec': applies baseline correction to individual trials 
-		then averages
-		For 'cnd_spec'/'cnd_avg': averages trials first then applies baseline 
-		correction. 
+		Performs baseline normalization using various correction 
+		methods. Supports both trial-specific and condition-averaged 
+		baseline correction strategies with decibel conversion for 
+		statistical analysis and visualization.
 
-		Args:
-			tfr (dict): TF power per condition (epochs X nr_freq X 
-				nr_ch X nr_time)
-			base (dict): baseline TF power. Format depends on method:
-				- For 'cnd_spec'/'cnd_avg': mean baseline across trials 
-				(nr_freq X nr_chan)
-				- For 'trial_specific': baseline per trial 
-				(epochs X nr_freq X nr_chan)
-			method (str): method for baseline correction. Options:
-				- 'cnd_spec': condition-specific baseline 
-					(each condition uses its own baseline)
-				- 'cnd_avg': condition-averaged baseline (all conditions 
-				use same baseline)
-				- 'trial_spec': trial-specific baseline correction
-			elec_oi (str): Necessary when baselining depends on the 
-				topographic distribution of electrodes 
-				(i.e., when method is 'norm' or 'Z')
+		Parameters
+		----------
+		tfr : dict
+			TFR results dictionary containing condition-specific power 
+			arrays with shape (n_epochs, n_frequencies, n_channels, 
+			n_times) and associated metadata (times, channel names, 
+			etc.).
+		base : dict
+			Baseline power values for each condition. Format varies by 
+			correction method:
+			
+			- 'trial_spec': (n_epochs, n_frequencies, n_channels) 
+			   per condition
+			- 'cnd_spec'/'cnd_avg': (n_frequencies, n_channels) 
+			   per condition
+		method : {'trial_spec', 'cnd_spec', 'cnd_avg', 'norm', None}
+			Baseline correction strategy:
+			
+			- 'trial_spec': Apply baseline correction to individual 
+			  trials, then average across trials
+			- 'cnd_spec': Average trials first, then apply 
+			  condition-specific baseline correction
+			- 'cnd_avg': Average trials first, then apply grand-average 
+			  baseline correction across all conditions
+			- 'norm': Apply normalization procedure 
+			  (electrode-dependent)
+			- None: Simple trial averaging without baseline correction
+		elec_oi : str or list, default='all'
+		    # TODO: check this
+			Electrode specification. Required for normalization methods 
+			that depend on electrode topography ('norm', 'Z'). Usually 
+			matches the electrode selection used in analysis.
 
-		Raises:
-			ValueError: In case incorrect baselining method is specified
+		Returns
+		-------
+		dict
+			Modified TFR dictionary with baseline-corrected power 
+			values.  Trial dimension is averaged out, resulting in power 
+			arrays with shape (n_frequencies, n_channels, n_times) 
+			per condition.
 
-		Returns:
-			tfr (dict): baseline corrected time frequency power
+		Raises
+		------
+		ValueError
+			If an unsupported baseline correction method is specified.
+
+		Notes
+		-----
+		**Correction Methods:**
+		
+		- **Condition-specific ('cnd_spec')**: Standard approach 
+		  recommended by Cohen (2014). Averages trials within each 
+		  condition first, then applies baseline correction using that 
+		  condition's own baseline period. Balances statistical validity 
+		  with computational efficiency.
+		- **Trial-specific ('trial_spec')**: Alternative approach that 
+		  corrects each individual trial before averaging. May introduce 
+		  artifacts and is generally not recommended as the primary 
+		  method.
+		- **Condition-averaged ('cnd_avg')**: Uses grand-average 
+		  baseline across all conditions. Useful for between-condition 
+		  comparisons when conditions have similar baseline 
+		  characteristics.
+		- **Normalization ('norm')**: Specialized electrode-dependent 
+		  normalization (implementation-specific).
+
+		**Output Format:**
+		The method modifies the TFR dictionary in-place and adds 
+		trial count information ('cnd_cnt') for each condition to 
+		track statistical degrees of freedom.
+
+		See Also
+		--------
+		db_convert : Decibel conversion implementation
 		"""
 
 		cnds = list(tfr['power'].keys())
@@ -924,7 +1252,8 @@ class TFR(FolderStructure):
 			cnd_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 
 		for cnd in cnds:
-			power = tfr['power'][cnd]  # Shape: (epochs X nr_freq X nr_ch X nr_time)
+			# Shape: (epochs X nr_freq X nr_ch X nr_time)
+			power = tfr['power'][cnd]  
 			tfr['cnd_cnt'][cnd] = power.shape[0]
 
 			if method == 'trial_spec':
@@ -942,7 +1271,7 @@ class TFR(FolderStructure):
 				print('For normalization procedure it is assumed that it is as'
 				 	 ' if all stimuli of interest are presented right')
 				# Average first for normalization
-				avg_power = np.mean(power, axis=0)  # Shape: (nr_freq X nr_ch X nr_time)
+				avg_power = np.mean(power, axis=0)  
 				tfr['power'][cnd], info = self.normalize_power(avg_power, 
 															 list(elec_oi)) 
 				tfr.update({'norm_info':info})
@@ -956,23 +1285,50 @@ class TFR(FolderStructure):
 	
 	def db_convert(self, power: np.array, base_power: np.array) -> np.array:
 		"""
-		Decibel (dB) conversion with automatic detection of 
-		baseline type.
+		Convert power to decibels relative to baseline.
 		
-		Handles both trial-specific and condition-averaged baseline correction 
-		based on the dimensionality of both power and base_power inputs.
-
-		Args:
-			power (np.array): TF power. Can be:
-				- 4D (epochs X nr_freq X nr_ch X nr_time): individual trials
-				- 3D (nr_freq X nr_ch X nr_time): trial-averaged power
-			base_power (np.array): baseline power. Can be:
-				- 2D (nr_freq X nr_chan): condition-averaged baseline
-				- 3D (epochs X nr_freq X nr_chan): trial-specific baseline
-
-		Returns:
-			norm_power (np.array): baseline normalized power (dB)
-				- Same shape as input power
+		Performs decibel transformation [10 * log10(power / baseline)] 
+		with automatic detection of baseline type based on input 
+		dimensions. Handles both trial-specific and condition-averaged 
+		baselines.
+		
+		Parameters
+		----------
+		power : np.ndarray
+			Time-frequency power data with shapes:
+			- 4D (n_epochs, n_frequencies, n_channels, n_times): 
+			  individual trials
+			- 3D (n_frequencies, n_channels, n_times): 
+			  trial-averaged power
+		base_power : np.ndarray  
+			Baseline power data with shapes:
+			- 2D (n_frequencies, n_channels): condition-averaged 
+			  baseline
+			- 3D (n_epochs, n_frequencies, n_channels): trial-specific 
+			  baseline
+			
+		Returns
+		-------
+		np.ndarray
+			Baseline-normalized power in decibels with same shape as 
+			input power.Values represent power change relative to 
+			baseline:
+			- 0 dB: power equals baseline
+			- Positive dB: power exceeds baseline  
+			- Negative dB: power below baseline
+			
+		Raises
+		------
+		ValueError
+			If base_power dimensions are not 2D or 3D.
+			
+		Notes
+		-----
+		The conversion uses the formula: 10 * log10(power / baseline)
+		
+		Small epsilon values (1e-12) are added to prevent log(0) errors.
+		Baseline arrays are automatically expanded along the time 
+		dimension to match the power array shape.
 		"""
 
 		nr_time = power.shape[-1]
@@ -989,6 +1345,7 @@ class TFR(FolderStructure):
 
 		return norm_power
 
+	#TODO: update fucnction (make it more general)
 	@staticmethod
 	def lateralization_index(tfr:dict,elec_oi:list='all',
 		elec_pairs:list=None) -> dict:	
@@ -1098,46 +1455,35 @@ class TFR(FolderStructure):
 
 	@staticmethod	
 	def nextpow2(i):
-		'''
-		Gives the exponent of the next higher power of 2
-		'''
+		"""
+		Calculate the exponent of the next higher power of 2.
+
+		Determines the smallest integer n such that 2^n >= i. This is 
+		commonly used in FFT algorithms to find the optimal buffer size 
+		for frequency-domain convolution operations.
+
+		Parameters
+		----------
+		i : int
+			Input value for which to find the next power of 2 exponent.
+
+		Returns
+		-------
+		int
+			Exponent n such that 2^n >= i and 2^(n-1) < i.
+
+		Notes
+		-----
+		This function is used internally for determining optimal FFT 
+		buffer sizes during wavelet convolution. Powers of 2 are 
+		preferred for FFT efficiency.
+		"""
 
 		n = 1
 		while 2**n < i: 
 			n += 1
 		
 		return n
-
-	def apply_hilbert(self, 
-		X: np.ndarray, 
-		l_freq: float, 
-		h_freq: float, 
-		s_freq: float = 512) -> np.ndarray:
-		"""
-		Apply the filter-Hilbert method for time-frequency 
-		decomposition.
-
-		This method first bandpass filters the input EEG signal 
-		between `l_freq` and `h_freq`using the specified sampling 
-		frequency (`s_freq`). It then applies the Hilbert transform
-		to obtain the analytic signal, which can be used to extract 
-		instantaneous amplitude and phase.
-
-		Args:
-			X (np.ndarray): array containing the EEG signal. 
-			l_freq (float): Lower bound of the frequency band (Hz).
-			h_freq (float): Upper bound of the frequency band (Hz).
-			s_freq (float, optional): Sampling frequency of the signal 
-				(Hz). Defaults to 512.
-
-		Returns:
-			np.ndarray: The analytic signal after bandpass filtering and 
-				Hilbert transform. Same shape as input `X`.
-		"""
-
-		X = hilbert(filter_data(X, s_freq, l_freq, h_freq))
-
-		return X
 
 
 

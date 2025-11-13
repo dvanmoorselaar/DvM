@@ -112,11 +112,13 @@ def select_electrodes(ch_names: Union[list, np.ndarray],
 				  f'{list(missing)}')
 
 		else:
-			print(f'Note: {len(missing)} requested electrodes not found in dataset')
-			
+			print(f'Note: {len(missing)} requested electrodes not found '
+				  'in dataset')
+
+
 	picks = mne.pick_channels(ch_names, include=available_electrodes)
 
-	return picks	
+	return picks	 
 
 
 def baseline_correction(X:np.array,times:np.array,baseline:tuple) -> np.array:
