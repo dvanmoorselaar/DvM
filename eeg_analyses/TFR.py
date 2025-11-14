@@ -369,8 +369,7 @@ class TFR(FolderStructure):
 		# check whether left stimuli should be 
 		# artificially transferred to left hemifield
 		if topo_flip is not None:
-			(header, left), = topo_flip.items()
-			epochs = ERP.flip_topography(epochs, df,  left,  header)
+			epochs = ERP.flip_topography(epochs, df, topo_flip)
 		else:
 			print('No topography info specified. For lateralization analysis,'
 	 			' it is assumed as if all stimuli of interest are presented '

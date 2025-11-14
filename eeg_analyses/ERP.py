@@ -1,5 +1,48 @@
 """
-analyze EEG data
+Event-Related Potential (ERP) Analysis for EEG Data.
+
+This module provides comprehensive functionality for analyzing 
+event-related potentials (ERPs) in EEG data, leveraging the MNE-Python 
+ecosystem for professional neuroscience analysis. The module supports 
+standard ERP analysis workflows including trial averaging, baseline 
+correction, condition-based comparisons, and lateralized component 
+analysis.
+
+The primary ERP class inherits from FolderStructure to provide organized 
+file management and output saving capabilities. The module implements 
+both basic ERP analysis (mean amplitude, peak latency) and advanced 
+statistical methods (jackknife latency comparisons, AUC measurements).
+
+Key functionality includes:
+    - Condition-based ERP averaging with flexible trial selection
+    - Lateralized ERP analysis with topographic flipping
+    - Peak detection and time window optimization
+    - Statistical comparison methods for ERP components
+    - Export capabilities for further statistical analysis
+    - Integration with MNE-Python for professional visualization
+
+The module is designed for cognitive neuroscience research and supports 
+common ERP components analysis including N2pc, P3, lateralized readiness 
+potentials, and other event-related brain responses.
+
+
+Examples
+--------
+Basic ERP analysis workflow:
+    >>> import mne
+    >>> from ERP import ERP
+    >>> # Load preprocessed epochs and behavioral data
+    >>> erp_analyzer = ERP(sj=1, epochs=epochs, df=behavior_df, 
+    ...                   baseline=(-0.2, 0))
+    >>> # Create condition-based ERPs
+    >>> erp_analyzer.condition_erps(pos_labels={'target_loc': [2, 6]},
+    ...                            cnds={'target_type': ['standard', 
+    ...'deviant']})
+
+See Also
+--------
+mne.Evoked : MNE-Python evoked data structure
+mne.Epochs : MNE-Python epochs data structure
 
 Created by Dirk van Moorselaar on 01-07-2015.
 Copyright (c) 2015 DvM. All rights reserved.
@@ -28,43 +71,105 @@ from support.support import select_electrodes,trial_exclusion,create_cnd_loop,\
 
 class ERP(FolderStructure):
     """
-    The ERP class supports functionality for event-related potential 
-    (ERP) analysis on EEG data. This class relies on the MNE-Python 
-    functionality to handle evoked data. It provides methods for ....
-    TODO: UPDATE DOCSTRING!!!!!
+    Event-Related Potential (ERP) analysis for EEG data using
+    MNE-Python.
 
-    This class inherits from FolderStructure, which provides 
-    functionality for managing file paths and saving outputs. 
+    The ERP class provides comprehensive functionality for analyzing 
+    event-related potentials in EEG data. It supports standard ERP 
+    analysis workflows including trial averaging, condition-based 
+    comparisons, baseline correction, and lateralized component 
+    analysis.
 
-    Args:
-        sj (int): Subject number.
-        epochs (mne.Epochs): Preprocessed EEG data segmented into 
-        epochs.
-        df (pd.DataFrame): Behavioral data associated with 
-        the EEG epochs.
-        baseline (Tuple[float, float]): Time range (start, end) in 
-        seconds for baseline correction.
-        l_filter (Optional[float]): Low cutoff frequency for filtering. 
-        Defaults to None.
-        h_filter (Optional[float]): High cutoff frequency for filtering. 
-        Defaults to None.
-        downsample (Optional[int]): Target sampling frequency for 
-        downsampling. Defaults to None.
-        report (bool): Whether to generate ERP reports. 
-        Defaults to False.
+    The class inherits from FolderStructure to provide organized file 
+    management and automatic saving of analysis outputs. It integrates 
+    seamlessly with MNE-Python for professional neuroscience analysis 
+    and visualization.
 
-    Attributes:
-        sj (int): Subject number.
-        epochs (mne.Epochs): Preprocessed EEG data segmented into 
-        epochs.
-        df (pd.DataFrame): Behavioral data associated with the EEG 
-        epochs.
-        baseline (Tuple[float, float]): Time range (start, end) in 
-        seconds for baseline correction.
-        report (bool): Whether to generate ERP reports.
+    Parameters
+    ----------
+    sj : int
+        Subject identifier number for file naming and organization.
+    epochs : mne.Epochs
+        Preprocessed EEG data segmented into epochs. Should contain 
+        all trials for analysis with proper event markers.
+    df : pd.DataFrame
+        Behavioral data corresponding to the EEG epochs. Must have 
+        the same number of trials as epochs and optionally contain 
+        condition labels for analysis. Can be used for trial selection, 
+        exclusion criteria, or collapsed across all trials.
+    baseline : tuple of float
+        Time range (start, end) in seconds for baseline correction 
+        (e.g., (-0.2, 0) for 200ms pre-stimulus baseline).
+    l_filter : float, optional
+        Low-pass filter cutoff frequency in Hz. Applied to epochs 
+        during data selection if specified. 
+        Default is None (no filtering).
+    h_filter : float, optional
+        High-pass filter cutoff frequency in Hz. Applied to epochs 
+        during data selection if specified. 
+        Default is None (no filtering).
+    downsample : int, optional
+        Target sampling frequency in Hz for downsampling. Only 
+        applied if lower than current sampling rate. Default is None.
+    laplacian : bool, optional
+        Whether to apply Laplacian (current source density) filtering 
+        to enhance spatial resolution. Default is False.
+    report : bool, optional
+        Whether to generate HTML reports with ERP visualizations 
+        using MNE-Python's reporting functionality. Default is False.
 
-    Methods:
+    Methods
+    -------
+    select_erp_data(excl_factor=None, topo_flip=None)
+        Select and preprocess ERP data with optional trial exclusion 
+        and topographic flipping.
+    create_erps(epochs, df, idx=None, time_oi=None, erp_name='all', 
+                RT_split=False, save=True)
+        Create averaged ERP objects from epochs with optional 
+        RT splitting.
+    condition_erps(pos_labels=None, cnds=None, midline=None, 
+                   topo_flip=None, time_oi=None, excl_factor=None, 
+                   RT_split=False, name='main')
+        Generate condition-specific ERPs with flexible trial selection.
+    generate_erp_report(evokeds, report_name)
+        Generate HTML reports for ERP visualization.
 
+    Notes
+    -----
+    This class is specifically designed for cognitive neuroscience 
+    research and supports analysis of common ERP components such as 
+    N2pc, P300, lateralized readiness potentials, and other 
+    event-related brain responses.
+
+    The class handles lateralized designs by supporting topographic 
+    flipping, allowing all trials to be analyzed as if stimuli were 
+    presented in a consistent hemifield (typically right/contralateral).
+
+    Baseline correction follows standard ERP analysis practices and 
+    is applied to all evoked objects using the MNE-Python baseline 
+    correction implementation.
+
+    Examples
+    --------
+    Basic ERP analysis:
+        >>> erp = ERP(sj=1, epochs=epochs_data, df=behavioral_data,
+        ...          baseline=(-0.2, 0))
+        >>> erp.condition_erps(cnds={'condition': ['standard', 
+        ...'deviant']})
+
+    Lateralized ERP analysis:
+        >>> erp = ERP(sj=1, epochs=epochs_data, df=behavioral_data,
+        ...          baseline=(-0.2, 0))
+        >>> erp.condition_erps(pos_labels={'target_loc': [2, 4, 6, 8]},
+        ...                    topo_flip={'target_loc': [2, 8]},
+        ...                    cnds={'condition': ['target', 
+        ... 'distractor']})
+
+    See Also
+    --------
+    mne.Evoked : MNE-Python evoked data structure
+    mne.Epochs : MNE-Python epochs data structure
+    mne.baseline.apply_baseline : Baseline correction implementation
     """
 
     def __init__(
@@ -79,7 +184,16 @@ class ERP(FolderStructure):
         laplacian: bool = False,
         report: bool = False
     ):
-        """class constructor"""
+        """
+        Initialize ERP analysis object.
+        
+        Sets up event-related potential analysis parameters and 
+        validates input data. Configures baseline correction, filtering 
+        options, and report generation settings for comprehensive ERP 
+        analysis.
+        
+        Parameters are documented in the class docstring above.
+        """
 
 
         self.sj = sj
@@ -92,36 +206,68 @@ class ERP(FolderStructure):
         self.laplacian = laplacian
         self.report = report
 
-    def select_erp_data(self,excl_factor:dict=None,
-                        topo_flip:dict=None)->Tuple[pd.DataFrame, 
-                                                            mne.Epochs]:
+    def select_erp_data(self, excl_factor: dict = None,
+                        topo_flip: dict = None) -> Tuple[pd.DataFrame, 
+                                                        mne.Epochs]:
         """
-        Selects the data of interest by excluding a subset of trials and 
-        optionally flipping the topography of certain trials.
+        Select and preprocess ERP data with optional trial exclusion and 
+        topographic flipping.
 
-        This function filters the behavioral and EEG data based on 
-        specified exclusion criteria and adjusts the topography for 
-        lateralized designs, ensuring that all stimuli of interest are 
-        treated as if presented on the right hemifield.
+        This function filters behavioral and EEG data based on specified 
+        exclusion criteria and applies topographic adjustments for 
+        lateralized designs. It also applies any specified filtering, 
+        downsampling, and Laplacian filtering before trial averaging.
 
-        Args:
-            excl_factor (Optional[dict]): A dictionary specifying 
-                criteria for excluding trials from the analysis. 
-                For example, `dict(target_color=['red'])` excludes all 
-                trials where the target color is red. Defaults to None.
-            topo_flip (Optional[dict]): A dictionary specifying criteria 
-                for flipping the topography of certain trials. The key 
-                should be the column name in the behavioral data, and 
-                the value should be a list of labels indicating trials 
-                to flip. For example, dict(cue_loc=[2, 3]) flips trials 
-                where the cue location is 2 or 3. Defaults to None.
+        Parameters
+        ----------
+        excl_factor : dict, optional
+            Dictionary specifying criteria for excluding trials from 
+            analysis. Keys should be column names in the behavioral 
+            DataFrame, values should be lists of labels to exclude. 
+            For example, `{'target_color': ['red']}` excludes trials 
+            where target color is red. Default is None.
+        topo_flip : dict, optional
+            Dictionary specifying criteria for flipping topography of 
+            certain trials. Key should be column name in behavioral 
+            data, value should be list of labels indicating trials to 
+            flip. For example, `{'cue_loc': [2, 3]}` flips trials where
+            cue location is 2 or 3. Default is None.
 
-        Returns:
-            Tuple[pd.DataFrame, mne.Epochs]: 
-                - `df`: A pandas DataFrame containing the filtered 
-                    behavioral data.
-                - `epochs`: An mne.Epochs object containing the filtered 
-                    EEG data.
+        Returns
+        -------
+        df : pd.DataFrame
+            Filtered behavioral data with reset index for proper 
+            alignment with epochs.
+        epochs : mne.Epochs
+            Processed EEG epochs with applied filtering, downsampling, 
+            Laplacian filtering, and topographic flipping as specified.
+
+        Notes
+        -----
+        For lateralized designs, topographic flipping ensures all
+        stimuli of interest are treated as if presented in the right 
+        hemifield (contralateral relative to the stimulus of interest).
+
+        The function applies preprocessing steps in the following order:
+        1. Trial exclusion based on behavioral criteria
+        2. Frequency filtering (if l_filter or h_filter specified)
+        3. Laplacian filtering (if laplacian=True)
+        4. Downsampling (if downsample specified and lower than current 
+           rate)
+        5. Topographic flipping (if topo_flip specified)
+
+        Examples
+        --------
+        Exclude trials and flip topography:
+        >>> df, epochs = erp.select_erp_data(
+        ...     excl_factor={'correct': [0]}, # exclude incorrect trials
+        ...     topo_flip={'target_loc': [2, 8]}  # flip left positions
+        ... )
+
+        Apply only trial exclusion:
+        >>> df, epochs = erp.select_erp_data(
+        ...     excl_factor={'reaction_time': [999]}  # exclude timeouts
+        ... )
         """
 
         df = self.df.copy()
@@ -150,8 +296,7 @@ class ERP(FolderStructure):
         # check whether left stimuli should be 
         # artificially transferred to left hemifield
         if topo_flip is not None:
-            (header, left), = topo_flip.items()
-            epochs = self.flip_topography(epochs, df, left, header)
+            epochs = self.flip_topography(epochs, df, topo_flip)
         else:
             print('No topography info specified. In case of a lateralized '
                 'design. It is assumed as if all stimuli of interest are '
@@ -170,37 +315,103 @@ class ERP(FolderStructure):
         save: bool = True
     ) -> mne.Evoked:
         """
-        Creates evoked objects using MNE functionality and optionally 
-        saves them to disk.
+        Average epochs to create evoked responses with baseline 
+        correction.
 
-        This function averages EEG epochs to create evoked objects, 
-        applies baseline correction, and optionally crops the evoked 
-        objects to a specified time window. It can also split 
-        trials into fast and slow groups based on median reaction time 
-        (RT) and generate separate evoked objects for each group.
+        Computes trial-averaged evoked responses (ERPs) from EEG epochs 
+        using MNE-Python's averaging functionality. The method applies 
+        baseline correction based on the instance's baseline parameter
+        and can optionally crop data to specific time windows of 
+        interest. When RT_split is enabled, trials are divided at the 
+        median reaction time to create separate fast and slow evoked 
+        responses for RT analyses.
 
-        Args:
-            epochs (mne.Epochs): Preprocessed EEG data segmented into 
-                epochs.
-            df (pd.DataFrame): Behavioral data associated with the 
-                EEG epochs.
-            idx (Optional[np.array]): Indices used for trial averaging. 
-                If None, all trials are used. Defaults to None.
-            time_oi (Optional[tuple]): Time window of interest 
-                (start, end) in seconds. If specified, evoked objects 
-                are cropped to this window. Defaults to None.
-            erp_name (str): Filename to save the evoked object. 
-                Defaults to 'all'.
-            RT_split (bool): If True, data is analyzed separately for 
-                fast and slow trials based on median RT. Requires that 
-                the DataFrame contains a column RT. Defaults to False.
-            save (bool): If True, the evoked object is saved to disk. 
-                If False, the evoked object is returned instead. 
-                Defaults to True.
+        Parameters
+        ----------
+        epochs : mne.Epochs
+            Preprocessed EEG epochs for trial averaging. Should contain 
+            the trials specified by idx parameter or all available 
+            trials if idx is None.
+        df : pd.DataFrame
+            Behavioral dataframe with trial-level information. Used for 
+            RT splitting when RT_split=True. Must contain 'RT' column if 
+            RT splitting is requested.
+        idx : array-like or None, default=None
+            Boolean or integer array specifying which trials to include 
+            in averaging. If None, all epochs are averaged. The indices 
+            apply to both epochs and df to maintain trial 
+            correspondence.
+        time_oi : tuple or None, default=None
+            Time window of interest as (tmin, tmax) in seconds. If 
+            provided, evoked responses are cropped to this window after 
+            averaging. Useful for focusing on specific ERP components or 
+            analysis periods.
+        erp_name : str, default='all'
+            Base filename for saving evoked objects. Files are saved 
+            with '-ave.fif' suffix. When RT_split=True, '_fast' and 
+            '_slow' are appended to create separate files.
+        RT_split : bool, default=False
+            Whether to create separate evoked responses for fast and 
+            slow trials based on median reaction time. When True, 
+            requires 'RT' column in df and creates additional evoked 
+            objects.
+        save : bool, default=True
+            Whether to save evoked objects to disk. Files are saved in 
+            the ERP evoked subfolder with .fif format. When False, only 
+            returns the main evoked object without saving.
 
-        Returns:
-            mne.Evoked: The evoked object created from the averaged EEG 
-            epochs.
+        Returns
+        -------
+        mne.Evoked
+            Trial-averaged evoked response with baseline correction 
+            applied. If time_oi is specified, the evoked object is 
+            cropped to that time window. When RT_split=True, this 
+            returns the evoked response from all trials, while fast/slow 
+            splits are saved separately.
+
+        Notes
+        -----
+        The averaging process follows standard ERP computation:
+        1. Select trials using idx parameter
+        2. Average epochs across trials using MNE's average() method
+        3. Apply baseline correction using instance's baseline parameter
+        4. Optionally crop to time window of interest
+        5. Save to disk if requested
+
+        When RT_split=True, the method performs median split analysis:
+        - Computes median RT across selected trials
+        - Creates 'fast' group for trials below median
+        - Creates 'slow' group for trials above median
+        - Generates separate evoked objects for each group
+        - Both split evoked objects are automatically saved
+
+        File naming convention:
+        - Main evoked: '{erp_name}-ave.fif'
+        - Fast trials: '{erp_name}_fast-ave.fif'
+        - Slow trials: '{erp_name}_slow-ave.fif'
+
+        Examples
+        --------
+        Create evoked response from all trials:
+
+        >>> erp_analyzer = ERP(...)
+        >>> evoked = erp_analyzer.create_erps(epochs, df, 
+        ...   erp_name='target')
+
+        Average specific trial subset with time cropping:
+
+        >>> target_idx = df['condition'] == 'target'
+        >>> evoked = erp_analyzer.create_erps(
+        ...     epochs, df, idx=target_idx,
+        ...     time_oi=(-0.1, 0.6), erp_name='target_crop'
+        ... )
+
+        Generate RT split analysis:
+
+        >>> evoked = erp_analyzer.create_erps(
+        ...     epochs, df, idx=target_idx,
+        ...     RT_split=True, erp_name='target_rt'
+        ... )
         """
 
         df = df.iloc[idx].copy()
@@ -229,13 +440,46 @@ class ERP(FolderStructure):
                                                             self.baseline)
                 # if specified select time window of interest
                 if time_oi is not None:
-                    evoked_split = evoked_splot.crop(tmin = time_oi[0],
+                    evoked_split = evoked_split.crop(tmin = time_oi[0],
                                                      tmax = time_oi[1]) 															
                 evoked_split.save(self.folder_tracker(['erp', 'evoked'],
                                                 f'{erp_name}_{rt}-ave.fif'))
         return evoked
                 
-    def generate_erp_report(self,evokeds:dict, report_name: str):
+    def generate_erp_report(self, evokeds: dict, report_name: str):
+        """
+        Generate HTML report for ERP visualization using MNE-Python.
+
+        Creates an HTML report containing ERP visualizations for all 
+        provided conditions. The report includes topographic plots, 
+        butterfly plots, and other standard ERP visualizations 
+        generated by MNE-Python's reporting functionality.
+
+        Parameters
+        ----------
+        evokeds : dict
+            Dictionary where keys are condition names and values are 
+            mne.Evoked objects containing the averaged ERP data.
+        report_name : str
+            Base name for the output report file (without extension).
+
+        Notes
+        -----
+        The report is saved as an HTML file in the 'erp/report' 
+        subfolder of the project directory. Laplacian-filtered data 
+        may have visualization limitations in current MNE versions.
+
+        The generated report provides interactive visualizations that 
+        are useful for quality control and preliminary analysis of 
+        ERP data across conditions.
+
+        Examples
+        --------
+        >>> erp_analyzer.generate_erp_report(
+        ...     evokeds={'standard': evoked_std, 'deviant': evoked_dev},
+        ...     report_name='P300_analysis'
+        ... )
+        """
 
 
         report_name = self.folder_tracker(['erp', 'report'],
@@ -263,61 +507,149 @@ class ERP(FolderStructure):
         name: str = 'main'
     ):
         """
-        Creates event-related potentials (ERPs) for specified 
-        conditions.
+        Generate condition-specific ERPs with flexible trial selection 
+        and lateralization support.
 
-        This function selects trials of interest based on provided 
-        position labels and generates condition-specific ERPs. It 
-        optionally applies exclusion criteria, flips the topography for 
-        lateralized designs (if specified via topo_flip),and crops the 
-        time window of interest. ERPs can also be split into fast and 
-        slow trials based on median reaction time (RT).
+        This is the primary method for ERP analysis in the class, 
+        providing comprehensive functionality for creating 
+        condition-specific event-related potentials from EEG epochs. 
+        The method supports lateralized experimental designs through 
+        position-based trial selection, topographic flipping for 
+        contralateral analysis, and flexible condition comparisons. 
+        It handles the complete ERP analysis pipeline from trial 
+        selection to evoked object creation and optional reporting.
 
-        Args:
-            pos_labels (dict): A dictionary specifying the position 
-                labels for stimuli of interest.The key should be the 
-                column in the corresponding behavioral DataFrame that 
-                contains position labels, and the value should be a list 
-                of position labels to be used in the analysis.
-                For example, `dict(target_loc=[2,6])` selects trials 
-                where the target is presented on positions 2 and 6.
-            cnds (Optional[dict]): Dictionary specifying conditions for 
-                ERP creation. The key should be the column name in the 
-                behavioral data, and the value should be a list of 
-                condition labels. 
-                For example, `dict(target_cnd=['red','green'])` 
-                creates seperate ERPs for trials where the target was
-                green and red.  Defaults to None, which creates ERPs 
-                collapsed across all data.
-            midline (Optional[dict]): Dictionary specifying trials where 
-                another stimulus of interest is presented on the 
-                vertical midline. The key should be the column name, 
-                and the value should be a list of labels (see pos_labels 
-                and cnds for example logic). Defaults to None.
-            topo_flip (Optional[dict]): Dictionary specifying criteria 
-                for flipping the topography of certain trials. 
-                The key should be the column name in the behavioral 
-                data, and the value should be a list of labels 
-                indicating trials to flip. (see pos_labels 
-                and cnds for example logic). Defaults to None.
-            time_oi (Optional[tuple]): Time window of interest 
-                (start, end) in seconds. If specified, 
-                evoked objects are cropped to this window. 
-                Defaults to None.
-            excl_factor (Optional[dict]): Dictionary specifying criteria 
-                for excluding trials from the analysis. 
-                For example, `dict(dist_color=['red'])` excludes all 
-                trials where the distractor color is red. 
-                Defaults to None.
-            RT_split (bool): If True, data is analyzed separately 
-                for fast and slow trials based on median RT. Requires
-                that the DataFrame contains a column 'RT'.
-                Defaults to False.
-            name (str): Name used for saving the ERP files. 
-            Defaults to 'main'.
+        Parameters
+        ----------
+        pos_labels : dict or None, default=None
+            Position-based trial selection criteria for lateralized
+            designs. Key specifies the behavioral dataframe column 
+            containing position information, value provides list of 
+            position labels to include. Essential for lateralized ERP 
+            components like N2pc, SPCN, or CDA analysis.
+            Example: {'target_loc': [2, 4, 6, 8]} selects trials where 
+            targets appeared at positions 2, 4, 6, or 8.
+        cnds : dict or None, default=None
+            Condition-specific ERP generation criteria. Key specifies 
+            the behavioral dataframe column for condition labels, value 
+            provides list of conditions to analyze separately. 
+            When None, creates single ERP collapsed across all selected 
+            trials.Example: {'stimulus_type': ['standard', 'deviant']} 
+            creates separate ERPs for standard and deviant stimuli.
+        midline : dict or None, default=None
+            Additional selection criteria for trials where other stimuli 
+            appear on the vertical midline. Useful for controlling 
+            distractor or non-target stimulus positions in lateralized 
+            designs. Format matches pos_labels and cnds.
+            Example: {'distractor_loc': [0]} limits analysis to trials 
+            where distractors appeared at central position.
+        topo_flip : dict or None, default=None
+            Topographic flipping criteria for lateralized analysis. 
+            Key specifies behavioral column, value lists labels for 
+            trials requiring hemisphere flipping. Enables analysis as if 
+            all stimuli were contralateral by flipping electrode data 
+            for ipsilateral presentations.
+            Example: {'target_loc': [2, 8]} flips topography for left 
+            visual field trials.
+        time_oi : tuple or None, default=None
+            Time window of interest as (tmin, tmax) in seconds for 
+            temporal cropping. Applied after trial averaging to focus 
+            analysis on specific ERP components or time periods. 
+            When None, uses full epoch duration.
+            Example: (0.1, 0.4) crops to 100-400ms post-stimulus for 
+            P300 analysis.
+        excl_factor : dict or None, default=None
+            Trial exclusion criteria based on behavioral or data quality 
+            measures. Key specifies column for exclusion logic, value 
+            lists labels to exclude. Applied before any other trial 
+            selection to remove unwanted trials.
+            Example: {'response_accuracy': ['incorrect']} excludes error 
+            trials.
+        RT_split : bool, default=False
+            Whether to perform median reaction time split analysis. When 
+            True, creates additional fast/slow ERPs based on median RT 
+            division. Requires 'RT' column in behavioral dataframe. 
+            Generates separate evoked objects for speed-based 
+            comparisons.
+        name : str, default='main'
+            Base identifier for output files and analysis labeling. 
+            Used in evoked object filenames as 
+            'sj_{subject}_{condition}_{name}-ave.fif'. Helps 
+            organize multiple analyses of the same dataset.
 
-        Returns:
-            None: The function saves the generated ERPs to disk.
+        Returns
+        -------
+        None
+            Method saves evoked objects to disk and optionally generates 
+            HTML reports. Individual evoked objects are stored in ERP 
+            evoked subfolder with systematic naming convention. 
+            When self.report=True, creates comprehensive visualization 
+            report.
+
+        Notes
+        -----
+        Analysis Pipeline:
+        1. Select and preprocess ERP data using select_erp_data()
+        2. Apply position-based trial selection if pos_labels specified
+        3. Loop through conditions creating separate ERPs
+        4. Apply time window cropping if time_oi provided
+        5. Save evoked objects with systematic naming
+        6. Generate optional visualization reports
+
+        Lateralized Design Support:
+        The method is specifically designed for lateralized ERP 
+        components where stimuli can appear in left or right visual 
+        fields. Position labels typically represent spatial locations 
+        (e.g., 2,4,6,8 for right field; 1,3,5,7 for left field) and 
+        topographic flipping ensures all analyses are performed as if 
+        stimuli were contralateral.
+
+        File Organization:
+        - ERP: 'erp/evoked/sj_{sj}_{condition}_{name}-ave.fif'
+        - RT split: 'erp/evoked/sj_{sj}_{condition}_{name}_fast-ave.fif'
+        - HTML reports: 'erp/report/sj_{sj}_{name}.html'
+
+        The method handles missing conditions by printing warnings and
+        continuing analysis for available conditions.
+
+        Examples
+        --------
+        Basic condition comparison without lateralization:
+
+        >>> erp_analyzer = ERP(sj=1, epochs=epochs, df=behavioral_data, 
+        ...                   baseline=(-0.2, 0))
+        >>> erp_analyzer.condition_erps(
+        ...     cnds={'stimulus_type': ['standard', 'deviant']},
+        ...     time_oi=(0.25, 0.45), name='P300_analysis'
+        ... )
+
+        Lateralized N2pc analysis with topographic flipping:
+
+        >>> erp_analyzer.condition_erps(
+        ...     pos_labels={'target_loc': [2, 4, 6, 8]},
+        ...     cnds={'set_size': ['2', '4', '6']},
+        ...     topo_flip={'target_loc': [2, 8]},
+        ...     time_oi=(0.18, 0.28), name='N2pc_setsize'
+        ... )
+
+        Complex lateralized design with distractor control:
+
+        >>> erp_analyzer.condition_erps(
+        ...     pos_labels={'target_loc': [1, 3, 5, 7, 2, 4, 6, 8]},
+        ...     cnds={'target_color': ['red', 'green']},
+        ...     midline={'distractor_loc': [0]},
+        ...     topo_flip={'target_loc': [1, 3, 5, 7]},
+        ...     excl_factor={'accuracy': ['error']},
+        ...     RT_split=True, name='lateralized_attention'
+        ... )
+
+        RT split analysis for speed-accuracy effects:
+
+        >>> erp_analyzer.condition_erps(
+        ...     cnds={'difficulty': ['easy', 'hard']},
+        ...     RT_split=True, time_oi=(0.3, 0.6), 
+        ...     name='difficulty_RT_effects'
+        ... )
         """
 
         # get data
@@ -366,47 +698,136 @@ class ERP(FolderStructure):
     def flip_topography(
         epochs: mne.Epochs, 
         df: pd.DataFrame, 
-        left: list, 
-        header: str, 
+        topo_flip: dict, 
         flip_dict: Optional[dict] = None, 
         heog: str = 'HEOG'
     ) -> mne.Epochs:
         """
-        Flips the topography of trials where the stimuli of interest 
-        were presented on the left.
+        Transform lateralized EEG data to unified hemispheric reference 
+        frame.
 
-        This function adjusts the EEG data so that trials where the 
-        stimuli of interest were presented on the left 
-        (i.e., right hemifield) are flipped as if they were presented on 
-        the right (i.e., left hemifield). After running this function, 
-        all stimuli are treated as if presented on the right hemifield 
-        (contralateral relative to the stimulus of interest).
+        This method performs topographic flipping to enable lateralized 
+        ERP analysis by transforming trials with ipsilateral stimulus 
+        presentations to appear as if they were contralateral. The 
+        transformation swaps left-right electrode pairs for specified 
+        trials, creating a consistent hemispheric reference frame where
+        all stimuli can be analyzed as contralateral presentations.
 
-        By default, flipping is performed based on the Biosemi 
-        64 spatial layout. The function also supports flipping 
-        the horizontal electrooculogram (HEOG) channel if specified.
+        This is essential for lateralized ERP components (N2pc, SPCN, 
+        CDA, LRP) where the neural response depends on the spatial 
+        relationship between stimulus location and recording hemisphere. 
+        After flipping, difference waves (contralateral - ipsilateral) 
+        can be computed across all trials regardless of original 
+        stimulus location.
 
-        Args:
-            epochs (mne.Epochs): Preprocessed EEG epochs object.
-            df (pd.DataFrame): Behavioral DataFrame containing 
-                trial-specific parameters.
-            left (list): Position labels of trials where the topography 
-                will be flipped to the other hemifield.
-            header (str): Column name in the behavioral DataFrame that 
-            contains position labels to be flipped.
-            flip_dict (Optional[dict]): Dictionary specifying electrode 
-                pairs for flipping. The key-value pairs represent 
-                electrodes to swap (e.g., `{'Fp1': 'Fp2'}`). 
-                Defaults to None, in which case the flip dict is 
-                generated based on electrode layout in epochs.
-            heog (str, optional): Name of the HEOG channel. If this 
-                channel is present in the epochs object, the sign of all 
-                left trials will be flipped. Defaults to 'HEOG'.
+        Parameters
+        ----------
+        epochs : mne.Epochs
+            Preprocessed EEG epochs containing trial data for 
+            topographic transformation. The epochs object is modified 
+            in-place with flipped electrode data for specified trials.
+        df : pd.DataFrame
+            Behavioral dataframe with trial-level stimulus information. 
+            Must contain position or location columns that correspond to 
+            the epochs trial order for identifying flipping targets.
+        topo_flip : dict
+            Dictionary specifying topographic flipping criteria. Key 
+            indicates the behavioral column name containing position 
+            labels, value provides list of position labels identifying 
+            trials requiring hemisphere transformation. 
+            Example: {'target_loc': [1, 3, 5, 7]} flips trials where 
+            targets appeared at left visual field positions.
+        flip_dict : dict or None, default=None
+            Custom electrode pairing dictionary for topographic 
+            transformation. Keys and values specify electrode pairs to 
+            swap (e.g., {'O1': 'O2', 'P7': 'P8'}). If None, 
+            automatically generates pairs based on standard naming 
+            convention (odd=left, even=right).
+        heog : str, default='HEOG'
+            Name of horizontal electrooculogram channel for polarity 
+            reversal. When present, the HEOG signal is inverted for 
+            flipped trials to maintain consistent eye movement polarity 
+            across the transformed reference frame.
 
-        Returns:
-            mne.Epochs: The epochs object with flipped topography for 
-                specified trials.
+        Returns
+        -------
+        mne.Epochs
+            The input epochs object with topographically flipped 
+            electrode data for specified trials. The transformation is 
+            applied in-place, modifying the original epochs._data array 
+            for identified trials.
+
+        Notes
+        -----
+        Topographic Flipping Logic:
+        1. Extract position criteria from topo_flip dictionary
+        2. Identify trials matching flipping criteria using behavioral 
+           data
+        3. Create or use provided flip_dict for electrode pair mapping
+        4. Swap data between paired electrodes for identified trials
+        5. Invert HEOG polarity to maintain eye movement consistency
+        6. Return modified epochs with unified hemispheric reference
+
+        Automatic Flip Dictionary Generation:
+        When flip_dict=None, the method automatically creates electrode 
+        pairs based on standard EEG naming conventions where 
+        odd-numbered electrodes represent left hemisphere positions and 
+        even-numbered electrodes represent right hemisphere positions 
+        (e.g., O1↔O2, P7↔P8).
+
+        Electrode Selection:
+        The method operates on EEG and CSD (current source density) 
+        channels only, preserving other channel types unchanged. This 
+        ensures that only spatially-relevant neural signals undergo 
+        transformation.
+
+        Common Applications:
+        - N2pc analysis: Flip ipsilateral target trials to create 
+          contralateral reference frame
+        - SPCN studies: Transform memory array presentations for 
+          consistent lateralization
+        - CDA experiments: Align memory load conditions regardless of 
+          original stimulus side
+        - LRP analysis: Create consistent motor preparation reference 
+          frame
+
+        Examples
+        --------
+        Basic N2pc topographic flipping for left visual field trials:
+
+        >>> flipped_epochs = ERP.flip_topography(
+        ...     epochs, behavioral_df, 
+        ...     topo_flip={'target_position': [1, 3, 5, 7]}
+        ... )
+
+        Custom electrode pairing for specialized montage:
+
+        >>> custom_pairs = {'O1': 'O2', 'P7': 'P8', 'PO7': 'PO8'}
+        >>> flipped_epochs = ERP.flip_topography(
+        ...     epochs, behavioral_df,
+        ...     topo_flip={'stimulus_location': ['left_field']},
+        ...     flip_dict=custom_pairs
+        ... )
+
+        Memory task with HEOG correction:
+
+        >>> flipped_epochs = ERP.flip_topography(
+        ...     epochs, behavioral_df,
+        ...     topo_flip={'memory_array_side': [2, 8]},
+        ...     heog='Horizontal_EOG'
+        ... )
+
+        See Also
+        --------
+        select_lateralization_idx : Select trials for lateralized 
+        analysis
+        condition_erps : Main ERP analysis method using topographic 
+        flipping
+        group_lateralized_erp : Group-level lateralized difference waves
         """
+
+        # Extract position criteria from topo_flip dictionary
+        (header, left), = topo_flip.items()
 
         picks = mne.pick_types(epochs.info, eeg=True, csd = True)   
         # dictionary to flip topographic layout
@@ -450,34 +871,121 @@ class ERP(FolderStructure):
         midline: Optional[dict] = None
     ) -> np.array:
         """
-        Selects trial indices based on lateralized position labels 
-        and optionally limits selection to trials where another stimulus 
-        is presented on the vertical midline.
+        Select trial indices for lateralized ERP analysis with optional 
+        midline constraints.
 
-        This function identifies trials where the stimuli of interest 
-        are presented left or right of the vertical midline based on 
-        position labels. If specified, trial selection can be further 
-        restricted to those where another stimulus is concurrently 
-        presented on the midline. It can also be used to select 
-        non-lateralized trials based on the provided position labels.
+        This method identifies trials based on spatial position criteria 
+        for lateralized experimental designs. It selects trials where 
+        stimuli of interest appear at specified lateral positions and 
+        optionally restricts selection to trials where additional 
+        stimuli are presented on the vertical midline. This function is 
+        essential for lateralized ERP components analysis such as N2pc, 
+        SPCN, CDA, and other spatial attention paradigms.
 
-        Args:
-            df (pd.DataFrame): Behavioral DataFrame containing 
-                trial-specific parameters linked to EEG epochs.
-            pos_labels (dict): Dictionary specifying the column with 
-                position labels in the `df` DataFrame and the values to 
-                include in the analysis. 
-                For example, `dict(target_loc=[2, 6])` selects trials
-                where the target is presented at positions 2 or 6.
-            midline (Optional[dict]): Dictionary specifying the column 
-                and values for trials where another stimulus is 
-                presented on the vertical midline. 
-                For example, `dict(dist_loc=[0, 2])` limits selection to 
-                trials where the distractor is presented at positions 
-                0 or 2. Defaults to None.
+        The method supports both simple position-based selection and 
+        complex experimental designs where multiple stimuli must meet 
+        specific spatial criteria simultaneously.
 
-        Returns:
-            np.array: Array of selected trial indices.
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Behavioral dataframe containing trial-level stimulus and 
+            response information. Must include position columns 
+            corresponding to the spatial layout used in the experiment. 
+            Trial order must match the corresponding EEG epochs for 
+            proper alignment.
+        pos_labels : dict
+            Position-based selection criteria specifying which trials to 
+            include. Key indicates the behavioral column containing 
+            spatial position information, value provides list of 
+            position labels to select. Supports both lateralized and 
+            non-lateralized position selection.
+            Example: {'target_loc': [2, 4, 6, 8]} selects trials where 
+            targets appeared at right visual field positions.
+        midline : dict or None, default=None
+            Additional spatial constraint for trials where other stimuli 
+            appear at midline positions. Key specifies behavioral column 
+            for secondary stimulus positions, value lists acceptable 
+            midline position labels. Used to control for distractor 
+            placement or enforce specific stimulus configurations.
+            Example: {'distractor_loc': [0]} limits selection to trials 
+            where distractors appeared at central fixation.
+
+        Returns
+        -------
+        np.ndarray
+            Array of trial indices (integers) identifying selected 
+            trials in the behavioral dataframe. These indices can be 
+            used directly for EEG epoch selection and maintain 
+            correspondence between behavioral and neural data.
+
+        Notes
+        -----
+        Selection Logic:
+        1. Extract position criteria from pos_labels dictionary
+        2. Identify all trials matching position requirements
+        3. If midline specified, apply additional spatial constraints
+        4. Return intersection of position and midline criteria
+
+        Spatial Position Systems:
+        The method works with any spatial position encoding system 
+        commonly used in lateralized paradigms:
+        - Clock positions: 1-8 representing locations around fixation
+        - Cartesian coordinates: explicit x,y position values  
+        - Categorical labels: 'left', 'right', 'center' descriptors
+        - Custom encoding: any consistent position labeling scheme
+
+        Multiple Constraint Handling:
+        When midline parameter is provided, the method applies 
+        intersection logic to ensure trials meet both primary position 
+        criteria and secondary midline constraints. This enables 
+        experimental control over stimulus configurations.
+
+        Common Applications:
+        - N2pc paradigms: Select lateral target trials with central 
+          distractors
+        - SPCN studies: Choose memory array positions with specific 
+          layouts
+        - CDA experiments: Control bilateral vs unilateral memory loads
+        - Attention cueing: Select valid/invalid cue-target combinations
+
+        Examples
+        --------
+        Basic lateral position selection for N2pc analysis:
+
+        >>> target_trials = ERP.select_lateralization_idx(
+        ...     behavioral_df, 
+        ...     pos_labels={'target_position': [2, 4, 6, 8]}
+        ... )
+
+        Complex selection with midline distractor control:
+
+        >>> controlled_trials = ERP.select_lateralization_idx(
+        ...     behavioral_df,
+        ...     pos_labels={'target_loc': [1, 3, 5, 7]},
+        ...     midline={'distractor_loc': [0]}
+        ... )
+
+        Memory paradigm with bilateral item selection:
+
+        >>> memory_trials = ERP.select_lateralization_idx(
+        ...     behavioral_df,
+        ...     pos_labels={'memory_items': ['left', 'right']},
+        ...     midline={'central_cue': ['fixation']}
+        ... )
+
+        Multiple distractor positions with lateral targets:
+
+        >>> multi_constraint = ERP.select_lateralization_idx(
+        ...     behavioral_df,
+        ...     pos_labels={'target_side': [2, 8]},
+        ...     midline={'dist1_loc': [0], 'dist2_loc': [4, 6]}
+        ... )
+
+        See Also
+        --------
+        condition_erps : Primary ERP analysis method using this 
+        selection function
         """
 
         # select all lateralized trials	
@@ -505,53 +1013,157 @@ class ERP(FolderStructure):
         window_size: float = 0.05
     ) -> Union[tuple, dict]:
         """
-        Determines an ERP time window using peak detection, based either 
-        on grand averaged data or condition-specific data.
+        Determine optimal ERP analysis time windows using peak detection 
+        algorithms.
 
-        This function identifies the peak within the specified 
-        electrodes and time window and returns the ERP window centered 
-        on the detected peak. The window can be based on either the 
-        grand average waveform across all conditions, condition-specific 
-        waveforms. Window selection can be based on a set of electrodes
-        of interest (elec_oi), which can be a single list of electrodes
-        or a lateralized difference waveform 
-        (e.g., contralateral - ipsilateral; see Args).
+        This method automatically identifies time windows for ERP 
+        component analysis by detecting peak activity within specified
+        electrodes and time ranges. The peak detection can operate on 
+        grand averaged data across all conditions or on 
+        condition-specific waveforms, supporting both standard electrode 
+        averaging and lateralized difference wave analysis. This is 
+        essential for objective, data-driven selection of analysis 
+        windows for ERP components.
 
-        Args:
-            erps (Union[dict, list]): Either a dictionary, as generated 
-                by e.g., lateralized_erp, where keys are condition names 
-                and values are lists of evoked objects (mne.Evoked), 
-                or a list of evoked objects for grand averaging.
-            elec_oi (list): Electrodes of interest. If the data of 
-                interestis a difference waveform (e.g., contralateral 
-                vs. ipsilateral), specify a list of lists, where the 
-                first list contains contralateral electrodes and the 
-                second list contains ipsilateral electrodes 
-                For example elec_oi = `[['O1'],['O2']]` selects the 
-                window of interest based on the difference between 
-                O1 and O2.
-            method (str, optional): Specifies whether the window is 
-                based on the grand averaged data (`'cnd_avg'`) or 
-                condition-specific data (`'cnd_spc'`).
-                Defaults to `'cnd_avg'`.
-            window_oi (Optional[tuple]): Time window of interest 
-                (start, end) in seconds. If specified, peak detection is 
-                restricted to this window. Defaults to None, 
-                which uses the full time range.
-            polarity (str, optional): Specifies whether the peak is 
-                positive (`'pos'`) or negative (`'neg'`). 
-                Defaults to `'pos'`.
-            window_size (float, optional): Size of the ERP window in 
-                seconds, centered on the detected peak. 
-                Defaults to 0.05.
+        The method provides robust window selection for ERP components 
+        where peak latency may vary across conditions, subjects, or 
+        experimental manipulations, eliminating subjective bias in 
+        temporal window definition.
 
-        Returns:
-            Union[list, dict]: 
-                - If `method='cnd_avg'`, returns a list representing 
-                the selected time window [start, end].
-                - If `method='cnd_spc'`, returns a dictionary where keys 
-                are condition names and values are lists representing 
-                condition-specific time windows.
+        Parameters
+        ----------
+        erps : dict or list
+            ERP data for peak detection analysis. If dictionary, keys 
+            represent condition names and values contain lists of 
+            mne.Evoked objects for each subject/trial. If list, 
+            contains mne.Evoked objects directly for grand average 
+            analysis. The method is designed for group-level analysis 
+            where multiple evoked objects are averaged together.
+        elec_oi : list
+            Electrode specification for peak detection. Can be either:
+            - List of electrode names (str) for standard averaging 
+              across specified channels (e.g., ['Cz', 'CPz'] for 
+              midline analysis)
+            - Nested list for lateralized difference waves with format 
+              [contralateral_electrodes, ipsilateral_electrodes] 
+              enabling automatic difference wave computation 
+              (e.g., [['O1', 'PO7'], ['O2', 'PO8']])
+        method : str, default='cnd_avg'
+            Peak detection strategy determining window selection
+            approach:
+            - 'cnd_avg': Uses grand average across all conditions for 
+              unified window selection, ensuring consistent temporal 
+              analysis across conditions
+            - 'cnd_spc': Generates condition-specific windows based on 
+              individual condition peaks, allowing adaptive windows for 
+              each experimental condition
+        window_oi : tuple or None, default=None
+            Temporal search range for peak detection as (tmin, tmax) in
+            seconds. When specified, constrains peak detection to this 
+            interval, useful for targeting specific ERP components or 
+            avoiding artifacts. If None, searches across the full epoch 
+            duration.Example: (0.1, 0.4) searches for P300 peaks 
+            between 100-400ms.
+        polarity : str, default='pos'
+            Expected polarity of the target ERP component for peak 
+            detection:
+            - 'pos': Searches for positive-going peaks (e.g., P300, P1)
+            - 'neg': Searches for negative-going peaks (e.g., N2pc)
+            Determines whether to use maximum or minimum detection 
+            algorithms.
+        window_size : float, default=0.05
+            Size of the analysis window in seconds, centered on the 
+            detected peak. The final window extends ±window_size/2 
+            around the peak latency. Should be chosen based on component 
+            characteristics and temporal resolution requirements 
+            (typically 20-100ms for most ERP components).
+
+        Returns
+        -------
+        list or dict
+            Analysis time window(s) with format depending on method 
+            parameter:
+            - If method='cnd_avg': Returns single list 
+              [tmin, tmax, polarity] representing the unified time 
+              window across all conditions
+            - If method='cnd_spc': Returns dictionary with condition 
+              names as keys and [tmin, tmax, polarity] lists as values 
+              for condition-specific windows.
+
+        Notes
+        -----
+        Peak Detection Algorithm:
+        1. Extract electrode data based on elec_oi specification
+        2. For lateralized analysis, compute difference waves 
+           (contra - ipsi)
+        3. Average across specified electrodes to create summary 
+           waveform
+        4. Apply temporal constraints from window_oi parameter
+        5. Detect peak using polarity-appropriate algorithm (max/min)
+        6. Center analysis window around detected peak latency
+
+        Lateralized Difference Waves:
+        When elec_oi contains nested lists, the method automatically 
+        computes contralateral minus ipsilateral difference waves. This 
+        is essential for lateralized ERP components (N2pc, SPCN, CDA) 
+        where the signal of interest is the hemispheric difference 
+        rather than absolute amplitude.
+
+        Method Selection Guidelines:
+        - Use 'cnd_avg' for components with consistent timing across 
+          conditions
+        - Use 'cnd_spc' when experimental manipulations affect 
+          component latency
+        - Consider 'cnd_avg' for group analyses requiring uniform time 
+          windows
+        - Consider 'cnd_spc' for exploratory analyses or variable 
+          components
+
+        Examples
+        --------
+        Grand average P300 window selection:
+
+        >>> p300_window = ERP.select_erp_window(
+        ...     erps={'standard': std_erps, 'deviant': dev_erps},
+        ...     elec_oi=['Cz', 'CPz', 'Pz'],
+        ...     method='cnd_avg', window_oi=(0.25, 0.45),
+        ...     polarity='pos', window_size=0.05
+        ... )
+
+        Condition-specific N170 windows:
+
+        >>> n170_windows = ERP.select_erp_window(
+        ...     erps={'faces': face_erps, 'objects': obj_erps},
+        ...     elec_oi=['P7', 'P8', 'PO7', 'PO8'],
+        ...     method='cnd_spc', window_oi=(0.12, 0.22),
+        ...     polarity='neg', window_size=0.03
+        ... )
+
+        Lateralized N2pc difference wave window:
+
+        >>> n2pc_window = ERP.select_erp_window(
+        ...     erps={'target_left': left_erps, 
+        ...    'target_right': right_erps},
+        ...     elec_oi=[['O1', 'PO7'], ['O2', 'PO8']],
+        ...     method='cnd_avg', window_oi=(0.18, 0.28),
+        ...     polarity='neg', window_size=0.04
+        ... )
+
+        Automatic LPP window with full epoch search:
+
+        >>> lpp_window = ERP.select_erp_window(
+        ...     erps=emotion_erps,
+        ...     elec_oi=['CPz', 'Pz'],
+        ...     method='cnd_avg', window_oi=(0.4, 0.8),
+        ...     polarity='pos', window_size=0.1
+        ... )
+
+        See Also
+        --------
+        get_erp_params : Extract channel and timing information from 
+        ERP data
+        export_erp_metrics_to_csv : Export metrics using selected 
+        windows
         """
 
         # set params
@@ -624,25 +1236,20 @@ class ERP(FolderStructure):
     @staticmethod
     def get_erp_params(erps:Union[dict,list])->Tuple[list,np.array]:
         """
-        Extracts EEG channel names and sample times from ERP data.
+        Extract channel names and time points from ERP data.
 
-        This function retrieves the channel names and time points 
-        from the provided ERP data, which can be either a dictionary 
-        (with condition names as keys and lists of evoked objects as 
-        values) or a list of evoked objects.
+        Parameters
+        ----------
+        erps : dict or list
+            ERP data as dictionary of condition lists or direct list 
+            of mne.Evoked objects.
 
-        Args:
-            erps (Union[dict, list]): ERP data to extract 
-                parameters from. 
-                If a dictionary, the keys represent condition names and 
-                the values are lists of evoked objects (mne.Evoked). 
-                If a list, it contains evoked objects directly.
-
-        Returns:
-            Tuple[list, np.array]: 
-                - `channels` (list): List of EEG channel names.
-                - `times` (np.array): Array of sample times in the 
-                    evoked data.
+        Returns
+        -------
+        channels : list
+            EEG channel names.
+        times : np.ndarray
+            Time points in seconds.
         """
 
         # set params
@@ -665,40 +1272,105 @@ class ERP(FolderStructure):
         name: str = 'main'
     ):
         """
-        Exports ERP metrics (e.g., mean amplitude, area under the curve) 
-        to a CSV file.
+        Export ERP metrics to CSV file for statistical analysis.
 
-        This function calculates ERP metrics for specified conditions 
-        and electrodes and saves the results to a CSV file. The file is 
-        stored in the subfolder `erp/stats` in the main project folder. 
-        It supports lateralized difference waveforms and 
-        condition-specific time windows.
+        Calculates and exports ERP amplitude metrics across conditions 
+        and electrodes to CSV format. Supports both standard electrode 
+        averaging and lateralized difference wave analysis. The output 
+        is organized for direct import into statistical software with 
+        subjects as rows and condition/electrode combinations as 
+        columns.
 
-        Args:
-            erps (Union[dict, list]): ERP data to process. Can be a list 
-                of evoked objects (mne.Evoked) or a dictionary where 
-                keys are condition names and values are lists of evoked 
-                objects.
-            window_oi (Union[list, dict]): Time window of interest for 
-                calculating metrics. If a list, the same window is 
-                applied to all conditions. If a dictionary, 
-                condition-specific windows are used 
-                (keys correspond to condition names).
-            elec_oi (list): Electrodes of interest. For lateralized 
-                difference waveforms, specify a list of lists, where the 
-                first list contains contralateral electrodes 
-                and the second list contains ipsilateral electrodes.
-            cnds (list, optional): List of conditions to include in the 
-                export. If None, all conditions are processed. 
-                Defaults to None.
-            method (str, optional): Metric calculation method 
-                (e.g., `'mean_amp'`, `'auc'`). Defaults to `'mean_amp'`.
-            name (str, optional): Name of the output CSV file. 
-                Defaults to `'main'`.
+        Parameters
+        ----------
+        erps : dict or list
+            ERP data for metric extraction. If dictionary, keys are 
+            condition names and values are lists of mne.Evoked objects 
+            (one per subject). If list, contains evoked objects directly 
+            and is treated as single condition.
+        window_oi : list or dict
+            Time window for metric calculation in seconds as 
+            [tmin, tmax]. If list, same window applied to all 
+            conditions. If dictionary, keys match condition names with 
+            condition-specific windows as values.
+        elec_oi : list
+            Electrode specification for analysis. Either list of 
+            electrode names (str) for standard averaging, or nested list 
+            [[contralateral_electrodes], [ipsilateral_electrodes]] for 
+            lateralized difference wave analysis.
+        cnds : list, optional
+            Condition names to include in export. If None, processes all 
+            available conditions from erps dictionary. Default is None.
+        method : str, default='mean_amp'
+            Metric calculation method. Supported options:
+            - 'mean_amp': Mean amplitude across time window
+            - 'auc': Area under curve for all values
+            - 'auc_pos': Area under curve for positive values only
+            - 'auc_neg': Area under curve for negative values only  
+            - 'onset_latency': Component onset latency detection
+        name : str, default='main'
+            Output CSV filename (without extension). File is saved in 
+            'erp/stats/' subfolder.
 
-        Returns:
-            None: The function saves the calculated metrics to a 
-                CSV file.
+        Notes
+        -----
+        Output Organization:
+        - Rows represent individual subjects/observations
+        - Columns represent condition/electrode combinations
+        - For lateralized analysis: generates contralateral, 
+          ipsilateral, and difference wave columns per condition
+        - Header row contains condition labels for data identification
+
+        File Structure:
+        The CSV file is saved with comma delimiters and includes a 
+        header row. For lateralized designs, each condition generates 
+        three columns: '{condition}_contra', '{condition}_ipsi', and 
+        '{condition}_diff' representing contralateral, ipsilateral, and 
+        difference wave metrics respectively.
+
+        Statistical Compatibility:
+        Output format is designed for direct import into R, SPSS, Python 
+        pandas, or other statistical software. The transpose 
+        organization (subjects x conditions) follows standard 
+        conventions for repeated measures analysis.
+
+        Examples
+        --------
+        Export standard P300 amplitude metrics:
+
+        >>> ERP.export_erp_metrics_to_csv(
+        ...     erps={'standard': std_erps, 'deviant': dev_erps},
+        ...     window_oi=[0.3, 0.5],
+        ...     elec_oi=['Cz', 'CPz', 'Pz'],
+        ...     method='mean_amp', name='P300_analysis'
+        ... )
+
+        Export lateralized N2pc difference waves with 
+        condition-specific windows:
+
+        >>> windows = {'target': [0.18, 0.28], 
+        ...           'distractor': [0.20, 0.30]}
+        >>> ERP.export_erp_metrics_to_csv(
+        ...     erps={'target': targ_erps, 'distractor': dist_erps},
+        ...     window_oi=windows,
+        ...     elec_oi=[['O1', 'PO7'], ['O2', 'PO8']],
+        ...     method='mean_amp', name='N2pc_lateralized'
+        ... )
+
+        Export area under curve for emotion ERP analysis:
+
+        >>> ERP.export_erp_metrics_to_csv(
+        ...     erps={'positive': pos_erps, 'negative': neg_erps},
+        ...     window_oi=[0.4, 0.8],
+        ...     elec_oi=['CPz', 'Pz'],
+        ...     method='auc', name='emotion_LPP'
+        ... )
+
+        See Also
+        --------
+        extract_erp_features : Individual metric calculation methods
+        group_erp : Group-level ERP data preparation
+        select_erp_window : Automatic time window selection
         """
 
         if not isinstance(erps, (dict, list)):
@@ -759,19 +1431,41 @@ class ERP(FolderStructure):
         elec_oi: list = 'all'
     ) -> Tuple[np.array, mne.Evoked]:
         """
-        Combines all individual data at the group level.
+        Combine individual ERP data at the group level.
 
-        Args:
-            erp (list): List of evoked items (mne.Evoked).
-            elec_oi (list): Electrodes of interest. If 'all', all 
-                electrodes are included.
+        This function aggregates individual ERP data across subjects 
+        or conditions to create group-level averages and extract 
+        electrode-specific data for further analysis.
 
-        Returns:
-            Tuple[np.array, mne.Evoked]: 
-                - `evoked_X`: Stacked individual ERP data for the 
-                    specified electrodes.
-                - `evoked`: Group-level evoked object created by 
-                    averaging individual evoked items.
+        Parameters
+        ----------
+        erp : list
+            List of mne.Evoked objects containing individual ERP data.
+        elec_oi : list or str, optional
+            Electrodes of interest for data extraction. If 'all', 
+            includes all available electrodes. Default is 'all'.
+
+        Returns
+        -------
+        evoked_X : np.ndarray
+            Stacked individual ERP data for specified electrodes, 
+            averaged across electrodes (n_subjects, n_timepoints).
+        evoked : mne.Evoked
+            Group-level evoked object created by averaging all 
+            individual evoked objects with equal weights.
+
+        Notes
+        -----
+        The function uses MNE-Python's combine_evoked with equal 
+        weights to create unbiased group averages. Individual data 
+        is preserved in evoked_X for subsequent statistical analysis.
+
+        Examples
+        --------
+        >>> evoked_data, group_evoked = ERP.group_erp(
+        ...     [subj1_erp, subj2_erp, subj3_erp], 
+        ...     elec_oi=['Cz', 'Pz']
+        ... )
         """
 
         # Compute group-level evoked object
@@ -798,82 +1492,187 @@ class ERP(FolderStructure):
         polarity: str = 'pos'
     ) -> np.ndarray:
         """
-        Calculates metrics for ERP data, such as mean amplitude 
-        or area under the curve (AUC).
+        Calculate amplitude and timing metrics from ERP data.
 
-        This function computes specific metrics for ERP data based on 
-        the provided method. Currently supported methods include:
-            - `'mean_amp'`: Calculates the mean amplitude of 
-                the ERP data.
-            - `'auc_pos'`: Calculates the area under the curve (AUC) 
-                for positive values only.
-            - `'auc_neg'`: Calculates the AUC for negative values only.
-            - `'auc'`: Calculates the AUC for all values.
-            - `'onset_latency'`: Calculates the onset latency of the 
-                ERP component based on a threshold (e.g., 50% of the 
-                peak amplitude).
+        Computes various metrics from ERP waveform data including mean 
+        amplitude, area under curve measurements, and onset latency 
+        detection. This function supports standard amplitude analysis, 
+        polarity-specific area calculations, and timing-based measures 
+        needed for ERP component characterization.
 
-        Args:
-            X (np.ndarray): ERP data (trials x timepoints).
-            times (np.ndarray): Array of time points corresponding to 
-                the ERP data.
-            method (str): Specifies the metric to calculate. 
-                Supported values are `'mean_amp'`, `'auc'`, `'auc_pos'`, 
-                and `'auc_neg'`.
-            threshold (float, optional): Threshold for onset latency 
-                calculation. If `method` is `'onset_latency'`, this 
-                specifies the percentage of the peak amplitude 
-                (e.g., 0.5 for 50%). Defaults to 0.5.
-            polarity (str, optional): Polarity of the ERP component for 
-                onset latency calculation. Use `'pos'` for positive 
-                components (e.g., Pd) and `'neg'` for negative 
-                components (e.g., N2Pc). Defaults to `'pos'`.
+        Parameters
+        ----------
+        X : np.ndarray
+            ERP amplitude data with shape (n_subjects, n_timepoints) 
+            containing averaged waveforms for metric calculation. Each 
+            row represents one subject or trial, and columns represent 
+            time samples within the analysis window.
+        times : np.ndarray
+            Time points in seconds corresponding to the columns in X. 
+            Must have same length as X.shape[1]. Used for area 
+            calculations and onset latency timing.
+        method : str
+            Metric calculation method specifying the type of analysis:
+            - 'mean_amp': Mean amplitude across time window
+            - 'auc': Total area under curve (positive + negative)
+            - 'auc_pos': Area under curve for positive values only
+            - 'auc_neg': Area under curve for negative values only
+            - 'onset_latency': Component onset latency detection
+        threshold : float, default=0.5
+            Threshold percentage (0-1) of peak amplitude for onset 
+            latency detection. For example, 0.5 finds the first time 
+            point reaching 50% of peak amplitude. Only used when 
+            method='onset_latency'.
+        polarity : str, default='pos'
+            Expected component polarity for onset latency calculation:
+            - 'pos': Positive-going components (P300, P1, LPP)
+            - 'neg': Negative-going components (N170, N2pc, N400)
+            Only used when method='onset_latency'.
 
-        Returns:
-            np.ndarray: A NumPy array containing the calculated metrics 
-                for each trial.
+        Returns
+        -------
+        np.ndarray
+            Calculated metrics with shape (n_subjects,) containing the 
+            requested measure for each subject/trial. Units depend on 
+            method: microvolts for amplitudes, microvolt*seconds for 
+            areas, seconds for onset latencies.
+
+        Notes
+        -----
+        Metric Calculations:
+        - **Mean Amplitude**: Simple average across time window, most 
+          common ERP measure
+        - **Total AUC**: Integrates all signal deflections using 
+          trapezoidal rule
+        - **Positive AUC**: Integrates only positive deflections, 
+          negative values treated as zero
+        - **Negative AUC**: Integrates only negative deflections, 
+          positive values treated as zero  
+        - **Onset Latency**: Time to reach threshold percentage of 
+          peak amplitude
+
+        Onset Latency Algorithm:
+        1. Invert signal for negative polarity components
+        2. Find peak amplitude in time window
+        3. Calculate threshold as percentage of peak
+        4. Identify first time point exceeding threshold
+        5. Return corresponding time value or NaN if no onset found
+
+        Examples
+        --------
+        Calculate mean P300 amplitude:
+
+        >>> p300_amps = ERP.extract_erp_features(
+        ...     erp_data, times, method='mean_amp'
+        ... )
+
+        Calculate area under curve for positive LPP deflections:
+
+        >>> lpp_auc = ERP.extract_erp_features(
+        ...     erp_data, times, method='auc_pos'
+        ... )
+
+        Detect N170 onset latency at 75% of peak:
+
+        >>> n170_onset = ERP.extract_erp_features(
+        ...     erp_data, times, method='onset_latency',
+        ...     threshold=0.75, polarity='neg'
+        ... )
+
+        Calculate total signed area for difference waves:
+
+        >>> diff_auc = ERP.extract_erp_features(
+        ...     difference_waves, times, method='auc'
+        ... )
+
+        See Also
+        --------
+        export_erp_metrics_to_csv : Export calculated metrics to CSV
+        sklearn.metrics.auc : Underlying area calculation function
         """
 
         if method == 'mean_amp':
-            output = X.mean(axis = -1)
+            output = X.mean(axis=-1)
+            
         elif 'auc' in method:
-            if 'pos' in method:
-                X[X<0] = 0
-            elif 'neg' in method:
-                X[X>0] = 0
-            output = np.array([auc(times, x) for x in X])
+            output = []
+            for x in X:
+                # Create copy to avoid modifying input data
+                x_copy = x.copy()
+                
+                if 'pos' in method:
+                    x_copy[x_copy < 0] = 0
+                elif 'neg' in method:
+                    x_copy[x_copy > 0] = 0
+                    
+                output.append(auc(times, x_copy))
+            output = np.array(output)
+            
         elif method == 'onset_latency':
             output = []
             for x in X:
+                # Create copy to avoid modifying input data
+                x_copy = x.copy()
+                
                 if polarity == 'neg':
-                    x *= -1  # invert signal for negative polarity
-                thresh_value = x[np.argmax(x)] * threshold
-                # find first time point exceeding the threshold
-                idx = np.where(x >= thresh_value)[0]
+                    x_copy *= -1  # Invert signal for negative polarity
+                    
+                peak_value = x_copy[np.argmax(x_copy)]
+                thresh_value = peak_value * threshold
+                
+                # Find first time point exceeding the threshold
+                idx = np.where(x_copy >= thresh_value)[0]
                 if idx.size > 0:
                     output.append(times[idx[0]])
                 else:
-                    output.append(np.nan)  # no onset found
-            output = np.array(output)     
+                    output.append(np.nan)  # No onset found
+                    
+            output = np.array(output)
+        
+        else:
+            raise ValueError(f"Unknown method '{method}'. Supported methods: "
+                           "'mean_amp', 'auc', 'auc_pos', 'auc_neg', " 
+                           "'onset_latency'")
 
         return output
 
     @staticmethod
-    def lateralized_erp_idx(erp:list,elec_oi_c:list,
-                            elec_oi_i:list)->Tuple[np.array, np.array]:
+    def lateralized_erp_idx(erp: list, elec_oi_c: list, 
+                           elec_oi_i: list) -> Tuple[np.array, np.array]:
         """
-        get indices of contralateral and ipsilateral electrodes
+        Get electrode indices for lateralized ERP analysis.
 
-        Args:
-            erps (list): list with evoked items (mne)
-            elec_oi_c (list): contralateral electrodes
-            elec_oi_i (list): ipsilateral electrodes
+        This helper function identifies the indices of contralateral 
+        and ipsilateral electrodes in the ERP data for lateralized 
+        component analysis.
 
-        Returns:
-            contra_idx (array): indices corresponding to contralateral 
-            electrodes
-            ipsi_idx (array): indices corresponding to ipsilateral 
-            electrodes
+        Parameters
+        ----------
+        erp : list
+            List of mne.Evoked objects containing ERP data.
+        elec_oi_c : list
+            Names of contralateral electrodes of interest.
+        elec_oi_i : list
+            Names of ipsilateral electrodes of interest.
+
+        Returns
+        -------
+        contra_idx : np.ndarray
+            Array of indices corresponding to contralateral electrodes.
+        ipsi_idx : np.ndarray
+            Array of indices corresponding to ipsilateral electrodes.
+
+        Notes
+        -----
+        This is a utility function primarily used by other methods 
+        for lateralized ERP analysis. It ensures proper electrode 
+        mapping for difference wave calculations.
+
+        Examples
+        --------
+        >>> contra_idx, ipsi_idx = ERP.lateralized_erp_idx(
+        ...     erp_list, ['O1', 'PO7'], ['O2', 'PO8']
+        ... )
         """
         
         # extract channels from erps
@@ -886,30 +1685,46 @@ class ERP(FolderStructure):
         return contra_idx, ipsi_idx
     
     @staticmethod
-    def select_waveform(erps:list, elec_oi:list):
+    def select_waveform(erps: list, elec_oi: list):
         """
-        Extracts and averages ERP waveforms for specified electrodes 
-        from a list of evoked objects.
+        Extract and average ERP waveforms for specified electrodes.
 
-        This function selects the data from the provided electrodes of 
-        interest (`elec_oi`) across all evoked objects in `erps`. 
-        If `elec_oi` is a list of electrode names (strings),
-        it extracts and averages the data for those electrodes. 
-        If `elec_oi` is a list of two lists 
-        (e.g., for lateralized analysis), it computes the difference
-        between the contralateral and
-        ipsilateral electrodes for each evoked object, 
-        then averages across electrodes.
+        This function extracts ERP data from specified electrodes across 
+        multiple evoked objects and supports both standard electrode 
+        selection and lateralized difference wave calculations.
 
-        Args:
-            erps (list): List of mne.Evoked objects containing ERP data.
-            elec_oi (list): Electrodes of interest. Can be a list of 
-                electrode names (strings),or a list of two lists for 
-                lateralized analysis (e.g., [['O1'], ['O2']]).
+        Parameters
+        ----------
+        erps : list
+            List of mne.Evoked objects containing ERP data.
+        elec_oi : list
+            Electrodes of interest. Can be:
+            - List of electrode names (str) for standard averaging
+            - List of two lists for lateralized analysis 
+              [contralateral_electrodes, ipsilateral_electrodes]
 
-        Returns:
-            np.ndarray: Array of averaged ERP waveforms for each evoked 
-            object,shape (n_evoked, n_times).
+        Returns
+        -------
+        np.ndarray
+            Array of averaged ERP waveforms for each evoked object.
+            Shape: (n_evoked, n_times).
+
+        Notes
+        -----
+        For lateralized analysis, the function computes the difference 
+        between contralateral and ipsilateral electrodes for each 
+        evoked object, then averages across the specified electrode 
+        pairs.
+
+        Examples
+        --------
+        Standard electrode averaging:
+        >>> waveforms = ERP.select_waveform(erp_list, ['Cz', 'Pz'])
+
+        Lateralized difference waves:
+        >>> lat_waveforms = ERP.select_waveform(
+        ...     erp_list, [['O1', 'PO7'], ['O2', 'PO8']]
+        ... )
         """
 
         channels, times = ERP.get_erp_params(erps)
@@ -932,50 +1747,93 @@ class ERP(FolderStructure):
         erps: Union[dict, list], 
         elec_oi: list = None, 
         window_oi: tuple = None, 
-        times: np.array = None, 
+        times: np.ndarray = None, 
         percent_amp: int = 75, 
         polarity: str = 'pos', 
         phase: str = 'onset'
     ):
         """
-        Compares the latencies of ERP components between two conditions
-        using the jackknife method.
+        Compare ERP component latencies using jackknife method.
 
-        This function calculates the latency difference between two ERP 
-        conditions or waveforms based on a specified percentage of the 
-        peak amplitude. It supports both onset and offset latency 
-        comparisons and handles positive and negative polarities.
+        This function compares latencies between ERP conditions using 
+        the jackknife method for robust statistical estimation. It 
+        calculates latency differences based on a specified percentage 
+        of peak amplitude and provides statistical significance testing.
 
-        Args:
-            erps (Union[dict, list]): ERP data to compare. Can be a 
-                dictionary where keys are condition names and values are 
-                lists of evoked objects, or a list of two ERP waveforms 
-                to compare.
-            elec_oi (list, optional): Electrodes of interest for 
-                extracting the ERP waveforms. Defaults to None.
-            window_oi (tuple, optional): Time window of interest 
-                (start, end) in seconds. If None, the full time range 
-                is used. Defaults to None.
-            times (np.array, optional): Array of time points 
-                corresponding to the ERP data. Defaults to None.
-            percent_amp (int, optional): Percentage of the peak 
-                amplitude to use for latency calculation. 
-                Defaults to 75.
-            polarity (str, optional): Polarity of the ERP component 
-                ('pos' for positive, 'neg' for negative). 
-                Defaults to 'pos'.
-            phase (str, optional): Specifies whether to calculate onset 
-                or offset latency. Supported values are `'onset'` and 
-                `'offset'`. Defaults to `'onset'`.
+        Parameters
+        ----------
+        erps : dict or list
+            ERP data for comparison. If dict, keys are condition names 
+            and values are lists of evoked objects. If list, should 
+            contain two ERP waveforms to compare directly.
+        elec_oi : list, optional
+            Electrode specification for ERP waveform extraction. 
+            Required if erps is a dictionary. Can be either:
+            - List of electrode names (str) for standard averaging 
+              across specified channels (e.g., ['Cz', 'CPz'])
+            - Nested list for lateralized difference waves with format 
+              [contralateral_electrodes, ipsilateral_electrodes] 
+              enabling automatic difference wave computation 
+              (e.g., [['O1', 'PO7'], ['O2', 'PO8']])
+            Default is None.
+        window_oi : tuple, optional
+            Time window of interest (start, end) in seconds. If None, 
+            uses the full time range. Default is None.
+        times : np.ndarray, optional
+            Array of time points corresponding to ERP data. 
+            Default is None.
+        percent_amp : int, optional
+            Percentage of peak amplitude for latency calculation. 
+            Default is 75.
+        polarity : str, optional
+            Polarity of the ERP component. Use 'pos' for positive 
+            components or 'neg' for negative components.
+            Default is 'pos'.
+        phase : str, optional
+            Phase for latency calculation. Use 'onset' for component 
+            onset or 'offset' for component offset. Default is 'onset'.
 
-        Returns:
-            Union[tuple, dict]: 
-                - If comparing a single pair of conditions, returns 
-                    a tuple containing the latency difference and 
-                    the t-value.
-                - If comparing multiple pairs, returns a dictionary 
-                    where keys are condition pairs and values are tuples 
-                    of latency differences and t-values.
+        Returns
+        -------
+        tuple or dict
+            If comparing single pair: tuple of 
+            (latency_difference, t_value). If comparing multiple pairs: 
+            dict with condition pairs as keys and 
+            (latency_difference, t_value) tuples as values.
+
+        Notes
+        -----
+        The jackknife method provides robust estimates of latency 
+        differences and their statistical significance. This is the 
+        recommended approach for ERP latency comparisons as described 
+        in Miller et al. (1998) and Ulrich & Miller (2001).
+
+        For offset latency analysis, the waveforms are time-reversed 
+        before analysis to detect the offset timing.
+
+        References
+        ----------
+        Miller, J., Patterson, T., & Ulrich, R. (1998). Jackknife-based 
+        method for measuring LRP onset latency differences. 
+        Psychophysiology, 35(1), 99-115.
+
+        Examples
+        --------
+        Compare onset latencies between conditions using 
+        standard electrodes:
+        >>> lat_diff, t_val = ERP.compare_latencies(
+        ...     erps={'standard': std_erps, 'deviant': dev_erps},
+        ...     elec_oi=['Cz'], window_oi=(0.1, 0.4),
+        ...     percent_amp=50, polarity='pos'
+        ... )
+
+        Compare lateralized difference wave latencies:
+        >>> lat_diff, t_val = ERP.compare_latencies(
+        ...     erps={'target_left': left_erps, 
+        ...'target_right': right_erps},
+        ...     elec_oi=[['O1', 'PO7'], ['O2', 'PO8']], 
+        ...     window_oi=(0.18, 0.28), percent_amp=75, polarity='neg'
+        ... )
         """
 
         #set params
@@ -1005,9 +1863,10 @@ class ERP(FolderStructure):
             if phase == 'offset':
                 x1 = np.fliplr(x1)
                 x2 = np.fliplr(x2)   
-                #TODO: check flipping of time 
+                # For offset analysis, flip times to analyze from end
+                #TODO: double check this is correct
                 if p == 0:
-                    times_oi = np.fliplr(times_oi) 
+                    times_oi = times_oi[::-1] 
 
             if polarity == 'neg':
                 x1 *= -1
@@ -1025,40 +1884,71 @@ class ERP(FolderStructure):
 
     @staticmethod
     def jackknife_contrast(
-        x1: np.array, 
-        x2: np.array, 
-        times: np.array, 
+        x1: np.ndarray, 
+        x2: np.ndarray, 
+        times: np.ndarray, 
         percent_amp: int
     ) -> Tuple[float, float]:
         """
-        Performs a jackknife-based contrast to estimate the latency 
-        difference between two ERP waveforms.
+        Perform jackknife-based latency contrast between ERP waveforms.
 
-        This function calculates the latency difference between two ERP 
-        waveforms using the jackknife method. It computes the grand mean 
-        latency difference and estimates the variability of the 
-        difference using jackknife resampling.
+        This function implements the jackknife method for robust 
+        estimation of latency differences between two ERP conditions. 
+        The method provides both the latency difference estimate and 
+        its statistical significance.
 
-        Args:
-            x1 (np.array): ERP waveform for condition 1 
-                (trials x timepoints).
-            x2 (np.array): ERP waveform for condition 2 
-                (trials x timepoints).
-            times (np.array): Array of time points corresponding to the
-                ERP data.
-            percent_amp (int): Percentage of the peak amplitude to use 
-                for latency calculation.
+        Parameters
+        ----------
+        x1 : np.ndarray
+            ERP waveform for condition 1 (trials x timepoints).
+        x2 : np.ndarray
+            ERP waveform for condition 2 (trials x timepoints).
+        times : np.ndarray
+            Array of time points corresponding to the ERP data.
+        percent_amp : int
+            Percentage of peak amplitude for latency threshold 
+            calculation.
 
-        Returns:
-            Tuple[float, float]: 
-                - `d_latency`: The latency difference between the 
-                    two conditions.
-                - `t_value`: The t-value for the latency difference 
-                    based on jackknife resampling.
+        Returns
+        -------
+        d_latency : float
+            Estimated latency difference between the two conditions.
+        t_value : float
+            T-statistic for the latency difference based on jackknife 
+            variance estimation.
+
+        Notes
+        -----
+        The jackknife method estimates the variance of the latency 
+        difference by systematically omitting each observation and 
+        recalculating the statistic. This provides robust statistical 
+        inference for latency comparisons.
+
+        The method follows the approach described in Miller et al. 
+        (1998) for ERP latency analysis.
+
+        References
+        ----------
+        Miller, J., Patterson, T., & Ulrich, R. (1998). Jackknife-based 
+        method for measuring LRP onset latency differences. 
+        Psychophysiology, 35(1), 99-115.
+
+        Examples
+        --------
+        >>> lat_diff, t_stat = ERP.jackknife_contrast(
+        ...     condition1_data, condition2_data, times, 75
+        ... )
         """ 
 
         # set params
         nr_obs = x1.shape[0]
+        
+        if nr_obs != x2.shape[0]:
+            raise ValueError("x1 and x2 must have the same number of " \
+                            "observations")
+        if nr_obs < 2:
+            raise ValueError("Need at least 2 observations for " \
+                            "jackknife analysis")
 
         # step 1: get grand mean latency difference
         x1_ = x1.mean(axis = 0) 
@@ -1066,7 +1956,10 @@ class ERP(FolderStructure):
         c1 = max(x1_) * percent_amp/100.0
         c2 = max(x2_) * percent_amp/100.0 
 
-        d_latency = ERP.jack_latency_contrast(x1_,x2_,c1,c2,times,True)
+        try:
+            d_latency = ERP.jack_latency_contrast(x1_,x2_,c1,c2,times,True)
+        except ValueError as e:
+            raise ValueError(f"Error in grand mean latency calculation: {e}")
 
         # step 2: jackknifing procedure ()
         D = []
@@ -1076,57 +1969,119 @@ class ERP(FolderStructure):
             x2_ = x2[i != idx,:].mean(axis = 0)
             c1 = max(x1_) * percent_amp/100.0
             c2 = max(x2_) * percent_amp/100.0 
-            D.append(ERP.jack_latency_contrast(x1_,x2_,c1,c2,times))
+            try:
+                D.append(ERP.jack_latency_contrast(x1_,x2_,c1,c2,times))
+            except ValueError:
+                # Skip this iteration if threshold not reached
+                continue
+        
+        if len(D) == 0:
+            raise ValueError("No valid jackknife iterations - threshold " \
+                            "may be too high")
 
         # compute the jackknife estimate 
         Sd = np.sqrt((nr_obs - 1.0)/ nr_obs \
             * np.sum([(d - np.mean(D))**2 for d in np.array(D)]))	
 
+        if Sd == 0:
+            raise ValueError("Standard deviation is zero - cannot" \
+                            " compute t-statistic")
+            
         t_value = d_latency/ Sd 
 
         return d_latency, t_value
 
     @staticmethod
     def jack_latency_contrast(
-        x1: np.array, 
-        x2: np.array, 
+        x1: np.ndarray, 
+        x2: np.ndarray, 
         c1: float, 
         c2: float, 
-        times: np.array, 
+        times: np.ndarray, 
         print_output: bool = False
     ) -> float:
         """
-        Calculates the latency difference between two ERP waveforms at a 
-        specified threshold.
+        Calculate latency difference at specified amplitude thresholds.
 
-        This function determines the latency at which two ERP waveforms 
-        reach a specified threshold (e.g., a percentage of the peak 
-        amplitude) and calculates the difference between these 
-        latencies.
+        This helper function determines the precise latency at which 
+        two ERP waveforms reach specified amplitude thresholds and 
+        calculates the difference between these latencies using 
+        linear interpolation.
 
-        Args:
-            x1 (np.array): ERP waveform for condition 1 (timepoints).
-            x2 (np.array): ERP waveform for condition 2 (timepoints).
-            c1 (float): Threshold value for condition 1 
-                (e.g., 75% of the peak amplitude).
-            c2 (float): Threshold value for condition 2 
-                (e.g., 75% of the peak amplitude).
-            times (np.array): Array of time points corresponding to the 
-                ERP data.
-            print_output (bool, optional): If True, prints the estimated 
-                latencies for both conditions. Defaults to False.
+        Parameters
+        ----------
+        x1 : np.ndarray
+            ERP waveform for condition 1 (timepoints).
+        x2 : np.ndarray
+            ERP waveform for condition 2 (timepoints).
+        c1 : float
+            Amplitude threshold for condition 1 (e.g., 75% of peak).
+        c2 : float
+            Amplitude threshold for condition 2 (e.g., 75% of peak).
+        times : np.ndarray
+            Array of time points corresponding to the ERP data.
+        print_output : bool, optional
+            Whether to print the estimated latencies for both 
+            conditions. Default is False.
 
-        Returns:
-            float: The latency difference between the two conditions.
+        Returns
+        -------
+        float
+            Latency difference between the two conditions (lat2 - lat1).
+
+        Notes
+        -----
+        This function uses linear interpolation between adjacent time 
+        points to provide precise latency estimates that are not 
+        limited by the temporal resolution of the data sampling.
+
+        The function is typically called by jackknife_contrast for 
+        each jackknife iteration and the grand mean calculation.
+
+        Examples
+        --------
+        >>> lat_diff = ERP.jack_latency_contrast(
+        ...     wave1, wave2, 0.75*peak1, 0.75*peak2, times
+        ... )
         """
 
-        # get latency exceeding thresh 
-        idx_1 = np.where(x1 >= c1)[0][0]
-        lat_1 = times[idx_1 - 1] + (times[idx_1] - times[idx_1 - 1]) * \
-                    (c1 - x1[idx_1 - 1])/(x1[idx_1] - x1[idx_1-1])
-        idx_2 = np.where(x2 >= c2)[0][0]
-        lat_2 = times[idx_2 - 1] + (times[idx_2] - times[idx_2 - 1]) * \
-                (c2 - x2[idx_2 - 1])/(x2[idx_2] - x2[idx_2-1])
+        # get latency exceeding thresh with error handling
+        idx_1_candidates = np.where(x1 >= c1)[0]
+        if len(idx_1_candidates) == 0:
+            raise ValueError(f"No time points exceed threshold {c1:.4f} "
+                             f"for condition 1")
+        idx_1 = idx_1_candidates[0]
+        
+        idx_2_candidates = np.where(x2 >= c2)[0]
+        if len(idx_2_candidates) == 0:
+            raise ValueError(f"No time points exceed threshold {c2:.4f} "
+                             f"for condition 2")
+        idx_2 = idx_2_candidates[0]
+        
+        # Handle edge case where threshold is exceeded at first time point
+        if idx_1 == 0:
+            lat_1 = times[0]
+        else:
+            # Linear interpolation with division by zero protection
+            denominator_1 = x1[idx_1] - x1[idx_1-1]
+            if abs(denominator_1) < 1e-10:  # Very small difference
+                lat_1 = times[idx_1]
+            else:
+                lat_1 = (times[idx_1 - 1] + 
+                         (times[idx_1] - times[idx_1 - 1]) * 
+                         (c1 - x1[idx_1 - 1]) / denominator_1)
+        
+        if idx_2 == 0:
+            lat_2 = times[0]
+        else:
+            # Linear interpolation with division by zero protection
+            denominator_2 = x2[idx_2] - x2[idx_2-1]
+            if abs(denominator_2) < 1e-10:  # Very small difference
+                lat_2 = times[idx_2]
+            else:
+                lat_2 = (times[idx_2 - 1] + 
+                         (times[idx_2] - times[idx_2 - 1]) * 
+                         (c2 - x2[idx_2 - 1]) / denominator_2)
 
         d_latency = lat_2 - lat_1
         if print_output:
@@ -1135,43 +2090,168 @@ class ERP(FolderStructure):
 
         return d_latency   
 
-    def condition_erp(self, cnds:dict=None,time_oi:tuple=None,
-                    excl_factor:dict=None,RT_split:bool=False, 
-                    name:str='main'):
+    @staticmethod
+    def group_lateralized_erp(erp: list, elec_oi_c: list,
+                             elec_oi_i: list, set_mean: bool = False,
+                             montage: str = 'biosemi64') -> Tuple[np.array, 
+                                                                  mne.Evoked]:
+        """
+        Create group-level lateralized difference waveforms and 
+        topographies.
 
-        # get data
-        beh, epochs = self.select_erp_data(excl_factor)
-        beh.reset_index(inplace = True, drop = True)
+        This function combines individual ERP data to create lateralized 
+        difference waveforms (contralateral - ipsilateral) and generates 
+        topographic lateralized evoked objects where each electrode 
+        represents the difference from its contralateral counterpart.
 
-        # loop over all conditions
-        if cnds is None:
-            cnds = ['all_data']
+        Parameters
+        ----------
+        erp : list
+            List of mne.Evoked objects containing individual ERP data.
+        elec_oi_c : list
+            Names of contralateral electrodes of interest.
+        elec_oi_i : list
+            Names of ipsilateral electrodes of interest.
+        set_mean : bool, optional
+            If True, returns averaged data across subjects. If False, 
+            returns individual subject data stacked in first dimension. 
+            Default is False.
+        montage : str, optional
+            EEG montage name for electrode layout. Currently supports 
+            'biosemi64'. Default is 'biosemi64'.
+
+        Returns
+        -------
+        diff : np.ndarray
+            Lateralized difference waveform data. Shape depends on 
+            set_mean parameter: (n_subjects, n_times) or (n_times,).
+        evoked : mne.Evoked
+            Evoked object with lateralized topography where each 
+            electrode contains the difference from its mirror electrode 
+            (e.g., O1 contains O1-O2 data).
+
+        Notes
+        -----
+        The lateralized topography is created by subtracting each 
+        electrode's mirror counterpart based on the standard electrode 
+        naming convention (odd numbers = left, even numbers = right).
+
+        Midline electrodes (Fz, Cz, Pz, etc.) are preserved as-is 
+        since they don't have lateral counterparts.
+
+        This method is particularly useful for analyzing lateralized 
+        ERP components such as N2pc, SPCN, or lateralized readiness 
+        potentials.
+
+        Examples
+        --------
+        >>> diff_wave, lat_evoked = ERP.group_lateralized_erp(
+        ...     erp_list, ['O1', 'PO7'], ['O2', 'PO8']
+        ... )
+        """
+
+        #TODO: check whether function is still necessary
+        #TODO2: add more montages
+
+        # get mean and individual data
+        evoked_X = np.stack([evoked._data for evoked in erp])
+        evoked = mne.combine_evoked(erp, weights = 'equal')
+        
+        # calculate difference waveform
+        (contra_idx, 
+        ipsi_idx) = ERP.lateralized_erp_idx(erp, elec_oi_c, elec_oi_i)
+        diff = evoked_X[:,contra_idx] - evoked_X[:,ipsi_idx]
+        # average over electrodes
+        diff = diff.mean(axis = 1)
+
+        # set lateralized topography
+        channels = evoked.ch_names
+
+        if montage == 'biosemi64':
+            lat_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8',
+                            'F5':'F6','F3':'F4','F1':'F2','FT7':'FT8','FC5':'FC6',
+                            'FC3':'FC4','FC1':'FC2','T7':'T8','C5':'C6','C3':'C4',
+                            'C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',
+                            'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4',
+                            'P1':'P2','PO7':'PO8','PO3':'PO4','O1':'O2',
+                            'Fpz':'Fpz','AFz':'AFz','Fz':'Fz','FCz':'FCz',
+                            'Cz':'Cz','CPz':'CPz','Pz':'Pz','POz':'POz','Oz':'Oz',
+                            'Iz':'Iz'
+                            }
         else:
-            cnds = create_cnd_loop(cnds)
+            print(f'The {montage} montage is not yet supported')
+            return diff
 
-        for cnd in cnds:
-            # set erp name
-            if type(cnd) == str:
-                erp_name = f'sj_{self.sj}_{cnd}_{name}'	
-            else:
-                erp_name = f'sj_{self.sj}_{cnd[1]}_{name}'
+        pre_flip = np.copy(evoked._data)
+        for elec_1, elec_2 in lat_dict.items():
+            elec_1_data = pre_flip[channels.index(elec_1)]
+            elec_2_data = pre_flip[channels.index(elec_2)]
+            evoked._data[channels.index(elec_1)] = elec_1_data - elec_2_data
+            evoked._data[channels.index(elec_2)] = elec_2_data - elec_1_data
 
-            # slice condition trials
-            if cnd == 'all_data':
-                idx_c = np.arange(beh.shape[0])
-            else:
-                idx_c = beh.query(cnd[0]).index.values
+        return diff, evoked                        
+          
+    def residual_eye(self, left_info: dict = None, right_info: dict = None,
+                    ch_oi: list = ['HEOG'], cnds: dict = None,
+                    midline: dict = None, window_oi: tuple = None,
+                    excl_factor: dict = None, name: str = 'resid_eye'):
+        """
+        Calculate residual eye movement activity for lateralized designs.
 
-            if idx_c.size == 0:
-                print('no data found for {}'.format(cnd))
-                continue
+        This method computes residual eye movement waveforms by averaging 
+        HEOG activity for left and right stimulus presentations, accounting 
+        for the expected directional differences in eye movements. This is 
+        useful for validating that observed lateralized ERP effects are 
+        not contaminated by systematic eye movements.
 
-            self.create_erps(epochs, beh, idx_c, time_oi, erp_name, RT_split)
+        Parameters
+        ----------
+        left_info : dict, optional
+            Dictionary specifying criteria for left stimulus trials. 
+            Format: {column_name: [labels]}. Default is None.
+        right_info : dict, optional
+            Dictionary specifying criteria for right stimulus trials. 
+            Format: {column_name: [labels]}. Default is None.
+        ch_oi : list, optional
+            List of eye movement channels to analyze (typically HEOG). 
+            Default is ['HEOG'].
+        cnds : dict, optional
+            Dictionary specifying conditions for separate analysis. 
+            Default is None.
+        midline : dict, optional
+            Dictionary specifying midline stimulus criteria to limit 
+            trial selection. Default is None.
+        window_oi : tuple, optional
+            Time window of interest (start, end) in seconds. If None, 
+            uses full epoch time range. Default is None.
+        excl_factor : dict, optional
+            Dictionary specifying trial exclusion criteria. 
+            Default is None.
+        name : str, optional
+            Base name for output file. Default is 'resid_eye'.
 
-    def residual_eye(self,left_info:dict=None,right_info:dict=None,
-                    ch_oi:list=['HEOG'],cnds:dict=None,
-                    midline:dict=None,window_oi:tuple=None,
-                    excl_factor:dict=None,name:str='resid_eye'):
+        Notes
+        -----
+        The function calculates residual eye movements as:
+        residual = mean(left_trials, right_trials * -1)
+
+        This approach accounts for the expected opposite polarity of 
+        eye movements to left vs right stimuli, allowing detection of 
+        systematic biases or artifacts.
+
+        Output is saved as a pickled dictionary in the 'erp/eog' subfolder.
+
+        Examples
+        --------
+        >>> erp.residual_eye(
+        ...     left_info={'target_loc': [2, 8]},
+        ...     right_info={'target_loc': [4, 6]},
+        ...     cnds={'condition': ['standard', 'deviant']},
+        ...     window_oi=(0.1, 0.5)
+        ... )
+        """
+
+        #TODO: check whether function is correct
 
         # set file name
         erp_name= f'sj_{self.sj}_{name}.p'	
@@ -1221,74 +2301,6 @@ class ERP(FolderStructure):
 
         # save data
         pickle.dump(eye_dict, open(f_name, 'wb'))
-
-    @staticmethod
-    def group_lateralized_erp(erp:list,elec_oi_c:list,
-                            elec_oi_i:list,set_mean:bool=False,
-                            montage:str='biosemi64')->Tuple[np.array,
-                                                    mne.Evoked]:
-        """
-        Combines all individual data at the group level by creating a 
-        difference waveform (contralateral - ipsilateral). Also returns a 
-        topographic lateralized evoked object by subtracting the 
-        lateralized counterpart from each electrode 
-        (e.g., data at PO7 reflects PO7 - PO8).
-
-        Args:
-            erp (list): list with evoked items (mne)
-            elec_oi_c (list): Contralateral electrodes of interest
-            elec_oi_i (list): Ipsilateral electrodes of interest
-            set_mean (bool, optional): If True, returns array with averaged 
-            data. Otherwise data from individual datasets is stacked in the
-            first dimension. Defaults to False.
-
-        Returns:
-            diff(np.array): Difference waveform (n X nr_timepoints)
-            evoked(mne.Evoked):
-        """
-
-        # get mean and individual data
-        evoked_X = np.stack([evoked._data for evoked in erp])
-        evoked = mne.combine_evoked(erp, weights = 'equal')
-        
-        # calculate difference waveform
-        (contra_idx, 
-        ipsi_idx) = ERP.lateralized_erp_idx(erp, elec_oi_c, elec_oi_i)
-        diff = evoked_X[:,contra_idx] - evoked_X[:,ipsi_idx]
-        # average over electrodes
-        diff = diff.mean(axis = 1)
-
-        # set lateralized topography
-        channels = evoked.ch_names
-
-        if montage == 'biosemi64':
-            lat_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8',
-                            'F5':'F6','F3':'F4','F1':'F2','FT7':'FT8','FC5':'FC6',
-                            'FC3':'FC4','FC1':'FC2','T7':'T8','C5':'C6','C3':'C4',
-                            'C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',
-                            'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4',
-                            'P1':'P2','PO7':'PO8','PO3':'PO4','O1':'O2',
-                            'Fpz':'Fpz','AFz':'AFz','Fz':'Fz','FCz':'FCz',
-                            'Cz':'Cz','CPz':'CPz','Pz':'Pz','POz':'POz','Oz':'Oz',
-                            'Iz':'Iz'
-                            }
-        else:
-            print(f'The {montage} montage is not yet supported')
-            return diff
-
-        pre_flip = np.copy(evoked._data)
-        for elec_1, elec_2 in lat_dict.items():
-            elec_1_data = pre_flip[channels.index(elec_1)]
-            elec_2_data = pre_flip[channels.index(elec_2)]
-            evoked._data[channels.index(elec_1)] = elec_1_data - elec_2_data
-            evoked._data[channels.index(elec_2)] = elec_2_data - elec_1_data
-
-        return diff, evoked                        
-          
-if __name__ == '__main__':
-    pass
-
-
 
 
 
