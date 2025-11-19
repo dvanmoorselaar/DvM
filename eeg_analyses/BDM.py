@@ -1284,9 +1284,7 @@ class BDM(FolderStructure):
 		df.reset_index(inplace = True, drop = True)
 
 		# limit epochs object to electrodes of interest
-		picks = mne.pick_types(epochs.info,eeg=True, eog= True, misc = True)
-		picks = select_electrodes(np.array(epochs.ch_names)[picks], 
-								self.elec_oi)
+		picks = select_electrodes(epochs, self.elec_oi)
 		epochs = epochs.pick_channels(np.array(epochs.ch_names)[picks])
 
 		# apply filtering and downsampling (if specified)

@@ -614,7 +614,8 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
 
 def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 						show_SE:bool=False,smooth:bool=False,timecourse:str='1d',
-						output:str='raw_slopes',stats:Union[str,bool]='perm',
+						output:str='raw_slopes',band_oi: str=None,
+						stats:Union[str,bool]='perm',
 						onset_times:Union[list,bool]=[0],offset_axes:int=10,
 						show_legend:bool=True,avg_bins:bool=False,**kwargs):
 	
@@ -643,7 +644,11 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 		print('not enough colors specified. Using default colors')
 		colors = list(mcolors.TABLEAU_COLORS.values())
 
-	ylabel = 'CTF slope (au)'
+	if band_oi is not None:
+		band_idx = ctfs[0]['info']['bands'].index(band_oi)
+
+	ylabel = f'CTF slope (au) - {band_oi}' if band_oi is not None \
+											else 'CTF slope (au)'
 	for c, cnd in enumerate(cnds):
 		color = colors[c] 
 		for o, out in enumerate(output):
@@ -656,6 +661,18 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 
 			# do actual plotting
 			if timecourse == '1d':
+				# select freq_oi or average across frequency bands if needed
+				if y.shape[1]> 1:
+					if band_oi is not None:
+						y = y[:,band_idx,:]
+					else:
+						Warning('Multiple frequency bands detected but no ' \
+						'band_oi specified. Averaging across all frequency ' \
+						'bands.')
+						y = y.mean(axis=1)
+				else:
+					y = np.squeeze(y,axis=1)
+					
 				if y.ndim > 2 and avg_bins:
 					y = y[:,:,~np.all(y == 0, axis=(0,1))].mean(axis=-1)
 				if y.ndim > 2:
@@ -670,7 +687,9 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 					plot_timecourse(times,y,show_SE,smooth,
 									label=label,color=color,ls=['-','--'][o])
 
-				if stats:		
+				if stats:
+					#TODO: make also work for individual bins	
+					#TODO: add chance level if needed	
 					plot_significance(times,y,0,
 									color=color,stats=stats,
 									smooth=smooth,**kwargs)

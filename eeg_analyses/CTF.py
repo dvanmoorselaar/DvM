@@ -474,7 +474,7 @@ class CTF(BDM):
 			section = "Condition: " + cnd	
 			#TODO: add section after update mne (so that cnd info is displayed)
 			# get ctf slope
-			output = [f'{d}_slopes' for d in ['broadband','T','E'] 
+			output = [f'{d}_slopes' for d in ['envelope','voltage','T','E'] 
 			 						if f'{d}_slopes' in ctf_param[cnd].keys()]
 
 			if len(freqs) == 1:
@@ -501,7 +501,7 @@ class CTF(BDM):
 
 			# get ctf tuning functions
 			#TODO: add that multiple frequencies can be plotted in a list
-			for to in ['E','T','broadband']:
+			for to in ['E','T','voltage','envelope']:
 				if f'C2_{to}' in ctf[cnd].keys():
 					fig, ax = plt.subplots()
 					plot_ctf_timecourse(ctf,cnds = [cnd],
@@ -586,18 +586,19 @@ class CTF(BDM):
 		Returns
 		-------
 		None
-			Function performs analysis and saves results to pickle 
-			files:
-			- 'ctfs_{name}.pickle': Reconstructed channel tuning 
-			   functions
-			- 'ctf_param_{name}.pickle': Extracted tuning parameters 
-			  (slopes, von Mises fits, Gaussian fits)
-			- 'ctf_info_{name}.pickle': Analysis metadata and indices
-			
-			If self.report=True, also generates an HTML report with 
-			visualizations of the results.
-
-		Notes
+		Function performs analysis and saves results to pickle 
+		files:
+		- 'ctfs_{name}.pickle': Reconstructed channel tuning 
+		   functions. For filtered data: contains 'C2_E' 
+		   (evoked power) and 'C2_T' (total power). For broadband: 
+		   contains 'C2_envelope' (amplitude) and 'C2_voltage' 
+		   (raw ERPs).
+		- 'ctf_param_{name}.pickle': Extracted tuning parameters 
+		  (slopes, von Mises fits, Gaussian fits)
+		- 'ctf_info_{name}.pickle': Analysis metadata and indices
+		
+		If self.report=True, also generates an HTML report with 
+		visualizations of the results.		Notes
 		-----
 		The spatial CTF analysis pipeline implements the following 
 		steps:
@@ -611,17 +612,20 @@ class CTF(BDM):
 		   - Configure cross-validation folds for robust estimation
 		   
 		3. **Time-Frequency Analysis**:
-		   - Apply frequency filtering to specified bands
-		   - Extract power and total power measures
-		   
+			- For filtered data: Apply bandpass filtering, extract 
+			evoked power (phase-locked) and total power 
+			(non-phase-locked)
+			- For broadband: Extract raw voltages (ERPs) and amplitude 
+			envelope via Hilbert transform
+		
 		4. **Cross-Validation Loop**:
-		   - Partition data into training and testing sets
-		   - Train encoding models on spatial location data
-		   - Test model performance on held-out trials
-		   
+			- Partition data into training and testing sets
+			- Train encoding models on spatial location data
+			- Test model performance on held-out trials		
+		
 		5. **Channel Reconstruction**: 
-		   - Use forward modeling to reconstruct channel responses
-		   - Generate tuning functions across spatial positions
+			- Use forward modeling to reconstruct channel responses
+			- Generate tuning functions across spatial positions
 		   
 		6. **Parameter Extraction**:
 		   - Extract tuning curve slopes using linear regression
@@ -663,7 +667,8 @@ class CTF(BDM):
 		
 		# Input validation and setup
 
-		# hypothesized set tuning functions underlying power measured across electrodes
+		# hypothesized set tuning functions underlying power measured 
+		# across electrodes
 		print('Creating bassiset with sin_power ', self.sin_power )
 		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans,
 													self.sin_power,self.delta)
@@ -675,7 +680,7 @@ class CTF(BDM):
 		headers = [cnd_head]
 		epochs = self.epochs.copy()
 		df = self.df.copy()
-		freqs, nr_freqs = self.set_frequencies(freqs)
+		freqs, nr_freqs, bands = self.set_frequencies(freqs)
 		data_type = 'power' if freqs != ['broadband'] else 'broadband'
 		epochs, df = self.select_ctf_data(epochs, df,self.elec_oi, 
 											headers, excl_factor, data_type)
@@ -877,10 +882,10 @@ class CTF(BDM):
 				ctf[cnd][key] = ctf[cnd][key].mean(axis = 2)
 
 			if freqs == ['broadband']:
-				ctf[cnd]['C2_broadband'] = ctf[cnd].pop('C2_E')
-				ctf[cnd]['W_broadband'] = ctf[cnd].pop('W_E')
-				del ctf[cnd]['C2_T']
-				del ctf[cnd]['W_T']
+				ctf[cnd]['C2_envelope'] = ctf[cnd].pop('C2_E')
+				ctf[cnd]['W_envelope'] = ctf[cnd].pop('W_E')
+				ctf[cnd]['C2_voltage'] = ctf[cnd].pop('C2_T')
+				ctf[cnd]['W_voltage'] = ctf[cnd].pop('W_T')
 
 		# save output
 		times_oi = epochs.times[tois][::downsample]
@@ -893,7 +898,7 @@ class CTF(BDM):
 											test_bins=test_bins)
 		
 		ctf_param.update({'info':{'times':times_oi,
-							'freqs':freqs,}})
+							'freqs':freqs,'bands':bands}})
 
 		if self.ctf_param:
 			with open(self.folder_tracker(['ctf',self.to_decode], 
@@ -906,7 +911,7 @@ class CTF(BDM):
 		ctfs = {}
 		for cnd in ctf.keys():
 			ctfs[cnd] = {}
-			for key in ['C2_E','C2_T','C2_broadband']:
+			for key in ['C2_E','C2_T','C2_envelope','C2_voltage']:
 				if key in ctf[cnd].keys():
 					# extract non-permuted data
 					data = ctf[cnd][key][0]
@@ -1043,7 +1048,7 @@ class CTF(BDM):
 		# df) = self.average_trials(epochs,df,[self.to_decode] + headers) 
 
 		# limit analysis to electrodes of interest
-		picks = select_electrodes(epochs.ch_names, elec_oi) 
+		picks = select_electrodes(epochs, elec_oi) 
 		epochs.pick(picks)
 
 		return epochs, df
@@ -1241,31 +1246,40 @@ class CTF(BDM):
 	def extract_power(self, x: np.ndarray, 
 				   band: Union[str, list, tuple, None] = None) -> np.ndarray:
 		"""
-		Extract power from complex analytic signal.
+		Extract power or envelope from signal data.
 		
 		Computes power by squaring the complex magnitude of the analytic 
-		signal, or returns the original signal if no frequency band is 
-		specified.
+		signal for filtered data, computes envelope via Hilbert 
+		transform for broadband data, or returns the original signal 
+		unchanged.
 
 		Parameters
 		----------
 		x : np.ndarray
-			Complex analytic signal from Hilbert transform or raw data.
+			Complex analytic signal from Hilbert transform 
+			(filtered data) or raw voltage data (broadband).
 		band : str, list, tuple, or None, default=None
 			Frequency band specification:
-			- list/tuple: Apply power extraction (|x|²)
-			- str or None: Return original signal without power 
-			   extraction
+			- list/tuple: Apply power extraction (|x|²) for filtered 
+			  data
+			- 'broadband': Compute envelope |Hilbert(x)| after trial 
+			  averaging for phase-locked amplitude
+			- str or None: Return original signal without transformation
 
 		Returns
 		-------
 		np.ndarray
-			Power signal (|x|²) if band is list/tuple, otherwise 
-			original signal.
+			Power signal (|x|²) if band is list/tuple,
+			envelope if band is 'broadband',
+			otherwise original signal unchanged.
 		"""
+
 		if isinstance(band, (list,tuple)):
 			power = abs(x)**2
-		else:
+		elif band == 'broadband':
+			# Compute envelope of averaged signal (after averaging)
+			power = np.abs(hilbert(x, axis=-1))
+		else:	
 			power = x
 
 		return power
@@ -1299,34 +1313,49 @@ class CTF(BDM):
 		Returns
 		-------
 		E : np.ndarray
-			Complex analytic signal from Hilbert transform, 
-			shape (trials, channels, time). Used for evoked power 
-			calculation: activity phase-locked to stimulus onset 
+			For filtered data: Complex analytic signal from Hilbert 
+			transform, shape (trials, channels, time). Used for evoked 
+			power calculation: activity phase-locked to stimulus onset 
 			(computed by averaging complex signal across trials, 
 			then squaring magnitude).
+			For broadband: Raw baseline-corrected voltages, 
+			shape (trials, channels, time). Envelope will be computed 
+			AFTER trial averaging via extract_power() for cleaner 
+			phase-locked amplitude estimation.
 		T : np.ndarray
-			Total power signal, shape (trials, channels, time). 
-			Represents ongoing activity irrespective of phase 
+			For filtered data: Total power signal, shape (trials, channels, 
+			time). Represents ongoing activity irrespective of phase 
 			relationship to stimulus onset (computed by squaring 
 			magnitude of complex signal, then averaging across trials).
-
+			For broadband: Raw baseline-corrected voltages, 
+			shape (trials, channels, time). Preserves phase-locked 
+			activity and polarity information for ERP analysis.		
+			
 		Notes
 		-----
 		The decomposition pipeline includes:
 		
+		**For filtered data (band = tuple):**
 		1. **Frequency Filtering**: 5th-order Butterworth bandpass 
-		   filter (if band specified)
+		filter
 		2. **Hilbert Transform**: Extract complex analytic signal for 
-		   phase information
+		phase information
 		3. **Power Extraction**: Compute |signal|² for total power
 		4. **Time Windowing**: Extract specified time window of interest
 		5. **Downsampling**: Reduce temporal resolution to target 
-		   sampling rate
+		sampling rate
 		
-		For broadband analysis, baseline correction is applied instead 
-	    of filtering.
-		"""
-
+		**For broadband analysis (band = 'broadband'):**
+		1. **Baseline Correction**: Apply baseline normalization
+		2. **Data Storage**: 
+		- Both T and E contain raw voltages initially
+		- Envelope for E is computed AFTER trial averaging 
+			(in extract_power) to capture phase-locked amplitude
+		3. **Time Windowing**: Extract specified time window of interest
+		4. **Downsampling**: Reduce temporal resolution to target 
+		sampling rate
+		"""		
+	
 		# initiate arrays for evoked and total power
 		_, nr_chan, nr_time = epochs._data.shape
 
@@ -1339,8 +1368,8 @@ class CTF(BDM):
 			T = self.extract_power(E,band)
 		elif band == 'broadband':
 			epochs.apply_baseline(baseline = self.baseline)
-			T = epochs._data
 			E = epochs._data
+			T = epochs._data
 
 		# trim filtered data (after filtering to avoid artifacts)
 		E = E[:,:,tois]
@@ -1822,12 +1851,17 @@ class CTF(BDM):
 		-------
 		frex : list
 			List of frequency specifications:
-			- For frequency bands: list of (low_freq, high_freq) tuples
+			- For frequency bands: list of sorted (low_freq, high_freq)
+			  tuples
 			- For broadband: list containing single 'broadband' string
 		nr_frex : int
 			Number of frequency bands to process.
+		bands : list or None
+			List of sorted band names if custom dict provided, 
+			otherwise None.
 		"""
 
+		bands = None
 		if freqs == 'main_param':
 			if self.freq_scaling == 'log':
 				frex = np.logspace(np.log10(self.min_freq), 
@@ -1837,12 +1871,14 @@ class CTF(BDM):
 				frex = np.linspace(self.min_freq,self.max_freq,self.num_frex)
 			frex = [(frex[i], frex[i+1]) for i in range(self.num_frex -1)]
 		elif type(freqs) == dict:
-			frex = [(freqs[band][0],freqs[band][1]) for band in freqs.keys()]
+			frex = [(freqs[band][0],freqs[band][1]) for band 
+		   					in sorted(freqs.keys(), key=lambda k: freqs[k][0])]
+			bands = sorted(freqs.keys(), key=lambda k: freqs[k][0])
 		elif freqs == 'broadband':
 			frex = [freqs]
 		nr_frex = len(frex)
 
-		return frex, nr_frex
+		return frex, nr_frex, bands
 
 	def localizer_spatial_ctf(self,pos_labels_tr:dict ='all',
 							pos_labels_te:dict ='all',
@@ -2004,12 +2040,12 @@ class CTF(BDM):
 		for cnd in test_cnds:
 
 			if freqs == ['broadband']:
-				ctf[cnd]['C2_broadband'] = ctf[cnd].pop('C2_E')
-				ctf[cnd]['W_broadband'] = ctf[cnd].pop('W_E')
-				del ctf[cnd]['C2_T']
-				del ctf[cnd]['W_T']
-
-		# save output
+				# Rename to clarify what each represents in broadband
+				ctf[cnd]['C2_envelope'] = ctf[cnd].pop('C2_E')
+				ctf[cnd]['W_envelope'] = ctf[cnd].pop('W_E')
+				ctf[cnd]['C2_voltage'] = ctf[cnd].pop('C2_T')
+				ctf[cnd]['W_voltage'] = ctf[cnd].pop('W_T')		# save output
+				
 		with open(self.folder_tracker(['ctf',self.to_decode], 
 				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
 			print('saving ctfs')
@@ -2118,7 +2154,8 @@ class CTF(BDM):
 			Pre-allocated parameter arrays to store results. Keys follow 
 			pattern '{signal}_paramname' (e.g., 'E_slopes', 'T_amps').
 		signal : str
-			Signal type identifier ('E', 'T', or 'broadband').
+			Signal type identifier: 'E', 'T' for filtered data; 
+			'envelope', 'voltage' for broadband data.
 		perm_idx : int
 			Permutation iteration index for parameter storage.
 		ch_idx : int, optional
@@ -2128,8 +2165,8 @@ class CTF(BDM):
 			Method for curve fitting. Options:
 			- 'von_mises': Von Mises (circular cosine) fitting (default)
 			- 'gaussian': Gaussian bell curve fitting
-			Default is 'von_mises'.
-
+			Default is 'von_mises'.		
+		
 		Returns
 		-------
 		dict
@@ -2326,7 +2363,8 @@ class CTF(BDM):
 			CTF reconstructions per condition as returned by 
 			spatial_ctf() and localizer_spatial_ctf(). Keys are 
 			condition names, values contain 'C2_T', 'C2_E' 
-			(for power data) or 'C2_broadband' (for raw EEG).
+			(for filtered power data) or 'C2_envelope'/'C2_voltage' 
+			(for broadband data).
 			Data type is automatically inferred from available keys.
 		ctf_param : str, optional
 			Parameter extraction method. Options:
@@ -2354,21 +2392,22 @@ class CTF(BDM):
 			Nested dictionary with structure 
 			{condition: {parameter: values}}. Parameter keys follow 
 			pattern '{signal}_{metric}' where:
-			- signal: 'T'/'E' (power data) or 'broadband' (raw data)  
+			- signal: 'T'/'E' (filtered power), 'envelope'/'voltage' 
+			(broadband)
 			- metric: 'slopes', 'amps', 'base', 'conc', 'means'
 			Values are arrays with dimensions squeezed to remove 
-			singleton axes.
-		"""
-
+			singleton axes (except for frequency ).
+		"""		
+	
 		# determine the output parameters
 		if test_bins is None:
 			test_bins = np.arange(self.nr_bins)
 		
 		# infer data type from available keys
 		sample_ctf = ctfs[list(ctfs.keys())[0]]
-		if 'C2_broadband' in sample_ctf:
-			signals = ['broadband']
-			data_key = 'C2_broadband'
+		if 'C2_envelope' in sample_ctf:
+			signals = ['envelope', 'voltage']
+			data_key = 'C2_envelope'
 		else:
 			signals = ['T', 'E']
 			data_key = 'C2_E'
@@ -2413,12 +2452,18 @@ class CTF(BDM):
 			ctf_param[cnd] = self.summarize_ctfs(ctfs[cnd],ctf_param[cnd],
 				     						nr_samples,nr_freqs,test_bins,
 											nr_perm,avg_ch,fitting_method)
+			
 		
 			# get rid of unnecessary dimensions
 			ctf_param[cnd] = {k: np.squeeze(v) 
-		     							for k, v in ctf_param[cnd].items()}		
+										for k, v in ctf_param[cnd].items()}
+		
+			# restore frequency dimension if it was squeezed out
+			if nr_freqs == 1:
+				ctf_param[cnd] = {k: np.expand_dims(v, axis=0) 
+									for k, v in ctf_param[cnd].items()}
 
-		return ctf_param			
+		return ctf_param	
 
 	def fit_cos_to_ctf(self, ctf_data: np.array, conc_step: float = 0.1, 
 					   estimate_center: bool = False):

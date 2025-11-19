@@ -76,7 +76,6 @@ from numpy.fft import fft, ifft,rfft, irfft
 from eeg_analyses.ERP import ERP
 from support.FolderStructure import *
 from support.support import *
-from signals.signal_processing import *
 from IPython import embed
 
 

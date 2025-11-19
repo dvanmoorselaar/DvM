@@ -14,7 +14,7 @@ from sklearn.feature_extraction.image import grid_to_graph
 from mne.stats import permutation_cluster_test, spatio_temporal_cluster_test
 from scipy.stats import t, ttest_rel
 
-def select_electrodes(ch_names: Union[list, np.ndarray],
+def select_electrodes(epochs:mne.Epochs,
 						elec_oi: Union[list, str] = 'all') -> np.ndarray:
 	"""
 	Select subset of electrodes based on available channels and 
@@ -22,8 +22,9 @@ def select_electrodes(ch_names: Union[list, np.ndarray],
 
 	Parameters
 	----------
-	ch_names : list or np.ndarray
-		List of all electrode names in EEG object (MNE format).
+	epochs : mne.Epochs
+		Epoched EEG data containing the neural responses to be analyzed
+		and the electrode names.
 	elec_oi : list or str, default='all'
 		Electrode selection criteria:
 		- 'all': Use all available electrodes in ch_names
@@ -48,10 +49,13 @@ def select_electrodes(ch_names: Union[list, np.ndarray],
 	continue with available electrodes.
 	"""
 
+	ch_names = epochs.ch_names
+
 	if isinstance(elec_oi, str):
 		if elec_oi == 'all':
+			eeg_picks = mne.pick_types(epochs.info, eeg=True)
 			# Use all available electrodes
-			elec_oi = list(ch_names)
+			elec_oi = list(np.array(ch_names)[eeg_picks])
 			
 		elif elec_oi == 'posterior':
 			# Posterior electrodes: parietal, occipital, and posterior temporal
@@ -114,7 +118,6 @@ def select_electrodes(ch_names: Union[list, np.ndarray],
 		else:
 			print(f'Note: {len(missing)} requested electrodes not found '
 				  'in dataset')
-
 
 	picks = mne.pick_channels(ch_names, include=available_electrodes)
 
