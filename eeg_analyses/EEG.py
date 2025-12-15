@@ -56,17 +56,225 @@ def blockPrinting(func):
 
     return func_wrapper
 
-class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
+class RawEEG(BaseRaw, FolderStructure):
     '''
-    Child originating from MNE built-in RawEDF, such that new methods can be added to this built in class
+    Extended MNE Raw class with additional preprocessing functionality.
+    
+    This class wraps MNE's Raw objects and adds custom methods for EEG preprocessing,
+    including channel replacement, re-referencing, montage configuration, and event selection.
+    
+    Supports multiple recording systems including:
+    - BioSemi BDF files (.bdf)
+    - European Data Format (.edf)
+    - Neuromag/Elekta/MEGIN (.fif)
+    - BrainVision (.vhdr)
+    - And other formats supported by MNE
+    
+    Examples:
+        >>> # Read BDF file
+        >>> raw = RawEEG('data.bdf', preload=True)
+        >>> 
+        >>> # Read FIF file
+        >>> raw = RawEEG('data_raw.fif', file_type='fif')
+        >>> 
+        >>> # Read EDF with specific EOG channels
+        >>> raw = RawEEG('data.edf', eog=['EOG1', 'EOG2'])
     '''
 
-    def __init__(self,input_fname,eog=None,stim_channel=-1,
-                exclude=(),preload=True,verbose=None):
-
-        super(RawEEG, self).__init__(input_fname=input_fname,eog=eog,
-                                    stim_channel=stim_channel,preload=preload, 
-                                    verbose=verbose)
+    def __init__(self, 
+                 input_fname: Union[str, os.PathLike],
+                 file_type: Optional[str] = None,
+                 eog: Optional[Union[str, List[str]]] = None,
+                 stim_channel: Union[int, str, List[str], None] = -1,
+                 exclude: Union[List[str], Tuple[str, ...]] = (),
+                 preload: bool = True,
+                 verbose: Optional[Union[bool, str, int]] = None,
+                 **kwargs):
+        """Initialize RawEEG by reading data from various file formats.
+        
+        Args:
+            input_fname: Path to the EEG data file. Can be a string or Path object.
+            file_type: Type of file to read. Options include:
+                - 'bdf': BioSemi BDF format (default if .bdf extension)
+                - 'edf': European Data Format (default if .edf extension)
+                - 'fif': Neuromag/Elekta format (default if .fif extension)
+                - 'brainvision': BrainVision format (default if .vhdr extension)
+                - 'cnt': Neuroscan CNT format
+                - 'set': EEGLAB format
+                If None, automatically detects from file extension.
+            eog: Channel name(s) for EOG channels. Can be a single channel name
+                or list of channel names.
+            stim_channel: Channel name or index for stimulus/trigger channel.
+                Use -1 for last channel (common default). Use None to exclude.
+            exclude: List of channel names to exclude from reading.
+            preload: If True, load data into memory immediately. If False, 
+                data is read on-demand.
+            verbose: Control verbosity of MNE output. Can be bool, str ('INFO', 
+                'WARNING', 'ERROR'), or int.
+            **kwargs: Additional keyword arguments passed to the specific 
+                MNE reader function (e.g., montage, misc for BDF files).
+        
+        Raises:
+            ValueError: If file type cannot be determined or is unsupported.
+            FileNotFoundError: If input file does not exist.
+        """
+        
+        # Convert to Path object for easier handling
+        input_fname = os.path.expanduser(input_fname)
+        
+        # Auto-detect file type from extension if not specified
+        if file_type is None:
+            ext = os.path.splitext(input_fname)[1].lower()
+            file_type_map = {
+                '.bdf': 'bdf',
+                '.edf': 'edf',
+                '.fif': 'fif',
+                '.vhdr': 'brainvision',
+                '.cnt': 'cnt',
+                '.set': 'set',
+            }
+            file_type = file_type_map.get(ext)
+            if file_type is None:
+                raise ValueError(
+                    f"Cannot determine file type from extension '{ext}'. "
+                    f"Please specify file_type parameter. "
+                    f"Supported types: {list(file_type_map.values())}"
+                )
+        
+        # Read data using appropriate MNE function
+        if file_type == 'bdf':
+            raw = mne.io.read_raw_bdf(
+                input_fname,
+                eog=eog,
+                stim_channel=stim_channel,
+                exclude=exclude,
+                preload=preload,
+                verbose=verbose,
+                **kwargs
+            )
+        elif file_type == 'edf':
+            raw = mne.io.read_raw_edf(
+                input_fname,
+                eog=eog,
+                stim_channel=stim_channel,
+                exclude=exclude,
+                preload=preload,
+                verbose=verbose,
+                **kwargs
+            )
+        elif file_type == 'fif':
+            raw = mne.io.read_raw_fif(
+                input_fname,
+                preload=preload,
+                verbose=verbose,
+                **kwargs
+            )
+        elif file_type == 'brainvision':
+            raw = mne.io.read_raw_brainvision(
+                input_fname,
+                eog=eog,
+                preload=preload,
+                verbose=verbose,
+                **kwargs
+            )
+        elif file_type == 'cnt':
+            raw = mne.io.read_raw_cnt(
+                input_fname,
+                eog=eog,
+                preload=preload,
+                verbose=verbose,
+                **kwargs
+            )
+        elif file_type == 'set':
+            raw = mne.io.read_raw_eeglab(
+                input_fname,
+                preload=preload,
+                verbose=verbose,
+                **kwargs
+            )
+        else:
+            raise ValueError(
+                f"Unsupported file type: {file_type}. "
+                f"Supported types: bdf, edf, fif, brainvision, cnt, set"
+            )
+        
+        # Copy all attributes from the loaded raw object to self
+        self.__dict__.update(raw.__dict__)
+        
+        print(f'Loaded {file_type.upper()} file: {input_fname}')
+        print(f'Channels: {len(self.ch_names)}, Sampling rate: {self.info["sfreq"]} Hz')
+    
+    @classmethod
+    def from_bdf(cls, 
+                 input_fname: Union[str, os.PathLike],
+                 **kwargs) -> 'RawEEG':
+        """Convenience method to load BioSemi BDF files.
+        
+        Args:
+            input_fname: Path to the BDF file.
+            **kwargs: Additional arguments passed to __init__.
+            
+        Returns:
+            RawEEG instance with loaded BDF data.
+            
+        Examples:
+            >>> raw = RawEEG.from_bdf('subject01.bdf', preload=True)
+        """
+        return cls(input_fname, file_type='bdf', **kwargs)
+    
+    @classmethod
+    def from_edf(cls, 
+                 input_fname: Union[str, os.PathLike],
+                 **kwargs) -> 'RawEEG':
+        """Convenience method to load EDF files.
+        
+        Args:
+            input_fname: Path to the EDF file.
+            **kwargs: Additional arguments passed to __init__.
+            
+        Returns:
+            RawEEG instance with loaded EDF data.
+            
+        Examples:
+            >>> raw = RawEEG.from_edf('subject01.edf', preload=True)
+        """
+        return cls(input_fname, file_type='edf', **kwargs)
+    
+    @classmethod
+    def from_fif(cls, 
+                 input_fname: Union[str, os.PathLike],
+                 **kwargs) -> 'RawEEG':
+        """Convenience method to load FIF files.
+        
+        Args:
+            input_fname: Path to the FIF file.
+            **kwargs: Additional arguments passed to __init__.
+            
+        Returns:
+            RawEEG instance with loaded FIF data.
+            
+        Examples:
+            >>> raw = RawEEG.from_fif('subject01_raw.fif', preload=True)
+        """
+        return cls(input_fname, file_type='fif', **kwargs)
+    
+    @classmethod
+    def from_brainvision(cls, 
+                         input_fname: Union[str, os.PathLike],
+                         **kwargs) -> 'RawEEG':
+        """Convenience method to load BrainVision files.
+        
+        Args:
+            input_fname: Path to the .vhdr file.
+            **kwargs: Additional arguments passed to __init__.
+            
+        Returns:
+            RawEEG instance with loaded BrainVision data.
+            
+        Examples:
+            >>> raw = RawEEG.from_brainvision('subject01.vhdr', preload=True)
+        """
+        return cls(input_fname, file_type='brainvision', **kwargs)
   
     def report_raw(self, report, events, event_id):
         '''
@@ -171,7 +379,7 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
 
         # Re-reference EEG channels
         self.set_eeg_reference(ref_channels=ref_channels)
-        print('Re-referenced EE data to channels: {ref_channels}')
+        print(f'Re-referenced EEG data to channels: {ref_channels}')
 
         # Add reference channels to removal list if not using average reference
         if ref_channels != 'average':
@@ -179,8 +387,9 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
 
         # Remove specified channels if they exist
         to_remove = [ch for ch in to_remove if ch in self.ch_names]
-        self.drop_channels(to_remove)
-        print(f'Removed channels: {to_remove}')
+        if to_remove:
+            self.drop_channels(to_remove)
+            print(f'Removed channels: {to_remove}')
 
         return self
 
@@ -192,7 +401,7 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
         """Set EEG montage and rename channels to standard 
         naming conventions.
 
-        Uses MNE functions to set the specified montage and optioanlly 
+        Uses MNE functions to set the specified montage and optionally 
         changes channel labels from A/B naming scheme to standard 10-20 
         naming conventions. Optionally removes specified channels.
 
@@ -208,7 +417,7 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
 
         Examples:
             >>> raw = RawEEG(input_fname)
-            >>> raw.set_montage('biosemi64', ch_remove=['EXG7', 'EXG8'])
+            >>> raw.configure_montage('biosemi64', ch_remove=['EXG7', 'EXG8'])
 
         Notes:
             - Assumes BioSemi channel naming (A1-A32, B1-B32).
@@ -217,22 +426,35 @@ class RawEEG(mne.io.edf.edf.RawEDF, BaseRaw, FolderStructure):
         """
 
         # Drop specified channels
-        self.drop_channels(ch_remove)
+        if ch_remove:
+            channels_to_remove = [ch for ch in ch_remove if ch in self.ch_names]
+            if channels_to_remove:
+                self.drop_channels(channels_to_remove)
+
+        # Get montage object if string was passed
+        if isinstance(montage, str):
+            montage_obj = mne.channels.make_standard_montage(montage)
+        else:
+            montage_obj = montage
 
         # Create mapping dictionary for renaming channels
         ch_mapping = {}
-        if self.ch_names[0] == 'A1':  # Check if using BioSemi naming
+        if len(self.ch_names) > 0 and self.ch_names[0] == 'A1':  # Check if using BioSemi naming
             idx = 0
             for hemi in ['A', 'B']:
                 for elec in range(1, 33):
-                    ch_mapping.update({f'{hemi}{elec}':montage.ch_names[idx]})
+                    ch_name = f'{hemi}{elec}'
+                    if ch_name in self.ch_names and idx < len(montage_obj.ch_names):
+                        ch_mapping[ch_name] = montage_obj.ch_names[idx]
                     idx += 1
-            print('Channels renamed to 10-20 system')
+            
+            if ch_mapping:
+                self.rename_channels(ch_mapping)
+                print('Channels renamed to 10-20 system')
 
-        # Apply channel renaming and set montage
-        self.rename_channels(ch_mapping)
-        self.set_montage(montage=montage, on_missing='warn')
-        print('Montage added')
+        # Apply montage
+        self.set_montage(montage=montage_obj, on_missing='warn')
+        print(f'Montage {montage if isinstance(montage, str) else "custom"} added')
 
         return self
 

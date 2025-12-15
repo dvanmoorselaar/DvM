@@ -15,8 +15,7 @@ from eeg_analyses.ERP import *
 from stats.nonparametric import bootstrap_SE
 from typing import Optional, Generic, Union, Tuple, Any, List, Dict
 from support.support import get_time_slice, get_diff_pairs
-
-from IPython import embed
+from visuals.visuals import MidpointNormalize
 
 # set general plotting parameters
 # inspired by http://nipunbatra.github.io/2014/08/latexify/
@@ -127,13 +126,34 @@ def _get_continuous_segments(mask: np.ndarray) -> List[np.ndarray]:
 def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 					  color:str=None,stats:str='perm',
 					  smooth:bool=False,line_width:float = 4,
-					   y_val:np.array=None,**kwargs):
+					   y_val:np.array=None,
+					  sig_mask:Union[np.ndarray,list]=None,
+					  p_vals:np.ndarray=None,
+					  **kwargs):
+	"""
+	Plot significance markers on existing plots.
+	
+	Args:
+		x: X-axis values (time points)
+		y: Data array for stats calculation (only used if sig_mask not provided)
+		chance: Chance level for statistical testing
+		p_thresh: P-value threshold for significance
+		color: Color for significance markers
+		stats: Statistical test type ('perm', 'ttest', 'fdr')
+		smooth: Whether to smooth the data
+		line_width: Width of significance lines (1D plots)
+		y_val: Y-axis values for 2D plots (e.g., frequencies)
+		sig_mask: Pre-computed significance mask (optional, avoids re-calculating stats)
+		p_vals: Pre-computed p-values (optional, used with sig_mask)
+		**kwargs: Additional plotting arguments
+	"""
 	
 	# Infer plot type from data dimensions
 	plot_type = '2d' if y.ndim == 3 else '1d'
 
-	# perform statistical test
-	_, sig_mask, p_vals = _perform_stats(y, chance, stats, p_thresh)
+	# Only compute stats if not provided
+	if sig_mask is None:
+		_, sig_mask, p_vals = _perform_stats(y, chance, stats, p_thresh)
 
 	if plot_type == '2d':
 		# Require y_val for 2D plots
@@ -200,16 +220,96 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 def plot_2d(Z:np.array,x_val:np.array=None,
 	    	y_val:np.array=None,colorbar:bool=True,nr_ticks_x:np.array=None,
 			nr_ticks_y:np.array=5, set_y_ticks:bool=True,
-			interpolation:str='bilinear',cbar_label:str=None,**kwargs):
+			interpolation:str='bilinear',cbar_label:str=None,
+			mask:Union[np.ndarray,list]=None,mask_value:float=0,
+			p_vals:np.ndarray=None,p_thresh:float=0.05,
+			center_zero:bool=False,cmap:str=None,
+			**kwargs):
+	"""
+	Plot 2D heatmap with optional masking of non-significant values.
+	
+	Args:
+		Z: 2D or 3D array to plot (if 3D, averaged over first dimension)
+		x_val: X-axis values
+		y_val: Y-axis values
+		colorbar: Whether to show colorbar
+		nr_ticks_x: Number of x-axis ticks
+		nr_ticks_y: Number of y-axis ticks
+		set_y_ticks: Whether to set y-axis ticks
+		interpolation: Interpolation method for imshow
+		cbar_label: Label for colorbar
+		mask: Boolean array or cluster list indicating which values to keep
+		mask_value: Value to set masked pixels to (default: 0 for chance level)
+		p_vals: P-values for each cluster (only used with cluster list mask)
+		p_thresh: P-value threshold for significance (only used with cluster list mask)
+		center_zero: If True, use diverging colormap centered at zero (white)
+		cmap: Colormap name. If None and center_zero=True, uses 'RdBu_r'
+		**kwargs: Additional arguments passed to plt.imshow
+	"""
 
 	if Z.ndim > 2:
 		Z = Z.mean(axis=0)
+	
+	# Apply mask to set non-significant values to mask_value
+	# This is for visualization only - does not affect statistical testing
+	if mask is not None:
+		Z = Z.copy()  # Don't modify the original array
+		
+		# Handle different mask formats
+		if isinstance(mask, list):
+			# Convert cluster list to boolean mask (for perm test results)
+			bool_mask = np.zeros(Z.shape, dtype=bool)
+			for i, cluster in enumerate(mask):
+				# Only include significant clusters
+				if p_vals is None or p_vals[i] <= p_thresh:
+					bool_mask[cluster] = True
+			mask = bool_mask
+		
+		# Store unmasked data range BEFORE applying mask (for colorbar limits)
+		Z_unmasked_values = Z[mask]
+		
+		# Use masked array to properly handle non-significant values
+		# This prevents interpolation artifacts - masked pixels won't be displayed
+		Z = np.ma.masked_where(~mask, Z)
+	else:
+		Z_unmasked_values = None
 
 	# set extent
 	x_lim = [0,Z.shape[-1]] if x_val is None else [x_val[0],x_val[-1]]
 	y_lim = [0,Z.shape[-2]] if y_val is None else [y_val[0],y_val[-1]]
 	extent = [x_lim[0],x_lim[1],y_lim[0],y_lim[1]]
 
+	# Set up colormap and normalization for diverging data
+	#TODO: fix or remove
+	if center_zero:
+		if cmap is None:
+			cmap = 'RdBu_r'  # Red-Blue colormap, reversed (red=positive, blue=negative)
+		cmap_obj = plt.cm.get_cmap(cmap)
+		cmap_obj.set_bad(color='white')
+
+		# Calculate data range for colorbar limits
+		if Z_unmasked_values is not None and len(Z_unmasked_values) > 0:
+			data_min = Z_unmasked_values.min()
+			data_max = Z_unmasked_values.max()
+		else:
+			if isinstance(Z, np.ma.MaskedArray):
+				data_min = Z.compressed().min()
+				data_max = Z.compressed().max()
+			else:
+				data_min = Z.min()
+				data_max = Z.max()
+
+		# Ensure the range includes zero for MidpointNormalize to work correctly
+		vmin = min(data_min, 0)
+		vmax = max(data_max, 0)
+		norm = MidpointNormalize(vmin=vmin, vmax=vmax, midpoint=0)
+		kwargs.setdefault('norm', norm)
+		kwargs.setdefault('cmap', cmap_obj)
+
+		# Prevent interpolation artifacts for masked arrays
+		if isinstance(Z, np.ma.MaskedArray) and np.ma.is_masked(Z):
+			interpolation = 'nearest'
+	
 	# do actuall plotting
 	plt.imshow(Z,interpolation=interpolation,aspect='auto',origin='lower',
 	    	extent=extent, **kwargs)
@@ -422,6 +522,9 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 	colors: list = None, 
 	timecourse: str = '2d',
 	stats:Union[str,bool]=False,
+	p_thresh:float=0.05,
+	mask_nonsig:bool=False,
+	center_zero:bool=False,
 	show_SE: bool = False, 
 	smooth: bool = False, 
 	window_oi: Tuple = None, 
@@ -501,11 +604,24 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 		#do actual plotting
 		for i, y_ in enumerate(y):
 			if timecourse == '2d':
+				# Calculate stats once if needed
+				sig_mask = None
+				p_vals = None
+				if stats:
+					_, sig_mask, p_vals = _perform_stats(y_, 0, stats, p_thresh)
+				
+				# Plot with optional masking
 				plot_2d(y_, x_val=times, y_val=freqs, cbar_label='Power (au)',
-						colorbar=True)
-				if stats:		
+						colorbar=True,
+						mask=sig_mask if mask_nonsig else None,
+						mask_value=0, p_vals=p_vals, p_thresh=p_thresh,
+						center_zero=center_zero)
+				
+				# Add contours only if not masking (when masking, zeros show significance)
+				if stats and not mask_nonsig:		
 					plot_significance(times, y_, 0, color='white', stats=stats,
-							y_val=freqs, **kwargs)
+							y_val=freqs, sig_mask=sig_mask, p_vals=p_vals,
+							**kwargs)
 			else:
 				color = colors.pop(0) 
 				plot_timecourse(times,y_.mean(axis = 1),show_SE,smooth,
@@ -534,6 +650,8 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
 						colors:list=None,
 						show_SE:bool=False,smooth:bool=False,method:str='auc',
 						chance_level:float=0.5,stats:Union[str,bool]='perm',
+						p_thresh:float=0.05,mask_nonsig:bool=False,
+						center_zero:bool=False,
 						freq_oi: Union[int,Tuple] = None,
 						onset_times:Union[list,bool]=[0],offset_axes:int=10,
 						show_legend:bool=True,ls = '-',**kwargs):
@@ -583,13 +701,25 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
 				y_range = times
 				y_label = 'Train time (ms)'
 				y_ticks = False
-			# Remove colorbar from kwargs if present
-			plot_2d(y,x_val=times,y_val=y_range,colorbar=True,
-		   				set_y_ticks=y_ticks,cbar_label=method,**kwargs)
 			
+			# Calculate stats once if needed
+			sig_mask = None
+			p_vals = None
 			if stats:
+				_, sig_mask, p_vals = _perform_stats(y, 0, stats, p_thresh)
+			
+			# Plot with optional masking
+			plot_2d(y, x_val=times, y_val=y_range, colorbar=True,
+		   				set_y_ticks=y_ticks, cbar_label=method,
+						mask=sig_mask if mask_nonsig else None,
+						mask_value=0, p_vals=p_vals, p_thresh=p_thresh,
+						center_zero=center_zero, **kwargs)
+			
+			# Add contours only if not masking (when masking, zeros show significance)
+			if stats and not mask_nonsig:
 				plot_significance(times, y, 0, color='white', stats=stats,
-								y_val=y_range, **kwargs)				
+								y_val=y_range, sig_mask=sig_mask,
+								p_vals=p_vals, **kwargs)				
 
 	# fine tune plot	
 	if show_legend:
@@ -615,7 +745,8 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
 def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 						show_SE:bool=False,smooth:bool=False,timecourse:str='1d',
 						output:str='raw_slopes',band_oi: str=None,
-						stats:Union[str,bool]='perm',
+						stats:Union[str,bool]='perm',p_thresh:float=0.05,
+						mask_nonsig:bool=False,center_zero:bool=False,
 						onset_times:Union[list,bool]=[0],offset_axes:int=10,
 						show_legend:bool=True,avg_bins:bool=False,**kwargs):
 	
@@ -659,9 +790,8 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 			else:
 				label = cnd
 
-			# do actual plotting
-			if timecourse == '1d':
-				# select freq_oi or average across frequency bands if needed
+			# Select frequency band if needed (applies to both 1d and 2d_gat)
+			if timecourse in ['1d', '2d_gat']:
 				if y.shape[1]> 1:
 					if band_oi is not None:
 						y = y[:,band_idx,:]
@@ -672,7 +802,9 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 						y = y.mean(axis=1)
 				else:
 					y = np.squeeze(y,axis=1)
-					
+
+			# do actual plotting
+			if timecourse == '1d':
 				if y.ndim > 2 and avg_bins:
 					y = y[:,:,~np.all(y == 0, axis=(0,1))].mean(axis=-1)
 				if y.ndim > 2:
@@ -693,17 +825,35 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
 					plot_significance(times,y,0,
 									color=color,stats=stats,
 									smooth=smooth,**kwargs)
-			elif timecourse == '2d_tfr':
-				freqs = ctfs[0]['info']['freqs']	
-				y_range = [np.mean(band) for band in freqs]
-				ylabel = 'Frequency (Hz)'
-				y_ticks = True
-				plot_2d(y,x_val=times,y_val=y_range,colorbar=True,
-		   				set_y_ticks=y_ticks,cbar_label='CTF slope',**kwargs)
-			
+			elif timecourse == '2d_tfr' or timecourse == '2d_gat':
+				if timecourse == '2d_tfr':
+					freqs = ctfs[0]['info']['freqs']	
+					y_range = [np.mean(band) for band in freqs]
+					ylabel = 'Frequency (Hz)'
+					y_ticks = True
+				else:  # 2d_gat
+					y_range = times
+					ylabel = 'Train time (ms)'
+					y_ticks = False
+				
+				# Calculate stats once if needed
+				sig_mask = None
+				p_vals = None
 				if stats:
+					_, sig_mask, p_vals = _perform_stats(y, 0, stats, p_thresh)
+				
+				# Plot with optional masking
+				plot_2d(y, x_val=times, y_val=y_range, colorbar=True,
+		   				set_y_ticks=y_ticks, cbar_label='CTF slope',
+						mask=sig_mask if mask_nonsig else None,
+						mask_value=0, p_vals=p_vals, p_thresh=p_thresh,
+						center_zero=center_zero, **kwargs)
+			
+				# Add contours only if not masking (when masking, zeros show significance)
+				if stats and not mask_nonsig:
 					plot_significance(times, y, 0, color='white', stats=stats,
-									y_val=y_range, **kwargs)	
+									y_val=y_range, sig_mask=sig_mask, 
+									p_vals=p_vals, **kwargs)	
 			elif timecourse == '2d_ctf':
 				if y.shape[1]> 1:
 					Warning('2d CTF timecourse only supports single output.' \
@@ -781,7 +931,7 @@ def plot_topography(X:np.array,ch_types:str='eeg',montage:str='biosemi64',
 
 	# do actuall plotting
 	mne.viz.plot_topomap(X, info,**kwargs)
-			
+
 
 
 
