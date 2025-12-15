@@ -19,18 +19,13 @@ The necessary steps are outlined below:
 
 1. install anaconda (switching all code to python 3 now)
 2. launch terminal
-3. conda create -n mne python=3 pip
-4. source activate mne
-5. conda install scipy matplotlib scikit-learn mayavi jupyter spyder
-6. pip install PySurfer mne
-7. conda install seaborn
-8. pip install opencv-python
-9. pip install -U autoreject
-In case you want to make use of picard during ica
-10. pip install python-picard
-11. pip install openpyxly
-12. conda install statsmodels
-
+3. conda create -n mne python=3.11 pip
+4. conda activate mne 
+5. pip install --upgrade pip 
+6. conda install scipy matplotlib scikit-learn mayavi jupyter spyder
+7. conda install seaborn statsmodels
+8. pip install --upgrade mne
+9. pip install PySurfer autoreject python-picard opencv-python openpyxl
 
 ## Folderstructure
 
