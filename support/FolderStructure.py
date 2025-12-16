@@ -1,3 +1,37 @@
+"""
+File Management and Data Loading for the DvM Toolbox.
+
+This module provides the FolderStructure class which handles all file
+operations within the DvM toolbox. It manages automatic folder creation,
+path generation, and provides standardized methods for loading
+preprocessed EEG data, behavioral data, ERPs, time-frequency data, and
+multivariate decoding results.
+
+The FolderStructure class uses the current working directory as a base
+and automatically creates subdirectory structures for different data
+types (raw, processed, behavioral, ERP, TFR, BDM, etc.). This ensures
+consistent organization across all projects using the toolbox.
+
+Key Features
+------------
+- Automatic folder creation and path management
+- Standardized file naming conventions
+- Loading preprocessed EEG epochs with metadata
+- Reading ERP, TFR, and BDM analysis results
+- Subject and condition-based data organization
+- Cross-analysis file matching and validation
+
+Typical Usage
+-------------
+The FolderStructure class is typically inherited by other analysis
+classes (EEG, Epochs, ERP, TFR, BDM, CTF) to provide file management
+functionality. It can also be used standalone for loading previously
+analyzed data.
+
+Created by Dirk van Moorselaar on 8-12-2021.
+Copyright (c) 2021 DvM. All rights reserved.
+"""
+
 import os
 import sys
 import mne
@@ -9,11 +43,31 @@ import copy
 import numpy as np
 import pandas as pd
 
-from typing import Dict, List, Optional, Generic, Union, Tuple, Any
-from support.support import exclude_eye, match_epochs_times, trial_exclusion
-from IPython import embed
+from typing import List, Optional, Union, Tuple
+from support.support import (
+    exclude_eye, match_epochs_times, trial_exclusion
+)
+
 
 def blockPrinting(func):
+    """Decorator to suppress console output during function execution.
+
+    Parameters
+    ----------
+    func : callable
+        Function to wrap with output suppression.
+
+    Returns
+    -------
+    func_wrapper : callable
+        Wrapped function that suppresses stdout during execution.
+
+    Notes
+    -----
+    This decorator redirects stdout to devnull during function 
+    execution,then restores normal output. Useful for silencing verbose 
+    library output when not needed.
+    """
     def func_wrapper(*args, **kwargs):
         # block all printing to the console
         sys.stdout = open(os.devnull, 'w', encoding='utf-8')
@@ -27,43 +81,163 @@ def blockPrinting(func):
     return func_wrapper
 
 class FolderStructure(object):
+    """Manage file operations and data loading for EEG analyses.
 
-    '''
-    Handles reading and saving of files within dvm toolbox
-    '''
+    This class provides standardized file management for the DvM 
+    toolbox. It handles automatic folder creation, path generation based 
+    on the current working directory, and provides methods for loading 
+    various types of processed data (EEG epochs, ERPs, TFR, 
+    BDM, CTF results).
+
+    The class uses a consistent folder structure convention:
+    - raw_eeg/ : Raw BDF/EDF files
+    - processed/ : Preprocessed epoch files (-epo.fif)
+    - beh/raw/ : Raw behavioral CSV files
+    - beh/processed/ : Processed behavioral data
+    - eye/raw/ : Eye tracker data files
+    - eye/processed/ : Processed eye tracking data
+    - erp/evoked/ : Evoked response files
+    - tfr/[method]/ : Time-frequency analysis results
+    - bdm/[analysis]/ : Multivariate decoding results
+    - ctf/[analysis]/ : Channel tuning function results
+    - preprocessing/report/ : HTML quality control reports
+    - preprocessing/group_info/ : Group-level statistics
+
+    Methods
+    -------
+    folder_tracker(ext, fname, overwrite)
+        Generate folder paths and create directories if needed.
+    load_processed_epochs(sj, fname, preproc_name, eye_dict, ...)
+        Load preprocessed EEG epochs with behavioral metadata.
+    read_raw_beh(sj, session, files)
+        Read raw behavioral CSV files.
+    read_erps(erp_name, cnds, sjs, match)
+        Load evoked response data.
+    read_tfr(tfr_folder_path, tfr_name, cnds, sjs)
+        Load time-frequency analysis results.
+    read_bdm(bdm_folder_path, bdm_name, sjs, analysis_labels)
+        Load multivariate decoding results.
+    read_ctfs(ctf_folder_path, output_type, ctf_name, sjs)
+        Load channel tuning function results.
+
+    Notes
+    -----
+    This class is designed to be inherited by analysis classes
+    (EEG, Epochs, ERP, TFR, BDM, CTF) to provide them with file
+    management capabilities.
+
+    Examples
+    --------
+    >>> # Standalone usage
+    >>> fs = FolderStructure()
+    >>> 
+    >>> # Load preprocessed epochs
+    >>> df, epochs = fs.load_processed_epochs(
+    ...     sj=1, fname='ses_1_main', preproc_name='main'
+    ... )
+    >>> 
+    >>> # Load ERP data for multiple subjects
+    >>> erps, times = fs.read_erps(
+    ...     erp_name='target_locked',
+    ...     cnds=['left', 'right'],
+    ...     sjs=[1, 2, 3]
+    ... )
+
+    See Also
+    --------
+    eeg_analyses.EEG : EEG data classes that inherit FolderStructure
+    eeg_analyses.ERP : ERP analysis class
+    eeg_analyses.TFR : Time-frequency analysis class
+    eeg_analyses.BDM : Multivariate decoding class
+    eeg_analyses.CTF : Channel tuning function class
+    """
 
     def __init__(self):
-        pass
+        """Initialize FolderStructure instance.
+
+        Creates a new FolderStructure object that uses the current
+        working directory as the base for all file operations.
+        """
 
     @staticmethod
     def _extract_subject_number(fname: str) -> int:
-        """Extract subject number from filename."""
+        """Extract subject number from filename.
+
+        Parameters
+        ----------
+        fname : str
+            Filename containing subject number in format 'sj_X_'.
+
+        Returns
+        -------
+        sj : int
+            Extracted subject number.
+
+        Raises
+        ------
+        ValueError
+            If filename does not contain subject number in 
+            expected format.
+        """
         match = re.search(r'sj_(\d+)_', fname)
         if match:
             return int(match.group(1))
         raise ValueError(f"Could not extract subject number from {fname}")
 
     @staticmethod
-    def folder_tracker(ext:list=[], fname:str=None,overwrite:bool=True)->str:
-        """
-        Creates a folder address with the current working directory as 
-        a base. In case the specified path does not exits, it is created
+    def folder_tracker(
+        ext: Optional[list] = None,
+        fname: Optional[str] = None,
+        overwrite: bool = True
+    ) -> str:
+        """Generate file path with automatic folder creation.
 
-        Args:
-            ext (list, optional): list of subfolders that are attached 
-            to current working directory. Defaults to [] (i.e., 
-            no subfolders).
-            fname (str, optional): filename. Defaults to None.
-            overwrite (bool, optional): if overwrite is False, the 
-            original file remains untouched and an * is appended to the 
-            specified file name Defaults to True.
+        Creates a folder path using the current working directory as
+        base. If the specified path does not exist, it is created
+        automatically. Optionally prevents overwriting existing files.
 
-        Returns:
-            path: specified file path
+        Parameters
+        ----------
+        ext : list, default=[]
+            List of subfolders to append to current working directory.
+            For example, ['beh', 'processed'] creates path
+            'cwd/beh/processed/'.
+        fname : str, optional
+            Filename to append to path. If None, only the folder path
+            is returned. Default is None.
+        overwrite : bool, default=True
+            If False and file exists, appends '+' characters to
+            filename until a unique name is found. If True, returns
+            path that may overwrite existing file.
+
+        Returns
+        -------
+        path : str
+            Complete file path including filename (if specified).
+
+        Examples
+        --------
+        >>> # Get path to processed folder
+        >>> path = FolderStructure.folder_tracker(ext=['processed'])
+        >>> 
+        >>> # Get path to specific file
+        >>> file_path = FolderStructure.folder_tracker(
+        ...     ext=['beh', 'processed'],
+        ...     fname='subject-1_session_1.csv'
+        ... )
+        >>> 
+        >>> # Prevent overwriting
+        >>> safe_path = FolderStructure.folder_tracker(
+        ...     ext=['processed'],
+        ...     fname='data.fif',
+        ...     overwrite=False
+        ... )
         """
 
         # create folder adress
         path = os.getcwd()
+        if ext is None:
+            ext = []
         if ext != []:
             path = os.path.join(path,*ext)
 
@@ -81,49 +255,104 @@ class FolderStructure(object):
         return path
 
     def load_processed_epochs(self,sj:int,fname:str,preproc_name:str,
-                        eye_dict:dict=None,csv_file:bool=True,
-                        excl_factor:dict=None)->\
+                        eye_dict:Optional[dict]=None,beh_file:bool=True,
+                        excl_factor:Optional[dict]=None)->\
                         Tuple[pd.DataFrame,mne.Epochs]:
-        """
-        Reads in preprocessed eeg data (mne.Epochs object) and 
-        behavioral data to be used for subsequent analyses. If data is 
-        excluded based on eye movement criteria and a preproccesing 
-        overview file exists, this file is updated with eyemovement 
-        info per subject.
- 
-        Args:
-            sj (int): subject identifier
-            fname (str): name of processed eeg data
-            preproc_name (str): name specified for specific 
-            preprocessing pipeline
-            eye_dict (dict, optional): Each key specifies criteria
-            used to exclude data based on eye_movement data. 
-            Defaults to None, i.e., no eye-movement exclusion.
-            Currently, supports the following keys:
-            eye_window (tuple): window used to search for eye movements
-            eye_ch (str): channel to search for eye movements
-            angle_thresh (float): threshold in degrees of visual angles
-            step_param (dict)
-            use_tracker (bool): should eye tracker data be used to 
-            search eye movements. If not exclusion will be based on 
-            step algorhytm applied to eog channel as specified in eye_ch
-            csv_file (bool, optional): Is epoch info stored in a 
-            seperate file or within epochs data. Defaults to True.
-            excl_factor (dict, optional): This gives the option to 
-			exclude specific conditions from the data that is read in. 
-			
-			For example, to only include trials where the cue was 
-			pointed to the left and not to the right 
-			specify the following: 
+        """Load preprocessed EEG epochs with behavioral metadata.
 
-			excl_factor = dict(cue_direc = ['right']). 
-			
-			Mutiple column headers and multiple variables per header can 
-			be specified. Defaults to None (i.e., no trial exclusion).
+        Reads preprocessed EEG data (MNE Epochs object) and behavioral
+        data for subsequent analyses. If eye movement criteria are
+        specified, trials are excluded based on fixation breaks. Updates
+        preprocessing overview file with eye movement statistics if it
+        exists.
 
-        Returns:
-            beh (pd.DataFrame): behavioral data alligned to eeg data
-            epochs (mne.Epochs): preprocessed eeg data
+        Parameters
+        ----------
+        sj : int
+            Subject identifier.
+        fname : str
+            Name of processed EEG file (without -epo.fif extension).
+        preproc_name : str
+            Name specified for preprocessing pipeline (used to locate
+            preprocessing parameter files).
+        eye_dict : dict, optional
+            Eye movement exclusion criteria. Default is None (no
+            exclusion). Supported keys:
+                - 'eye_window' : tuple, time window to search for eye
+                  movements
+                - 'eye_ch' : str, channel name for eye movement 
+                  detection
+                - 'angle_thresh' : float, threshold in degrees of visual
+                  angle
+                - 'step_param' : dict, parameters for step detection
+                  algorithm
+                - 'use_tracker' : bool, whether to use eye tracker data.
+                  If False, uses EOG channel specified in 'eye_ch'
+        beh_file : bool, default=True
+            If True, reads behavioral data from separate CSV file. If
+            False, uses condition information from epochs.events array.
+        excl_factor : dict, optional
+            Trial exclusion criteria based on experimental conditions.
+            Default is None (no exclusion). Format:
+                {column_name: [values_to_exclude]}
+            For example, to exclude trials where cue pointed right:
+                excl_factor = {'cue_direc': ['right']}
+            Multiple columns and values can be specified.
+
+        Returns
+        -------
+        beh : pd.DataFrame
+            Behavioral data aligned to EEG epochs. Contains trial
+            metadata and experimental variables.
+        epochs : mne.Epochs
+            Preprocessed EEG epochs object with bad trials rejected.
+
+        Notes
+        -----
+        If eye_dict is specified and eye tracker data file exists,
+        eye movements are detected using tracker data. Otherwise,
+        falls back to EOG-based detection using the step algorithm.
+
+        The preprocessing parameter file is updated with eye movement
+        exclusion statistics per subject if it exists.
+
+        Examples
+        --------
+        >>> # Basic loading
+        >>> beh, epochs = self.load_processed_epochs(
+        ...     sj=1,
+        ...     fname='main',
+        ...     preproc_name='main'
+        ... )
+        >>> 
+        >>> # Load with eye movement exclusion
+        >>> eye_params = {
+        ...     'eye_window': (-0.5, 1.0),
+        ...     'eye_ch': 'HEOG',
+        ...     'angle_thresh': 100,
+        ...     'use_tracker': True
+        ... }
+        >>> beh, epochs = self.load_processed_epochs(
+        ...     sj=1,
+        ...     fname='main',
+        ...     preproc_name='main',
+        ...     eye_dict=eye_params
+        ... )
+        >>> 
+        >>> # Load with condition exclusion
+        >>> beh, epochs = self.load_processed_epochs(
+        ...     sj=1,
+        ...     fname='main',
+        ...     preproc_name='main',
+        ...     excl_factor={'cue_direc': ['right']}
+        ... )
+
+        See Also
+        --------
+        support.support.exclude_eye : Eye movement detection and 
+        exclusion
+        support.support.trial_exclusion : Condition-based trial 
+        selection
         """
         
         # start by reading in processed eeg data
@@ -169,60 +398,45 @@ class FolderStructure(object):
 
         return df, epochs
 
+    def read_raw_beh(self,sj:Optional[int]=None,session:Optional[int]=None,
+                    files:Union[bool,list]=False)->Union[pd.DataFrame,list]:
+        """Read raw behavioral data from CSV files.
 
-    def load_data(self, sj, name = 'all', eyefilter = False, eye_window = None, eye_ch = 'HEOG', eye_thresh = 1, eye_dict = None, beh_file = True, use_tracker = True):
-        '''
-        loads EEG and behavior data
+        Loads and concatenates raw behavioral CSV files for a specific
+        subject and session. Files are automatically located in the
+        beh/raw/ folder based on subject and session numbers.
 
-        Arguments
-        - - - - -
-        sj (int): subject number
-        eye_window (tuple|list): timings to scan for eye movements
-        eyefilter (bool): in or exclude eye movements based on step like algorythm
-        eye_ch (str): name of channel to scan for eye movements
-        eye_thresh (int): exclude trials with an saccades exceeding threshold (in visual degrees)
-        eye_dict (dict): if not None, needs to be dict with three keys specifying parameters for sliding window detection
-        beh_file (bool): Is epoch info stored in a seperate file or within behavior file
-        use_tracker (bool): specifies whether eye tracker data should be used (i.e., is reliable)
+        Parameters
+        ----------
+        sj : int, optional
+            Subject identifier. Required if files is False.
+        session : int, optional
+            Session identifier. Required if files is False.
+        files : bool or list, default=False
+            If False, automatically finds CSV files matching subject
+            and session. If list, uses the provided file paths directly.
 
         Returns
-        - - - -
-        beh (Dataframe): behavior file
-        eeg (mne object): preprocessed eeg data
+        -------
+        beh : pd.DataFrame
+            Concatenated behavioral data from all matching files. Empty
+            list if no files found.
 
-        '''
+        Notes
+        -----
+        Files are expected to be named:
+        'subject-{sj}_session_{session}*.csv'
+        
+        All matching files are concatenated and the index is reset.
 
-        # read in processed EEG data
-        eeg = mne.read_epochs(self.folder_tracker(ext = ['processed'],
-                            fname = 'subject-{}_{}-epo.fif'.format(sj, name)))
-        if eeg.metadata is not None:
-            beh = eeg.metadata
-        else:
-            # read in processed behavior from pickle file
-            if beh_file:
-                beh = pickle.load(open(self.folder_tracker(ext = ['beh','processed'],
-                                    fname = 'subject-{}_{}.pickle'.format(sj, name)),'rb'), encoding='latin1')
-                beh = pd.DataFrame.from_dict(beh)
-            else:
-                beh = pd.DataFrame({'condition': eeg.events[:,2]})
-
-        if eyefilter:
-            beh, eeg = filter_eye(beh, eeg, eye_window, eye_ch, eye_thresh, eye_dict, use_tracker)
-
-        return beh, eeg
-
-    def read_raw_beh(self,sj:int=None,session:int=None,
-                    files:bool=False)->pd.DataFrame:
-        """Reads in raw behavior data from csv file to link to
-        epochs data.
-
-        Args:
-            sj (int): subject identifier
-            session (int): session identifier
-            files ()
-
-        Returns:
-            beh (pd.DataFrame): dataframe with raw behavior
+        Examples
+        --------
+        >>> # Load all behavioral files for subject 1, session 1
+        >>> beh = self.read_raw_beh(sj=1, session=1)
+        >>> 
+        >>> # Load specific files
+        >>> files = ['path/to/file1.csv', 'path/to/file2.csv']
+        >>> beh = self.read_raw_beh(files=files)
         """
 
         # get all files for this subject's session
@@ -237,33 +451,69 @@ class FolderStructure(object):
         beh = pd.concat(beh)
         beh.reset_index(inplace = True, drop = True)
 
-        # control for duplicate trial numbers
-        if len(files) > 1 and 'nr_trials' in beh:
-            nr_trials = beh.nr_trials.values
-
         return beh
 
-    #@blockPrinting
     def read_erps(self,erp_name:str,
-                cnds:list=None,sjs:list='all',
-                match:str=False)->Tuple[dict,np.array]:
-        """
-        Read in evoked files of a specific analysis. Evoked data is 
-        returned in dictionary
+                cnds:Optional[list]=None,sjs:Union[list,str]='all',
+                match:Union[str,bool]=False)->Tuple[dict,np.ndarray]:
+        """Read evoked response files for specific analysis.
 
-        Args:
-            erp_name (str): name assigned to erp analysis
-            cnds (list, optional): conditions of interest. 
-            Defaults to None
-            (i.e., no conditions).
-            sjs (list, optional): List of subjects. Defaults to 'all'.
-            match (str, optional): If match is not False, it will be 
-            explicitly checked whether timing events match between
-            read in files. If not, samples will be removed until 
-            matching. Defaults to False.
+        Loads evoked ERP data from previously computed ERP analysis.
+        Returns data organized by experimental condition.
 
-        Returns:
-            erps (dict): Dictionary with evoked data (with conditions as keys)
+        Parameters
+        ----------
+        erp_name : str
+            Name assigned to the ERP analysis (used in filename).
+        cnds : list, optional
+            List of condition labels to load. Default is None, which
+            loads 'all_data'.
+        sjs : list or 'all', default='all'
+            List of subject numbers to load. If 'all', loads all
+            subjects found in the erp/evoked/ folder.
+        match : str or bool, default=False
+            If not False, explicitly checks whether timing events match
+            between files. If mismatched, removes samples until aligned.
+
+        Returns
+        -------
+        erps : dict
+            Dictionary with condition labels as keys and lists of
+            mne.Evoked objects as values. Each list contains one
+            Evoked object per subject.
+        times : np.ndarray
+            Time points in seconds for the evoked responses.
+
+        Warnings
+        --------
+        If match is True and sample counts differ across subjects,
+        prints warning that data has been artificially aligned.
+
+        Notes
+        -----
+        Expected file naming convention:
+        'sj_{sj}_{cnd}_{erp_name}-ave.fif'
+
+        Examples
+        --------
+        >>> # Load ERPs for all subjects, two conditions
+        >>> erps, times = self.read_erps(
+        ...     erp_name='target_locked',
+        ...     cnds=['left', 'right']
+        ... )
+        >>> 
+        >>> # Load specific subjects with timing alignment
+        >>> erps, times = self.read_erps(
+        ...     erp_name='target_locked',
+        ...     cnds=['left', 'right'],
+        ...     sjs=[1, 2, 3],
+        ...     match=True
+        ... )
+
+        See Also
+        --------
+        eeg_analyses.ERP : ERP analysis class that generates these files
+        support.support.match_epochs_times : Timing alignment function
         """
 
         if cnds is None:
@@ -294,26 +544,66 @@ class FolderStructure(object):
                     print('data carefully' )
                     erps[cnd] = match_epochs_times(erps[cnd])
         
-        times = erps[cnd][0].times
+        # Get times from last condition (cnds is guaranteed non-empty)
+        times = erps[cnds[-1]][0].times
 
         return erps, times
     
-    def read_tfr(self,tfr_folder_path:list,tfr_name:str,cnds:list=None,
-                sjs:list='all')->list:
-        """
-        Read in time-frequency data as created by TFR class.
-        Time-frequency data is returned within a dictionary.
+    def read_tfr(self,tfr_folder_path:list,tfr_name:str,cnds:Optional[list]=None,
+                sjs:Union[list,str]='all')->dict:
+        """Read time-frequency analysis results.
 
-        Args:
-            tfr_folder_path (list): List of folders (as created by TFR)
-            within tfr folder pointing towards files of interest (e.g.,
-            ['wavelet'])
-            tfr_name (str): name assigned to tfr analysis
-            cnds (list, optional): conditions of interest. Defaults to None
-            sjs (list, optional): List of subjects. Defaults to 'all'.
+        Loads time-frequency data (TFR) computed by the TFR class.
+        Returns data organized by experimental condition.
 
-        Returns:
-            tfr (list): list with time-frequency data
+        Parameters
+        ----------
+        tfr_folder_path : list
+            List of subfolders within tfr/ folder specifying analysis
+            type. For example, ['wavelet'] or ['multitaper'].
+        tfr_name : str
+            Name assigned to the TFR analysis (used in filename).
+        cnds : list, optional
+            List of condition labels to load. Default is None, which
+            loads 'all_data'.
+        sjs : list or 'all', default='all'
+            List of subject numbers to load. If 'all', loads all
+            subjects found in the tfr/ folder.
+
+        Returns
+        -------
+        tfr : dict
+            Dictionary with condition labels as keys and lists of
+            mne.time_frequency.AverageTFR objects as values. Each list
+            contains one TFR object per subject.
+
+        Notes
+        -----
+        Expected file naming convention:
+        'sj_{sj}_{tfr_name}_{cnd}-tfr.h5'
+
+        Files are stored in: tfr/{tfr_folder_path}/
+
+        Examples
+        --------
+        >>> # Load wavelet TFR for all subjects
+        >>> tfr = self.read_tfr(
+        ...     tfr_folder_path=['wavelet'],
+        ...     tfr_name='target_locked',
+        ...     cnds=['left', 'right']
+        ... )
+        >>> 
+        >>> # Load multitaper TFR for specific subjects
+        >>> tfr = self.read_tfr(
+        ...     tfr_folder_path=['multitaper'],
+        ...     tfr_name='target_locked',
+        ...     cnds=['left', 'right'],
+        ...     sjs=[1, 2, 3]
+        ... )
+
+        See Also
+        --------
+        eeg_analyses.TFR : Time-frequency analysis class
         """
 
         if cnds is None:
@@ -349,18 +639,63 @@ class FolderStructure(object):
         sjs: Union[list, str] = 'all',
         analysis_labels: Optional[List[str]] = None
     ) -> list:
-        """
-        Read in classification data as created by BDM class.
+        """Read multivariate decoding analysis results.
 
-        Args:
-            bdm_folder_path (list): List of folders (as created by BDM) within
-            bdm folder pointing towards files of interest (e.g.,
-            ['target_loc', 'all_elecs', 'cross'])
-            bdm_name (str): name assigned to bdm analysis
-            sjs (list, optional): List of subjects. Defaults to 'all'.
+        Loads classification/decoding data computed by the BDM
+        (Backward Decoding Model) class. Supports loading single or
+        multiple analyses.
 
-        Returns:
-            bdm (list): list with decoding data
+        Parameters
+        ----------
+        bdm_folder_path : list
+            List of subfolders within bdm/ folder pointing to files of
+            interest. For example, ['target_loc', 'all_elecs', 'cross'].
+        bdm_name : str or list of str
+            Name(s) assigned to BDM analysis. If list, loads multiple
+            analyses.
+        sjs : list or 'all', default='all'
+            List of subject numbers to load. If 'all', loads all
+            subjects found in the bdm/ folder.
+        analysis_labels : list of str, optional
+            Labels for multiple analyses when bdm_name is a list. If
+            None and bdm_name is a list, uses bdm_name values as labels.
+
+        Returns
+        -------
+        bdm : list or dict
+            If single analysis: list of decoding results (one per
+            subject).
+            If multiple analyses: dictionary with analysis_labels as
+            keys and lists of results as values.
+
+        Notes
+        -----
+        Expected file naming convention:
+        'sj_{sj}_{bdm_name}.pickle'
+
+        Files are stored in: bdm/{bdm_folder_path}/
+
+        Results are loaded as pickle files containing decoding
+        accuracies, patterns, or other multivariate metrics.
+
+        Examples
+        --------
+        >>> # Load single BDM analysis
+        >>> bdm = self.read_bdm(
+        ...     bdm_folder_path=['target_loc', 'all_elecs'],
+        ...     bdm_name='standard'
+        ... )
+        >>> 
+        >>> # Load multiple BDM analyses
+        >>> bdm = self.read_bdm(
+        ...     bdm_folder_path=['target_loc', 'all_elecs'],
+        ...     bdm_name=['standard', 'cross_temporal'],
+        ...     analysis_labels=['within_time', 'across_time']
+        ... )
+
+        See Also
+        --------
+        eeg_analyses.BDM : Multivariate decoding class
         """
 
         # set extension
@@ -459,11 +794,71 @@ class FolderStructure(object):
         return bdm
     
     def read_ctfs(self,ctf_folder_path:list,output_type:str,
-                  ctf_name:str,sjs:list='all')->list:
+                  ctf_name:str,sjs:Union[list,str]='all')->list:
+        """Read channel tuning function analysis results.
+
+        Loads CTF (Channel Tuning Function) data computed by the CTF
+        class. Supports loading tuning functions, metadata, or
+        parameters.
+
+        Parameters
+        ----------
+        ctf_folder_path : list
+            List of subfolders within ctf/ folder pointing to files of
+            interest. For example, ['orientation', 'standard'].
+        output_type : str
+            Type of output to load. Options:
+                - 'ctf' : Tuning function data
+                - 'info' : Metadata and analysis information
+                - 'param' : Analysis parameters
+        ctf_name : str
+            Name assigned to the CTF analysis (used in filename).
+        sjs : list or 'all', default='all'
+            List of subject numbers to load. If 'all', loads all
+            subjects found in the ctf/ folder.
+
+        Returns
+        -------
+        ctfs : list
+            List of CTF results, one per subject. Content depends on
+            output_type parameter.
+
+        Notes
+        -----
+        Expected file naming conventions:
+            - 'ctfs_{sj}_{ctf_name}.pickle' (for output_type='ctf')
+            - 'ctf_info_{sj}_{ctf_name}.pickle' (for output_type='info')
+            - 'ctf_param_{sj}_{ctf_name}.pickle' (for output_type='param')
+
+        Files are stored in: ctf/{ctf_folder_path}/
+
+        Examples
+        --------
+        >>> # Load CTF data for all subjects
+        >>> ctfs = self.read_ctfs(
+        ...     ctf_folder_path=['orientation', 'standard'],
+        ...     output_type='ctf',
+        ...     ctf_name='main'
+        ... )
+        >>> 
+        >>> # Load CTF parameters for specific subjects
+        >>> params = self.read_ctfs(
+        ...     ctf_folder_path=['orientation', 'standard'],
+        ...     output_type='param',
+        ...     ctf_name='main',
+        ...     sjs=[1, 2, 3]
+        ... )
+
+        See Also
+        --------
+        eeg_analyses.CTF : Channel tuning function analysis class
+        """
 
         # set extension
         ext = ['ctf'] + ctf_folder_path
 
+        # determine output file prefix
+        output = 'ctfs'  # default
         if output_type=='ctf':
             output = 'ctfs'
         elif output_type=='info':
