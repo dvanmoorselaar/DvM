@@ -16,7 +16,7 @@ from IPython import embed
 def blockPrinting(func):
     def func_wrapper(*args, **kwargs):
         # block all printing to the console
-        sys.stdout = open(os.devnull, 'w')
+        sys.stdout = open(os.devnull, 'w', encoding='utf-8')
         # call the method in question
         value = func(*args, **kwargs)
         # enable all printing to the console
