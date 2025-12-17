@@ -66,8 +66,8 @@ from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
 from sklearn.metrics import auc
 from support.FolderStructure import *
-from support.support import select_electrodes,trial_exclusion,create_cnd_loop,\
-                            get_time_slice
+from support.preprocessing_utils import (select_electrodes,trial_exclusion,
+                                        get_time_slice)
 
 class ERP(FolderStructure):
     """

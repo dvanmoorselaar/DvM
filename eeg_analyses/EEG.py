@@ -75,7 +75,7 @@ from typing import Dict, List, Optional, Union, Tuple, Any
 from autoreject import get_rejection_threshold
 from eeg_analyses.EYE import *
 from math import sqrt, ceil, floor
-from support.support import get_time_slice, trial_exclusion
+from support.preprocessing_utils import get_time_slice, trial_exclusion
 from support.FolderStructure import *
 from mne.viz.epochs import plot_epochs_image
 from mne.filter import filter_data
@@ -1831,6 +1831,197 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
 
         logging.info('{} channels marked as bad: {}'.format(
             len(self.info['bads']), self.info['bads']))
+
+    def baseline_by_condition(
+        self,
+        df: pd.DataFrame,
+        cnds: list,
+        cnd_header: str,
+        base_period: tuple = (-0.1, 0),
+        nr_elec: int = 64
+    ) -> 'Epochs':
+        """
+        Apply baseline correction separately for each condition.
+
+        Performs condition-specific baseline correction when different
+        conditions require different baseline periods or when baseline
+        should be computed within-condition rather than globally.
+
+        Parameters
+        ----------
+        beh : pd.DataFrame
+            Behavioral data with condition labels for each epoch.
+        cnds : list
+            List of condition values to process. Must exist in 
+            beh[cnd_header].
+        cnd_header : str
+            Column name in beh DataFrame containing condition labels.
+        base_period : tuple, default=(-0.1, 0)
+            Baseline time window in seconds (start, end).
+        nr_elec : int, default=64
+            Number of EEG electrodes to baseline correct. Non-EEG 
+            channels (EOG, etc.) after this index are not corrected.
+
+        Returns
+        -------
+        self : Epochs
+            Returns self for method chaining.
+
+        Warnings
+        --------
+        Modifies EEG data in-place! Cannot be undone without reloading.
+
+        This is an advanced function. Standard baseline correction via
+        mne.Epochs(..., baseline=(-0.1, 0)) is recommended for most 
+        cases.
+
+        Notes
+        -----
+        For each condition:
+        1. Selects trials matching that condition
+        2. Computes mean baseline per electrode across those trials
+        3. Subtracts baseline from all electrodes in those trials
+
+        Use cases:
+        - Different experimental phases require different baselines
+        - Condition-specific artifacts affect baseline
+        - Within-condition normalization needed
+
+        Examples
+        --------
+        >>> # Apply -100 to 0ms baseline per condition
+        >>> epochs.baseline_by_condition(
+        ...     beh=beh,
+        ...     cnds=['cue_left', 'cue_right'],
+        ...     cnd_header='condition',
+        ...     base_period=(-0.1, 0)
+        ... )
+
+        See Also
+        --------
+        shift_by_condition : Shift timing by condition
+        """
+        # Select indices baseline period
+        start, end = [np.argmin(abs(self.times - b)) for b in base_period]
+
+        # Loop over conditions
+        for cnd in cnds:
+            # Get indices of interest
+            idx = np.where(df[cnd_header] == cnd)[0]
+
+            # Get data
+            X = self._data[idx, :nr_elec]
+            # Get base_mean (per electrode)
+            X_base = X[:, :, start:end].mean(axis=(0, 2))
+
+            # Do baselining per electrode
+            for i in range(nr_elec):
+                X[:, i, :] -= X_base[i]
+
+            self._data[idx, :nr_elec] = X
+
+        return self
+
+    def shift_by_condition(
+        self,
+        beh: pd.DataFrame,
+        cnd_info: dict,
+        cnd_header: str
+    ) -> 'Epochs':
+        """
+        Shift epoch timings by condition to align events of interest.
+
+        Artificially shifts the time series data for specific conditions
+        when events of interest occur at different latencies across
+        conditions. Useful for aligning responses that vary in timing.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Behavioral data with condition labels.
+        cnd_info : dict
+            Dictionary mapping condition values to shift amounts in 
+            seconds. Positive values shift forward (delay), negative 
+            shift backward. Example: {'fast': -0.1, 'slow': 0.1}
+        cnd_header : str
+            Column name in beh containing condition labels (keys from 
+            cnd_info).
+
+        Returns
+        -------
+        self : Epochs
+            Returns self for method chaining.
+
+        Warnings
+        --------
+        **DATA IS ARTIFICIALLY MANIPULATED!**
+        
+        - Modifies EEG data in-place
+        - Shifts are circular (uses np.roll) - edge effects occur!
+        - Cannot be undone without reloading
+        - Be extremely careful selecting analysis windows
+        - Original timing information is lost
+
+        Notes
+        -----
+        The function prints warnings about data manipulation and shows
+        original timing range.
+
+        Shifting is done via np.roll which wraps around 
+        (circular shift):
+        
+        - Forward shift: early samples wrap to end
+        - Backward shift: late samples wrap to beginning
+
+        Consider alternatives:
+        
+        - Re-epoch data with condition-specific time windows
+        - Use different event codes for analysis
+        - Align on different events during preprocessing
+
+        Examples
+        --------
+        >>> # Shift slow trials backward by 100ms, fast forward by 100ms
+        >>> epochs.shift_by_condition(
+        ...     beh=beh,
+        ...     cnd_info={'slow': -0.1, 'fast': 0.1},
+        ...     cnd_header='rt_bin'
+        ... )
+        Data will be artificially shifted...
+        Original timings range from -0.2 to 1.0
+        EEG data is shifted backward in time for all slow trials
+        EEG data is shifted forward in time for all fast trials
+
+        See Also
+        --------
+        baseline_by_condition : Condition-specific baseline correction
+        """
+
+        print('Data will be artificially shifted. Be careful in selecting '
+              'the window of interest for further analysis')
+        print(f'Original timings range from {self.tmin} to {self.tmax}')
+        
+        # Loop over all conditions
+        for cnd in cnd_info.keys():
+            # Set how much data needs to be shifted
+            to_shift = cnd_info[cnd]
+            to_shift = int(np.diff([np.argmin(abs(self.times - t)) 
+                                   for t in (0, to_shift)]))
+            
+            if to_shift < 0:
+                print(f'EEG data is shifted backward in time for all '
+                      f'{cnd} trials')
+            elif to_shift > 0:
+                print(f'EEG data is shifted forward in time for all '
+                      f'{cnd} trials')
+
+            # Find indices of epochs to shift
+            mask = (beh[cnd_header] == cnd).values
+
+            # Do actual shifting
+            self._data[mask] = np.roll(self._data[mask], to_shift, axis=2)
+
+        return self
 
 class ArtefactReject(object):
     """ Multiple (automatic artefact rejection procedures)

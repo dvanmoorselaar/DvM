@@ -14,7 +14,7 @@ from statsmodels.stats.multitest import fdrcorrection
 from eeg_analyses.ERP import *
 from stats.nonparametric import bootstrap_SE
 from typing import Optional, Generic, Union, Tuple, Any, List, Dict
-from support.support import get_time_slice, get_diff_pairs
+from support.preprocessing_utils import get_time_slice, get_diff_pairs
 from visuals.visuals import MidpointNormalize
 
 # set general plotting parameters

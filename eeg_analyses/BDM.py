@@ -63,7 +63,9 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, confusion_matrix
-from support.support import select_electrodes, trial_exclusion, get_time_slice
+from support.preprocessing_utils import (
+	select_electrodes, trial_exclusion, get_time_slice
+)
 from scipy.stats import rankdata
 from eeg_analyses.TFR import TFR
 from visuals.plot_results import plot_bdm_timecourse

@@ -44,9 +44,7 @@ import numpy as np
 import pandas as pd
 
 from typing import List, Optional, Union, Tuple
-from support.support import (
-    exclude_eye, match_epochs_times, trial_exclusion
-)
+from support.preprocessing_utils import match_epochs_times, trial_exclusion
 
 
 def blockPrinting(func):
