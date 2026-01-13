@@ -747,6 +747,9 @@ def log_preproc(
 		for key, value in to_update.items():
 			if key not in df:
 				df[key] = np.nan 
+			# Convert column to object dtype to allow string assignment
+			if df[key].dtype != 'object':
+				df[key] = df[key].astype('object')
 			if type(value) == list:
 				value = str(value) 
 			df.loc[idx,key] = str(value)

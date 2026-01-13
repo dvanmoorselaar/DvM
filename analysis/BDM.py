@@ -67,7 +67,7 @@ from support.preprocessing_utils import (
 	select_electrodes, trial_exclusion, get_time_slice, format_subject_id
 )
 from scipy.stats import rankdata
-from eeg_analyses.TFR import TFR
+from analysis.TFR import TFR
 from visuals.plot_results import plot_bdm_timecourse
 from IPython import embed
 import warnings

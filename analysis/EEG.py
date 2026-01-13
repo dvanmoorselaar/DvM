@@ -74,7 +74,7 @@ from mne.io import BaseRaw
 from typing import Dict, List, Optional, Union, Tuple, Any
 from autoreject import get_rejection_threshold
 from support.preprocessing_utils import format_subject_id
-from eeg_analyses.EYE import *
+from analysis.EYE import *
 from math import sqrt, ceil, floor
 from support.preprocessing_utils import get_time_slice, trial_exclusion
 from support.FolderStructure import *
@@ -2408,10 +2408,10 @@ class ArtefactReject(object):
         time.sleep(5)
         flush_input()
         print(f'You are preprocessing subject {sj}, session {session}')
-        # Format excluded components as a clean list
-        excl_str = str(list(ica.exclude)) if ica.exclude else '[]'
+        # Format excluded components as a clean list (convert numpy types)
+        excl_list = [int(x) for x in ica.exclude] if ica.exclude else []
         conf = input(
-            f'Advanced detection selected component(s) {excl_str} '
+            f'Advanced detection selected component(s) {excl_list} '
             '(see report). Do you agree (y/n)? '
         )
         if conf == 'n':
@@ -2426,7 +2426,6 @@ class ArtefactReject(object):
             ica.exclude = eog_inds
 
         return ica
-
 
     def apply_ICA(
         self,

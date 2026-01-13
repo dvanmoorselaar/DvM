@@ -59,7 +59,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from typing import Optional, Generic, Union, Tuple, Any
-from eeg_analyses.BDM import *  
+from analysis.BDM import *  
 from support.FolderStructure import *
 from matplotlib import cm
 from math import pi, sqrt

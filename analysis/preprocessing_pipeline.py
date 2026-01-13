@@ -38,7 +38,7 @@ Copyright (c) 2021 DvM. All rights reserved.
 
 from typing import Optional
 
-from eeg_analyses.EEG import *
+from analysis.EEG import *
 from support.FolderStructure import FolderStructure as FS
 from support.preprocessing_utils import log_preproc, format_subject_id
 
@@ -279,8 +279,10 @@ def eeg_preprocessing_pipeline(
     else:
         sj_info = {'bad_chs': []}
 
-    # initiate report
-    report_name = f'sj_{sj}_ses_{session}.html'
+    # initiate report with zero-padded subject and session IDs
+    sj_fmt = format_subject_id(sj)
+    ses_fmt = format_subject_id(session)
+    report_name = f'sj_{sj_fmt}_ses_{ses_fmt}.html'
     report_file = FS.folder_tracker(ext=['preprocessing', 'report', 
                                     preproc_name], 
                                     fname=report_name)

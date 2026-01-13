@@ -231,7 +231,7 @@ def exclude_eye(
                 times = epochs.times[window_idx]
                 sfreq = epochs.info['sfreq']
 
-            from eeg_analyses.EYE import EYE, SaccadeDetector
+            from analysis.EYE import EYE, SaccadeDetector
             EO = EYE(sfreq = sfreq,
                     viewing_dist = eye_dict['viewing_dist'],
                     screen_res = eye_dict['screen_res'],
