@@ -964,7 +964,7 @@ class TFR(FolderStructure):
 			counter = c + 1 
 			print(f'Decomposing condition {counter}: {cnd} \n')
 			# set tfr name
-			tfr_name = f'sj_{self.sj}_{name}'
+			tfr_name = f'sub_{self.sj}_{cnd}_{name}'
 
 			# slice condition trials
 			if cnd == 'all_data':
@@ -1155,10 +1155,8 @@ class TFR(FolderStructure):
 			
 			# save TFR object
 			f_name = self.folder_tracker(['tfr',self.method],
-									f'{tfr_name}_{cnd}-tfr.h5')
-			tfr_.save(f_name, overwrite = True)
-				
-	def baseline_tfr(self,tfr:dict,base:dict,method:str,
+								f'{tfr_name}-tfr.h5')
+			tfr_.save(f_name, overwrite = True)	def baseline_tfr(self,tfr:dict,base:dict,method:str,
 		 			elec_oi:str='all') -> dict:
 		"""
 		Apply baseline correction to time-frequency power data.

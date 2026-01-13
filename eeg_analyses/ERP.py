@@ -574,7 +574,7 @@ class ERP(FolderStructure):
         name : str, default='main'
             Base identifier for output files and analysis labeling. 
             Used in evoked object filenames as 
-            'sj_{subject}_{condition}_{name}-ave.fif'. Helps 
+            'sub_{subject}_{condition}_{name}-ave.fif'. Helps 
             organize multiple analyses of the same dataset.
 
         Returns
@@ -605,9 +605,9 @@ class ERP(FolderStructure):
         stimuli were contralateral.
 
         File Organization:
-        - ERP: 'erp/evoked/sj_{sj}_{condition}_{name}-ave.fif'
-        - RT split: 'erp/evoked/sj_{sj}_{condition}_{name}_fast-ave.fif'
-        - HTML reports: 'erp/report/sj_{sj}_{name}.html'
+        - ERP: 'erp/evoked/sub_{sj}_{condition}_{name}-ave.fif'
+        - RT split: 'erp/evoked/sub_{sj}_{condition}_{name}_fast-ave.fif'
+        - HTML reports: 'erp/report/sub_{sj}_{name}.html'
 
         The method handles missing conditions by printing warnings and
         continuing analysis for available conditions.
@@ -675,7 +675,7 @@ class ERP(FolderStructure):
 
         for cnd in cnds:
             # set erp name
-            erp_name = f'sj_{self.sj}_{cnd}_{name}'	
+            erp_name = f'sub_{self.sj}_{cnd}_{name}'	
 
             # slice condition trials
             if cnd == 'all_data':
@@ -692,7 +692,7 @@ class ERP(FolderStructure):
                                             erp_name, RT_split)
 
         if self.report:
-            self.generate_erp_report(evokeds,f'sj_{self.sj}_{name}'	)
+            self.generate_erp_report(evokeds,f'sub_{self.sj}_{name}'	)
 
     @staticmethod
     def flip_topography(
@@ -2254,7 +2254,7 @@ class ERP(FolderStructure):
         #TODO: check whether function is correct
 
         # set file name
-        erp_name= f'sj_{self.sj}_{name}.p'	
+        erp_name= f'sub_{self.sj}_{name}.p'	
         f_name = self.folder_tracker(['erp', 'eog'],erp_name)
         # get data
         beh, epochs = self.select_erp_data(excl_factor)
@@ -2282,7 +2282,7 @@ class ERP(FolderStructure):
 
         for cnd in cnds:
             # set erp name
-            erp_name = f'sj_{self.sj}_{cnd}_{name}'	
+            erp_name = f'sub_{self.sj}_{cnd}_{name}'	
 
             # slice condition trials
             if cnd == 'all_data':

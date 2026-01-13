@@ -694,7 +694,7 @@ class CTF(BDM):
 		 	"is not equal to desired downsample ({self.downsample}).")	
 
 		nr_itr = self.nr_iter * self.nr_folds
-		ctf_name = f'{self.sj}_{name}'
+		ctf_name = f'sub_{self.sj}_{name}'
 		nr_perm += 1
 		nr_elec = len(epochs.ch_names)
 		tois = get_time_slice(epochs.times, window_oi[0], window_oi[1])
@@ -902,7 +902,7 @@ class CTF(BDM):
 
 		if self.ctf_param:
 			with open(self.folder_tracker(['ctf',self.to_decode], 
-					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
+					fname=f'{ctf_name}_param.pickle'),'wb') as handle:
 				print('saving ctf params')
 				pickle.dump(ctf_param, handle)
 
@@ -930,13 +930,13 @@ class CTF(BDM):
 									report_name = ctf_name)
 
 		with open(self.folder_tracker(['ctf',self.to_decode], 
-				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
+				fname = f'{ctf_name}_ctf.pickle'),'wb') as handle:
 			print('saving ctfs')
 			pickle.dump(ctfs, handle)
 
 		# TODO: add saving of weights and permutations and add to report
 		with open(self.folder_tracker(['ctf',self.to_decode], 
-				fname = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
+				fname = f'{ctf_name}_info.pickle'),'wb') as handle:
 			pickle.dump(info, handle)
 		
 	def select_ctf_data(self,epochs:mne.Epochs,df:pd.DataFrame,
@@ -1903,7 +1903,7 @@ class CTF(BDM):
 			window_oi_te = window_oi_tr
 
 		nr_itr = 1
-		ctf_name = f'{self.sj}_{name}'
+		ctf_name = f'sub_{self.sj}_{name}'
 		nr_perm += 1
 		nr_elec = len(epochs_tr.ch_names)
 		tois_tr = get_time_slice(epochs_tr.times,

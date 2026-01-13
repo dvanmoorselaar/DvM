@@ -644,7 +644,7 @@ class BDM(FolderStructure):
 			cnds += ['collapsed']
 
 		# set bdm_name
-		bdm_name = f'sj_{self.sj}_{bdm_name}'				
+		bdm_name = f'sub_{self.sj}_{bdm_name}'				
 		
 		# set up dict to save decoding scores
 		bdm_params = {}
@@ -688,7 +688,7 @@ class BDM(FolderStructure):
 				pickle.dump(bdm_scores, handle)
 			if self.output_params:
 				with open(self.folder_tracker(ext, fname = 
-						f'{bdm_name}_params.pickle') ,'wb') as handle:
+						f'{bdm_name}_param.pickle') ,'wb') as handle:
 					pickle.dump(bdm_params, handle)				
 
 		return bdm_scores, bdm_params	
@@ -1053,7 +1053,7 @@ class BDM(FolderStructure):
 						save:bool=True, bdm_name:str='loc_dec'):
 		
 		# set bdm name
-		bdm_name = f'sj_{self.sj}_{bdm_name}'
+		bdm_name = f'sub_{self.sj}_{bdm_name}'
 
 		# set parameters
 		self.cross = True
@@ -1118,7 +1118,7 @@ class BDM(FolderStructure):
 
 			if self.output_params:
 				with open(self.folder_tracker(ext, fname = 
-						f'{bdm_name}_params.pickle') ,'wb') as handle:
+						f'{bdm_name}_param.pickle') ,'wb') as handle:
 					pickle.dump(bdm_params, handle)	
 
 		return bdm_scores	

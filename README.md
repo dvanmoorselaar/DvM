@@ -29,13 +29,15 @@ The necessary steps are outlined below:
 
 ## Folderstructure
 
-Analysis are run from specfic project scripts (e.g. Wholevspartial.py). To make sure this setup works
+Analysis are run from specific project scripts (e.g. Wholevspartial.py). To make sure this setup works
 on your own computer within this script you have to make sure that the project folder is specified.
 This folder needs to contain the following subfolders:
 
 1. raw_eeg (with raw eeg file)
 2. beh/raw (raw behavior files .csv)
 3. eye/raw (raw eye files if available .asc or .tsv)
+
+**For detailed file naming conventions and folder organization standards, see [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md).**
 
 Also make sure that the system is pointed to the folder where you stored the ANALYSIS toolbox.
 For any questions or suggestions, please email me: dirkvanmoorselaar@gmail.com

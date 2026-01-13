@@ -12,7 +12,7 @@ from scipy.signal import savgol_filter
 from scipy.ndimage.filters import gaussian_filter
 from statsmodels.stats.multitest import fdrcorrection
 from eeg_analyses.ERP import *
-from stats.nonparametric import bootstrap_SE
+from stats.stats_utils import bootstrap_SE
 from typing import Optional, Generic, Union, Tuple, Any, List, Dict
 from support.preprocessing_utils import get_time_slice, get_diff_pairs
 from visuals.visuals import MidpointNormalize
@@ -55,6 +55,8 @@ def _perform_stats(
 		stat_test: str = 'perm',
 		p_thresh: float = 0.05
 	) -> Tuple[np.ndarray, list, np.ndarray]:
+	#TODO: add option to return a mask with signifacant points only
+	#TODO: add statfun option for permutation test
 	"""Perform statistical testing and return consistent output format.
 
 	Args:

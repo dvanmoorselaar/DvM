@@ -622,10 +622,10 @@ class EYE(FolderStructure):
             eye_files='all'.
         eye_files : str or list, default='all'
             Eye tracker file paths or 'all' to auto-detect files 
-            matching pattern 'sub_{sj}_session_*.asc' in eye/raw folder.
+            matching pattern 'sub_{sj}_ses_*.asc' in eye/raw folder.
         beh_files : str or list, default='all'
             Behavioral file paths or 'all' to auto-detect files matching
-            pattern 'subject-{sj}_ses_*.csv' in beh/raw folder.
+            pattern 'sub_{sj}_ses_*.csv' in beh/raw folder.
         start : str, default='start_trial'
             Event marker string in eye tracker file marking trial onset.
         trial_info : list, optional
@@ -683,13 +683,13 @@ class EYE(FolderStructure):
             eye_files = glob.glob(
                 self.FolderTracker(
                     extension=['eye', 'raw'],
-                    filename='sub_{}_session_*.asc'.format(sj)
+                    filename='sub_{}_ses_*.asc'.format(sj)
                 )
             )	
             beh_files = glob.glob(
                 self.FolderTracker(
                     extension=['beh', 'raw'],
-                    filename='subject-{}_ses_*.csv'.format(sj)
+                    filename='sub_{}_ses_*.csv'.format(sj)
                 )
             )
             # if eye file does not exit remove beh file 

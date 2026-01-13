@@ -164,7 +164,7 @@ class FolderStructure(object):
         Parameters
         ----------
         fname : str
-            Filename containing subject number in format 'sj_X_'.
+            Filename containing subject number in format 'sub_X_'.
 
         Returns
         -------
@@ -177,7 +177,7 @@ class FolderStructure(object):
             If filename does not contain subject number in 
             expected format.
         """
-        match = re.search(r'sj_(\d+)_', fname)
+        match = re.search(r'sub_0?(\d+)_', fname)
         if match:
             return int(match.group(1))
         raise ValueError(f"Could not extract subject number from {fname}")
@@ -221,7 +221,7 @@ class FolderStructure(object):
         >>> # Get path to specific file
         >>> file_path = FolderStructure.folder_tracker(
         ...     ext=['beh', 'processed'],
-        ...     fname='subject-1_session_1.csv'
+        ...     fname='sub_01_ses_01.csv'
         ... )
         >>> 
         >>> # Prevent overwriting
@@ -355,7 +355,7 @@ class FolderStructure(object):
         
         # start by reading in processed eeg data
         epochs = mne.read_epochs(self.folder_tracker(ext = ['processed'],
-                            fname = f'sj_{sj}_{fname}-epo.fif'))
+                            fname = f'sub_{sj}_{fname}-epo.fif'))
 
         # check whether metadata is saved alongside epoched eeg
         if epochs.metadata is not None:
@@ -364,7 +364,7 @@ class FolderStructure(object):
             if beh_file:
                 # read in seperate behavior file
                 df = pd.read_csv(self.folder_tracker(ext=['beh','processed'],
-                    fname = f'subject-{sj}_{fname}.csv'))
+                    fname = f'sub_{sj}_{fname}.csv'))
             else:
                 df = pd.DataFrame({'condition': epochs.events[:,2]})
 
@@ -382,7 +382,7 @@ class FolderStructure(object):
                             fname = f'preproc_param_{preproc_name}.csv')
             # Check if the file exists before proceeding
             eye_file = self.folder_tracker(ext=['eye','processed'],
-                    fname=f'sj_{sj}_{fname}.npz')
+                    fname=f'sub_{sj}_{fname}.npz')
             if os.path.isfile(eye_file):
                 eye = np.load(eye_file)
                 df, epochs = exclude_eye(sj,df,epochs,eye_dict,eye,file)
@@ -423,7 +423,7 @@ class FolderStructure(object):
         Notes
         -----
         Files are expected to be named:
-        'subject-{sj}_session_{session}*.csv'
+        'sub_{sj}_ses_{session}*.csv'
         
         All matching files are concatenated and the index is reset.
 
@@ -441,7 +441,7 @@ class FolderStructure(object):
         if not files:
             files = sorted(glob.glob(self.folder_tracker(ext=[
                     'beh', 'raw'],
-                    fname=f'subject-{sj}_session_{session}*.csv')))
+                    fname=f'sub_{sj}_ses_{session}*.csv')))
         if files == []:
             return []
         # read in as dataframe
@@ -490,7 +490,7 @@ class FolderStructure(object):
         Notes
         -----
         Expected file naming convention:
-        'sj_{sj}_{cnd}_{erp_name}-ave.fif'
+        'sub_{sj}_{cnd}_{erp_name}-ave.fif'
 
         Examples
         --------
@@ -525,12 +525,12 @@ class FolderStructure(object):
             if sjs == 'all':
                 files = sorted(glob.glob(self.folder_tracker(
                             ext = ['erp','evoked'],
-                            fname = f'sj_*_{cnd}_{erp_name}-ave.fif')),
+                            fname = f'sub_*_{cnd}_{erp_name}-ave.fif')),
                             key = lambda s: int(re.search(r'\d+', s).group()))
             else:
                 files = [self.folder_tracker(
                                 ext = ['erp','evoked'],
-                                fname = f'sj_{sj}_{cnd}_{erp_name}-ave.fif')
+                                fname = f'sub_{sj}_{cnd}_{erp_name}-ave.fif')
                                             for sj in sjs]
 
             # read in actual data
@@ -578,7 +578,7 @@ class FolderStructure(object):
         Notes
         -----
         Expected file naming convention:
-        'sj_{sj}_{tfr_name}_{cnd}-tfr.h5'
+        'sub_{sj}_{tfr_name}_{cnd}-tfr.h5'
 
         Files are stored in: tfr/{tfr_folder_path}/
 
@@ -618,11 +618,11 @@ class FolderStructure(object):
             if sjs == 'all':
                 files = sorted(glob.glob(self.folder_tracker(
                             ext = ext,
-                            fname = f'sj_*_{tfr_name}_{cnd}-tfr.h5')),
+                            fname = f'sub_*_{tfr_name}_{cnd}-tfr.h5')),
                             key = lambda s: int(re.search(r'\d+', s).group()))
             else:
                 files = [self.folder_tracker(ext = ext,
-                    fname = f'sj_{sj}_{tfr_name}_{cnd}-tfr.h5')for sj in sjs]
+                    fname = f'sub_{sj}_{tfr_name}_{cnd}-tfr.h5')for sj in sjs]
 
             # read in actual data
             tfr[cnd] = [mne.time_frequency.read_tfrs(file)[0] 
@@ -710,17 +710,17 @@ class FolderStructure(object):
             if sjs == 'all':
                 # First get all potential files
                 pattern = self.folder_tracker(ext=ext,
-                                            fname=f'sj_*{name}.pickle')
+                                            fname=f'sub_*{name}.pickle')
                 potential_files = glob.glob(pattern)
                 
                 # Then filter to only exact matches using regex
-                regex_pattern = rf'sj_(\d+)_{re.escape(name)}\.pickle$'
+                regex_pattern = rf'sub_0?(\d+)_{re.escape(name)}\.pickle$'
                 files = sorted([f for f in potential_files 
                         if re.search(regex_pattern, os.path.basename(f))],
-                        key=lambda s: int(re.search(r'sj_(\d+)_', s).group(1)))
+                        key=lambda s: int(re.search(r'sub_0?(\d+)_', s).group(1)))
             else:
                 files = [self.folder_tracker(ext = ext,
-                    fname = f'sj_{sj}_{name}.pickle')for sj in sjs]
+                    fname = f'sub_{sj}_{name}.pickle')for sj in sjs]
                 
             if not files:
                 raise ValueError(f"No files found for analysis {name}")
@@ -824,9 +824,9 @@ class FolderStructure(object):
         Notes
         -----
         Expected file naming conventions:
-            - 'ctfs_{sj}_{ctf_name}.pickle' (for output_type='ctf')
-            - 'ctf_info_{sj}_{ctf_name}.pickle' (for output_type='info')
-            - 'ctf_param_{sj}_{ctf_name}.pickle' (for output_type='param')
+            - 'sub_{sj}_{ctf_name}_ctf.pickle' (for output_type='ctf')
+            - 'sub_{sj}_{ctf_name}_info.pickle' (for output_type='info')
+            - 'sub_{sj}_{ctf_name}_param.pickle' (for output_type='param')
 
         Files are stored in: ctf/{ctf_folder_path}/
 
@@ -855,23 +855,23 @@ class FolderStructure(object):
         # set extension
         ext = ['ctf'] + ctf_folder_path
 
-        # determine output file prefix
-        output = 'ctfs'  # default
+        # determine output file suffix
+        output = 'ctf'  # default
         if output_type=='ctf':
-            output = 'ctfs'
+            output = 'ctf'
         elif output_type=='info':
-            output = 'ctf_info'
+            output = 'info'
         elif output_type=='param':
-            output = 'ctf_param'
+            output = 'param'
 
         if sjs == 'all':
             files = sorted(glob.glob(self.folder_tracker(
                             ext = ext,
-                            fname = f'{output}_*_{ctf_name}.pickle')),
-                            key = lambda s: int(re.search(r'\d+', s).group()))
+                            fname = f'sub_*_{ctf_name}_{output}.pickle')),
+                            key = lambda s: int(re.search(r'sub_0?(\d+)_', s).group(1)))
         else:
             files = [self.folder_tracker(ext = ext,
-                    fname = f'{output}_{sj}_{ctf_name}.pickle')for sj in sjs]
+                    fname = f'sub_{sj}_{ctf_name}_{output}.pickle')for sj in sjs]
 
         ctfs = [pickle.load(open(file, 'rb')) for file in files]
 

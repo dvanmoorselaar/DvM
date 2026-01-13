@@ -1482,11 +1482,11 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         else:
             ext = '.asc'
         eye_files = glob.glob(self.folder_tracker(ext = ['eye','raw'], \
-                fname = f'sub_{self.sj}_session_{self.session}*'
+                fname = f'sub_{self.sj}_ses_{self.session}*'
                 f'.{ext}') )
         beh_files = glob.glob(self.folder_tracker(ext=[
                 'beh', 'raw'],
-                fname=f'subject-{self.sj}_session_{self.session}*.csv'))
+                fname=f'sub_{self.sj}_ses_{self.session}*.csv'))
         eye_files = sorted(eye_files)
         beh_files = sorted(beh_files)
 
@@ -1691,12 +1691,12 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         Notes
         -----
         - Individual session files are saved as: 
-          'sj_{sj}_ses_{session}_{preproc_name}-epo.fif'
+          'sub_{sj}_ses_{session}_{preproc_name}-epo.fif'
         - Combined session file is saved as: 
-          'sj_{sj}_all_{preproc_name}-epo.fif'
+          'sub_{sj}_all_{preproc_name}-epo.fif'
         - Eye tracking data (if exists) is renamed from 
-          'sj_{sj}_ses_{session}_xy_eye.npz' to 
-          'sj_{sj}_ses_{session}_{preproc_name}.npz'
+          'sub_{sj}_ses_{session}_xy_eye.npz' to 
+          'sub_{sj}_ses_{session}_{preproc_name}.npz'
         - Files are split into 2GB chunks automatically to handle large 
           datasets.
         - All files are saved to the 'processed' folder managed by 
@@ -1722,7 +1722,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         self.save(
             self.folder_tracker(
                 ext=['processed'],
-                fname=f'sj_{self.sj}_ses_{self.session}_{preproc_name}-epo.fif'
+                fname=f'sub_{self.sj}_ses_{self.session}_{preproc_name}-epo.fif'
             ),
             split_size='2GB',
             overwrite=True
@@ -1730,11 +1730,11 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
 
         # check whether matching eye file exists and adjust name
         eye_file = self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sj_{self.sj}_ses_{self.session}_xy_eye.npz')
+                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz')
         if os.path.exists(eye_file):
             old_name = eye_file
             new_name = self.folder_tracker(ext=['eye','processed'],
-                fname=f'sj_{self.sj}_ses_{self.session}_{preproc_name}.npz')
+                fname=f'sub_{self.sj}_ses_{self.session}_{preproc_name}.npz')
             os.rename(old_name, new_name)
 
         # check whether individual sessions need to be combined
@@ -1747,7 +1747,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
                         self.folder_tracker(
                             ext=['processed'],
                             fname=(
-                                f'sj_{self.sj}_ses_{session}_'
+                                f'sub_{self.sj}_ses_{session}_'
                                 f'{preproc_name}-epo.fif'
                             )
                         )
@@ -1758,7 +1758,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             all_eeg.save(
                 self.folder_tracker(
                     ext=['processed'],
-                    fname=f'sj_{self.sj}_all_{preproc_name}-epo.fif'
+                    fname=f'sub_{self.sj}_all_{preproc_name}-epo.fif'
                 ),
                 split_size='2GB',
                 overwrite=True
