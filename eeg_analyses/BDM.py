@@ -64,7 +64,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, confusion_matrix
 from support.preprocessing_utils import (
-	select_electrodes, trial_exclusion, get_time_slice
+	select_electrodes, trial_exclusion, get_time_slice, format_subject_id
 )
 from scipy.stats import rankdata
 from eeg_analyses.TFR import TFR
@@ -313,7 +313,7 @@ class BDM(FolderStructure):
 		to prevent inconsistent analysis configurations.
 		"""	
 
-		self.sj = sj
+		self.sj = format_subject_id(sj)
 		self.epochs = epochs					
 		self.df = df
 		self.classifier = classifier

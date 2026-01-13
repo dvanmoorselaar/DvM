@@ -33,9 +33,9 @@ Analysis are run from specific project scripts (e.g. Wholevspartial.py). To make
 on your own computer within this script you have to make sure that the project folder is specified.
 This folder needs to contain the following subfolders:
 
-1. raw_eeg (with raw eeg file)
-2. beh/raw (raw behavior files .csv)
-3. eye/raw (raw eye files if available .asc or .tsv)
+1. eeg/raw (raw eeg files .bdf or .edf)
+2. behavioral/raw (raw behavior files .csv)
+3. eye/raw (raw eye files if available .asc or .csv)
 
 **For detailed file naming conventions and folder organization standards, see [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md).**
 

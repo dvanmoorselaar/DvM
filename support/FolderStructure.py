@@ -44,7 +44,11 @@ import numpy as np
 import pandas as pd
 
 from typing import List, Optional, Union, Tuple
-from support.preprocessing_utils import match_epochs_times, trial_exclusion
+from support.preprocessing_utils import (
+    match_epochs_times,
+    trial_exclusion,
+    format_subject_id
+)
 
 
 def blockPrinting(func):
@@ -88,10 +92,10 @@ class FolderStructure(object):
     BDM, CTF results).
 
     The class uses a consistent folder structure convention:
-    - raw_eeg/ : Raw BDF/EDF files
-    - processed/ : Preprocessed epoch files (-epo.fif)
-    - beh/raw/ : Raw behavioral CSV files
-    - beh/processed/ : Processed behavioral data
+    - eeg/raw/ : Raw EEG BDF/EDF files
+    - eeg/processed/ : Preprocessed EEG epoch files (-epo.fif)
+    - behavioral/raw/ : Raw behavioral CSV files
+    - behavioral/processed/ : Processed behavioral data
     - eye/raw/ : Eye tracker data files
     - eye/processed/ : Processed eye tracking data
     - erp/evoked/ : Evoked response files
@@ -198,8 +202,8 @@ class FolderStructure(object):
         ----------
         ext : list, default=[]
             List of subfolders to append to current working directory.
-            For example, ['beh', 'processed'] creates path
-            'cwd/beh/processed/'.
+            For example, ['behavioral', 'processed'] creates path
+            'cwd/behavioral/processed/'.
         fname : str, optional
             Filename to append to path. If None, only the folder path
             is returned. Default is None.
@@ -220,7 +224,7 @@ class FolderStructure(object):
         >>> 
         >>> # Get path to specific file
         >>> file_path = FolderStructure.folder_tracker(
-        ...     ext=['beh', 'processed'],
+        ...     ext=['behavioral', 'processed'],
         ...     fname='sub_01_ses_01.csv'
         ... )
         >>> 
@@ -254,22 +258,22 @@ class FolderStructure(object):
 
     def load_processed_epochs(self,sj:int,fname:str,preproc_name:str,
                         eye_dict:Optional[dict]=None,beh_file:bool=True,
-                        excl_factor:Optional[dict]=None)->\
-                        Tuple[pd.DataFrame,mne.Epochs]:
-        """Load preprocessed EEG epochs with behavioral metadata.
+                        excl_factor:Optional[dict]=None,
+                        modality:str='eeg')->Tuple[pd.DataFrame,mne.Epochs]:
+        """Load preprocessed epochs with behavioral metadata.
 
-        Reads preprocessed EEG data (MNE Epochs object) and behavioral
-        data for subsequent analyses. If eye movement criteria are
-        specified, trials are excluded based on fixation breaks. Updates
-        preprocessing overview file with eye movement statistics if it
-        exists.
+        Reads preprocessed neuroimaging data (MNE Epochs object) and 
+        behavioral data for subsequent analyses. Supports both EEG and 
+        MEG data. If eye movement criteria are specified, trials are 
+        excluded based on fixation breaks. Updates preprocessing 
+        overview file with eye movement statistics if it exists.
 
         Parameters
         ----------
         sj : int
             Subject identifier.
         fname : str
-            Name of processed EEG file (without -epo.fif extension).
+            Name of processed file (without -epo.fif extension).
         preproc_name : str
             Name specified for preprocessing pipeline (used to locate
             preprocessing parameter files).
@@ -296,14 +300,20 @@ class FolderStructure(object):
             For example, to exclude trials where cue pointed right:
                 excl_factor = {'cue_direc': ['right']}
             Multiple columns and values can be specified.
+        modality : str, default='eeg'
+            Neuroimaging modality. Supported values: 'eeg' or 'meg'.
+            Determines which folder to load epochs from:
+                - 'eeg': loads from eeg/processed/
+                - 'meg': loads from meg/processed/
 
         Returns
         -------
         beh : pd.DataFrame
-            Behavioral data aligned to EEG epochs. Contains trial
+            Behavioral data aligned to epochs. Contains trial
             metadata and experimental variables.
         epochs : mne.Epochs
-            Preprocessed EEG epochs object with bad trials rejected.
+            Preprocessed epochs object (EEG or MEG) with bad trials 
+            rejected.
 
         Notes
         -----
@@ -344,6 +354,14 @@ class FolderStructure(object):
         ...     preproc_name='main',
         ...     excl_factor={'cue_direc': ['right']}
         ... )
+        >>> 
+        >>> # Load MEG data instead of EEG
+        >>> beh, epochs = self.load_processed_epochs(
+        ...     sj=1,
+        ...     fname='main',
+        ...     preproc_name='main',
+        ...     modality='meg'
+        ... )
 
         See Also
         --------
@@ -353,9 +371,23 @@ class FolderStructure(object):
         selection
         """
         
-        # start by reading in processed eeg data
-        epochs = mne.read_epochs(self.folder_tracker(ext = ['processed'],
-                            fname = f'sub_{sj}_{fname}-epo.fif'))
+        # Format subject ID with zero-padding
+        sj = format_subject_id(sj)
+        
+        # Load preprocessed epochs from appropriate modality folder
+        modality = modality.lower()
+        if modality not in ['eeg', 'meg']:
+            raise ValueError(
+                f"modality must be 'eeg' or 'meg', "
+                f"got '{modality}'"
+            )
+        
+        epochs = mne.read_epochs(
+            self.folder_tracker(
+                ext=[modality, 'processed'],
+                fname=f'sub_{sj}_{fname}-epo.fif'
+            )
+        )
 
         # check whether metadata is saved alongside epoched eeg
         if epochs.metadata is not None:
@@ -363,8 +395,12 @@ class FolderStructure(object):
         else:
             if beh_file:
                 # read in seperate behavior file
-                df = pd.read_csv(self.folder_tracker(ext=['beh','processed'],
-                    fname = f'sub_{sj}_{fname}.csv'))
+                df = pd.read_csv(
+                    self.folder_tracker(
+                        ext=['behavioral', 'processed'],
+                        fname=f'sub_{sj}_{fname}.csv'
+                    )
+                )
             else:
                 df = pd.DataFrame({'condition': epochs.events[:,2]})
 
@@ -402,7 +438,7 @@ class FolderStructure(object):
 
         Loads and concatenates raw behavioral CSV files for a specific
         subject and session. Files are automatically located in the
-        beh/raw/ folder based on subject and session numbers.
+        behavioral/raw/ folder based on subject and session numbers.
 
         Parameters
         ----------
@@ -416,7 +452,7 @@ class FolderStructure(object):
 
         Returns
         -------
-        beh : pd.DataFrame
+        df : pd.DataFrame
             Concatenated behavioral data from all matching files. Empty
             list if no files found.
 
@@ -430,27 +466,40 @@ class FolderStructure(object):
         Examples
         --------
         >>> # Load all behavioral files for subject 1, session 1
-        >>> beh = self.read_raw_beh(sj=1, session=1)
+        >>> df = self.read_raw_beh(sj=1, session=1)
         >>> 
         >>> # Load specific files
         >>> files = ['path/to/file1.csv', 'path/to/file2.csv']
-        >>> beh = self.read_raw_beh(files=files)
+        >>> df = self.read_raw_beh(files=files)
         """
 
-        # get all files for this subject's session
-        if not files:
+        # Handle case where files are explicitly provided (even if empty)
+        if isinstance(files, list):
+            # Files were explicitly provided, use them as-is
+            if len(files) == 0:
+                return []
+        elif files is False:
+            # Default case: need to glob for files based on sj/session
+            if sj is None or session is None:
+                raise ValueError(
+                    "Must provide either 'files' parameter with file "
+                    "paths or both 'sj' and 'session' parameters"
+                )
+            sj_fmt = format_subject_id(sj)
+            session_fmt = format_subject_id(session)
             files = sorted(glob.glob(self.folder_tracker(ext=[
-                    'beh', 'raw'],
-                    fname=f'sub_{sj}_ses_{session}*.csv')))
-        if files == []:
-            return []
+                    'behavioral', 'raw'],
+                    fname=f'sub_{sj_fmt}_ses_{session_fmt}*.csv')))
+            if not files:
+                return []
+        
         # read in as dataframe
-        beh = [pd.read_csv(file) for file in files]
-        beh = pd.concat(beh)
-        beh.reset_index(inplace = True, drop = True)
+        df = [pd.read_csv(file) for file in files]
+        df = pd.concat(df)
+        df.reset_index(inplace = True, drop = True)
 
-        return beh
-
+        return df
+    
     def read_erps(self,erp_name:str,
                 cnds:Optional[list]=None,sjs:Union[list,str]='all',
                 match:Union[str,bool]=False)->Tuple[dict,np.ndarray]:
@@ -523,15 +572,28 @@ class FolderStructure(object):
         # loop over conditions
         for cnd in cnds:
             if sjs == 'all':
-                files = sorted(glob.glob(self.folder_tracker(
-                            ext = ['erp','evoked'],
-                            fname = f'sub_*_{cnd}_{erp_name}-ave.fif')),
-                            key = lambda s: int(re.search(r'\d+', s).group()))
+                files = sorted(
+                    glob.glob(
+                        self.folder_tracker(
+                            ext=['erp', 'evoked'],
+                            fname=f'sub_*_{cnd}_{erp_name}-ave.fif'
+                        )
+                    ),
+                    key=lambda s: int(
+                        re.search(r'sub_0?(\d+)_', s).group(1)
+                    )
+                )
             else:
-                files = [self.folder_tracker(
-                                ext = ['erp','evoked'],
-                                fname = f'sub_{sj}_{cnd}_{erp_name}-ave.fif')
-                                            for sj in sjs]
+                files = [
+                    self.folder_tracker(
+                        ext=['erp', 'evoked'],
+                        fname=(
+                            f'sub_{format_subject_id(sj)}_{cnd}_'
+                            f'{erp_name}-ave.fif'
+                        )
+                    )
+                    for sj in sjs
+                ]
 
             # read in actual data
             erps[cnd] = [mne.read_evokeds(file)[0] for file in files]
@@ -547,8 +609,13 @@ class FolderStructure(object):
 
         return erps, times
     
-    def read_tfr(self,tfr_folder_path:list,tfr_name:str,cnds:Optional[list]=None,
-                sjs:Union[list,str]='all')->dict:
+    def read_tfr(
+        self,
+        tfr_folder_path: list,
+        tfr_name: str,
+        cnds: Optional[list] = None,
+        sjs: Union[list, str] = 'all'
+    ) -> dict:
         """Read time-frequency analysis results.
 
         Loads time-frequency data (TFR) computed by the TFR class.
@@ -616,13 +683,28 @@ class FolderStructure(object):
         # loop over conditions
         for cnd in cnds:
             if sjs == 'all':
-                files = sorted(glob.glob(self.folder_tracker(
-                            ext = ext,
-                            fname = f'sub_*_{tfr_name}_{cnd}-tfr.h5')),
-                            key = lambda s: int(re.search(r'\d+', s).group()))
+                files = sorted(
+                    glob.glob(
+                        self.folder_tracker(
+                            ext=ext,
+                            fname=f'sub_*_{tfr_name}_{cnd}-tfr.h5'
+                        )
+                    ),
+                    key=lambda s: int(
+                        re.search(r'sub_0?(\d+)_', s).group(1)
+                    )
+                )
             else:
-                files = [self.folder_tracker(ext = ext,
-                    fname = f'sub_{sj}_{tfr_name}_{cnd}-tfr.h5')for sj in sjs]
+                files = [
+                    self.folder_tracker(
+                        ext=ext,
+                        fname=(
+                            f'sub_{format_subject_id(sj)}_'
+                            f'{tfr_name}_{cnd}-tfr.h5'
+                        )
+                    )
+                    for sj in sjs
+                ]
 
             # read in actual data
             tfr[cnd] = [mne.time_frequency.read_tfrs(file)[0] 
@@ -709,18 +791,39 @@ class FolderStructure(object):
         for name in bdm_names:
             if sjs == 'all':
                 # First get all potential files
-                pattern = self.folder_tracker(ext=ext,
-                                            fname=f'sub_*{name}.pickle')
+                pattern = self.folder_tracker(
+                    ext=ext,
+                    fname=f'sub_*{name}.pickle'
+                )
                 potential_files = glob.glob(pattern)
                 
                 # Then filter to only exact matches using regex
-                regex_pattern = rf'sub_0?(\d+)_{re.escape(name)}\.pickle$'
-                files = sorted([f for f in potential_files 
-                        if re.search(regex_pattern, os.path.basename(f))],
-                        key=lambda s: int(re.search(r'sub_0?(\d+)_', s).group(1)))
+                regex_pattern = (
+                    rf'sub_0?(\d+)_{re.escape(name)}\.pickle$'
+                )
+                files = sorted(
+                    [
+                        f for f in potential_files
+                        if re.search(
+                            regex_pattern,
+                            os.path.basename(f)
+                        )
+                    ],
+                    key=lambda s: int(
+                        re.search(r'sub_0?(\d+)_', s).group(1)
+                    )
+                )
             else:
-                files = [self.folder_tracker(ext = ext,
-                    fname = f'sub_{sj}_{name}.pickle')for sj in sjs]
+                files = [
+                    self.folder_tracker(
+                        ext=ext,
+                        fname=(
+                            f'sub_{format_subject_id(sj)}_'
+                            f'{name}.pickle'
+                        )
+                    )
+                    for sj in sjs
+                ]
                 
             if not files:
                 raise ValueError(f"No files found for analysis {name}")
@@ -826,7 +929,8 @@ class FolderStructure(object):
         Expected file naming conventions:
             - 'sub_{sj}_{ctf_name}_ctf.pickle' (for output_type='ctf')
             - 'sub_{sj}_{ctf_name}_info.pickle' (for output_type='info')
-            - 'sub_{sj}_{ctf_name}_param.pickle' (for output_type='param')
+            - 'sub_{sj}_{ctf_name}_param.pickle' 
+               (for output_type='param')
 
         Files are stored in: ctf/{ctf_folder_path}/
 
@@ -865,13 +969,28 @@ class FolderStructure(object):
             output = 'param'
 
         if sjs == 'all':
-            files = sorted(glob.glob(self.folder_tracker(
-                            ext = ext,
-                            fname = f'sub_*_{ctf_name}_{output}.pickle')),
-                            key = lambda s: int(re.search(r'sub_0?(\d+)_', s).group(1)))
+            files = sorted(
+                glob.glob(
+                    self.folder_tracker(
+                        ext=ext,
+                        fname=f'sub_*_{ctf_name}_{output}.pickle'
+                    )
+                ),
+                key=lambda s: int(
+                    re.search(r'sub_0?(\d+)_', s).group(1)
+                )
+            )
         else:
-            files = [self.folder_tracker(ext = ext,
-                    fname = f'sub_{sj}_{ctf_name}_{output}.pickle')for sj in sjs]
+            files = [
+                self.folder_tracker(
+                    ext=ext,
+                    fname=(
+                        f'sub_{format_subject_id(sj)}_'
+                        f'{ctf_name}_{output}.pickle'
+                    )
+                )
+                for sj in sjs
+            ]
 
         ctfs = [pickle.load(open(file, 'rb')) for file in files]
 

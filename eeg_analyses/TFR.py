@@ -216,7 +216,7 @@ class TFR(FolderStructure):
 		Parameters are documented in the class docstring above.
 		"""
 		
-		self.sj = sj
+		self.sj = format_subject_id(sj)
 		self.df = df
 		self.epochs = epochs
 		self.min_freq = min_freq
@@ -1156,7 +1156,9 @@ class TFR(FolderStructure):
 			# save TFR object
 			f_name = self.folder_tracker(['tfr',self.method],
 								f'{tfr_name}-tfr.h5')
-			tfr_.save(f_name, overwrite = True)	def baseline_tfr(self,tfr:dict,base:dict,method:str,
+			tfr_.save(f_name, overwrite = True)	
+			
+	def baseline_tfr(self,tfr:dict,base:dict,method:str,
 		 			elec_oi:str='all') -> dict:
 		"""
 		Apply baseline correction to time-frequency power data.

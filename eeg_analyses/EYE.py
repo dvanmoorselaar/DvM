@@ -80,6 +80,7 @@ Copyright (c) 2017 DvM. All rights reserved.
 """
 import glob
 import os
+import re
 import warnings
 
 import numpy as np
@@ -87,8 +88,9 @@ import pandas as pd
 
 from math import degrees, atan2, floor, ceil
 from typing import Optional, Tuple, Union
+from numpy.lib.npyio import NpzFile
 from scipy.signal import savgol_filter
-from support.preprocessing_utils import get_time_slice
+from support.preprocessing_utils import get_time_slice, format_subject_id
 from support.FolderStructure import *
 from pygazeanalyser.edfreader import *
 from pygazeanalyser.eyetribereader import *
@@ -678,6 +680,10 @@ class EYE(FolderStructure):
         ... )
         """
 
+        # Format subject ID with zero-padding (only if needed for file globbing)
+        if eye_files == 'all' or beh_files == 'all':
+            sj = format_subject_id(sj)
+
         # read in behavior and eyetracking data
         if eye_files == 'all':
             eye_files = glob.glob(
@@ -688,21 +694,30 @@ class EYE(FolderStructure):
             )	
             beh_files = glob.glob(
                 self.FolderTracker(
-                    extension=['beh', 'raw'],
+                    extension=['behavioral', 'raw'],
                     filename='sub_{}_ses_*.csv'.format(sj)
                 )
             )
             # if eye file does not exit remove beh file 
             if len(beh_files) > len(eye_files):
-                eye_sessions = [int(file[-5]) for file in eye_files]
-                beh_sessions = [int(file[-5]) for file in beh_files]
+                # Extract session numbers using regex to handle runs properly
+                eye_sessions = [
+                    int(re.search(r'ses_0?(\d+)', 
+                                  os.path.basename(f)).group(1))
+                    for f in eye_files
+                ]
+                beh_sessions = [
+                    int(re.search(r'ses_0?(\d+)', 
+                                  os.path.basename(f)).group(1))
+                    for f in beh_files
+                ]
                 for i, ses in enumerate(beh_sessions):
                     if ses not in eye_sessions:
                         beh_files.pop(i)
 
         if eye_files[0][-3:] == 'tsv':			
             eye = [read_eyetribe(file, start = start, missing = 0) 
-                                                          for file in eye_files]
+                                                        for file in eye_files]
         elif eye_files[0][-3:] == 'asc':	
             if stop is None:
                 eye = [
@@ -736,8 +751,13 @@ class EYE(FolderStructure):
 
         df = self.read_raw_beh(files = beh_files)
 
+        # Handle case where no behavioral files exist
+        if isinstance(df, list) and len(df) == 0:
+            print('Warning: No behavioral files found for this session.')
+            df = pd.DataFrame(index=range(eye.shape[0]))
+        
         # check whether each beh trial is logged within eye
-        nr_miss =  eye.shape[0] - beh.shape[0]
+        nr_miss =  eye.shape[0] - df.shape[0]
         if nr_miss < 0:
             print('Trials in beh and eye do not match. Trials removed from') 
             print(' beh. Please inspect data carefully')
@@ -750,15 +770,16 @@ class EYE(FolderStructure):
                         trial_nr = int(''.join(filter(str.isdigit, event[1])))
                         # control for OpenSesame trial counter
                         eye_trials.append(trial_nr + 1)
-                        if trial_nr + 1 not in beh['nr_trials'].values:
+                        if 'nr_trials' in df.columns and trial_nr + 1 not in df['nr_trials'].values:
                             print(trial_nr)
 
             #  TODO: make linking more generic
             if len(eye_trials) == eye.shape[0]:
                 df.drop(df.index[nr_miss:], inplace=True) 
             else:
-                eye_mask = np.in1d(df['nr_trials'].values, eye_trials)
-                df = df[np.array(eye_mask)]		
+                if 'nr_trials' in df.columns:
+                    eye_mask = np.in1d(df['nr_trials'].values, eye_trials)
+                    df = df[np.array(eye_mask)]		
         elif nr_miss > 0:
             print(f'Trials in beh and eye do not match. Final {nr_miss}')
             print(f' removed from eye. Please inspect data carefully')

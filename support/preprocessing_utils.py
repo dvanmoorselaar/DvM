@@ -6,6 +6,9 @@ andexperimental design handling.
 
 Functions
 ---------
+File naming:
+    format_subject_id : Format subject/session IDs with zero-padding
+
 Electrode selection:
     select_electrodes : Select electrode subsets by region or name
     get_diff_pairs : Create contra-ipsi electrode pairs
@@ -26,11 +29,62 @@ import os
 import mne
 import warnings
 import itertools
+import re
 
 import numpy as np
 import pandas as pd
 
 from typing import Optional, Union, Tuple
+
+def format_subject_id(sj_id: Union[int, str], zero_pad: int = 2) -> str:
+	"""
+	Format subject or session ID with zero-padding.
+
+	Converts subject/session identifiers to zero-padded string format
+	for consistent file naming. Handles both integer and string inputs,
+	and automatically extracts numeric values from already-formatted 
+	IDs.
+
+	Parameters
+	----------
+	sj_id : int or str
+		Subject or session identifier. Can be integer (1, 2) or string
+		('1', '01', 'sub_1', 'ses_01'). Non-numeric prefixes are 
+		removed.
+	zero_pad : int, default=2
+		Number of digits for zero-padding (e.g., 2 → '01', 3 → '001').
+
+	Returns
+	-------
+	str
+		Zero-padded numeric string (e.g., '01', '001').
+
+	Examples
+	--------
+	>>> format_subject_id(1)
+	'01'
+	>>> format_subject_id('1')
+	'01'
+	>>> format_subject_id('sub_1')
+	'01'
+	>>> format_subject_id('01')
+	'01'
+	>>> format_subject_id(5, zero_pad=3)
+	'005'
+	"""
+	# Convert to string if integer
+	if isinstance(sj_id, int):
+		numeric = str(sj_id)
+	else:
+		# Extract numeric part from string (handles 'sub_1', 'ses_01', etc.)
+		match = re.search(r'(\d+)', str(sj_id))
+		if match:
+			numeric = match.group(1)
+		else:
+			raise ValueError(f"Cannot extract numeric ID from '{sj_id}'")
+	
+	# Return zero-padded string
+	return numeric.zfill(zero_pad)
 
 def select_electrodes(
 	epochs: mne.Epochs,

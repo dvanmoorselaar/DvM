@@ -73,6 +73,7 @@ from mne.io import BaseRaw
 
 from typing import Dict, List, Optional, Union, Tuple, Any
 from autoreject import get_rejection_threshold
+from support.preprocessing_utils import format_subject_id
 from eeg_analyses.EYE import *
 from math import sqrt, ceil, floor
 from support.preprocessing_utils import get_time_slice, trial_exclusion
@@ -1038,9 +1039,9 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         ... )
         """
         
-        # Set child class specific info
-        self.sj = sj
-        self.session = str(session)
+        # Set child class specific info with zero-padded formatting
+        self.sj = format_subject_id(sj)
+        self.session = format_subject_id(session)
         self.flt_pad = flt_pad
         
         # Apply filter padding to time window if specified
@@ -1481,12 +1482,17 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             ext = eye_info['tracker_ext']
         else:
             ext = '.asc'
+        
+        # Format subject and session IDs with zero-padding for file matching
+        sj_fmt = format_subject_id(self.sj)
+        ses_fmt = format_subject_id(self.session)
+        
         eye_files = glob.glob(self.folder_tracker(ext = ['eye','raw'], \
-                fname = f'sub_{self.sj}_ses_{self.session}*'
+                fname = f'sub_{sj_fmt}_ses_{ses_fmt}*'
                 f'.{ext}') )
         beh_files = glob.glob(self.folder_tracker(ext=[
-                'beh', 'raw'],
-                fname=f'sub_{self.sj}_ses_{self.session}*.csv'))
+                'behavioral', 'raw'],
+                fname=f'sub_{sj_fmt}_ses_{ses_fmt}*.csv'))
         eye_files = sorted(eye_files)
         beh_files = sorted(beh_files)
 
@@ -1699,7 +1705,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
           'sub_{sj}_ses_{session}_{preproc_name}.npz'
         - Files are split into 2GB chunks automatically to handle large 
           datasets.
-        - All files are saved to the 'processed' folder managed by 
+        - All files are saved to the 'eeg/processed' folder managed by 
           folder_tracker.
         - Session combining uses self.session as the upper bound, so if 
           self.session=3, it will combine sessions 1, 2, and 3.
@@ -1721,7 +1727,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         # save eeg
         self.save(
             self.folder_tracker(
-                ext=['processed'],
+                ext=['eeg', 'processed'],
                 fname=f'sub_{self.sj}_ses_{self.session}_{preproc_name}-epo.fif'
             ),
             split_size='2GB',
@@ -1745,7 +1751,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
                 all_eeg.append(
                     mne.read_epochs(
                         self.folder_tracker(
-                            ext=['processed'],
+                            ext=['eeg', 'processed'],
                             fname=(
                                 f'sub_{self.sj}_ses_{session}_'
                                 f'{preproc_name}-epo.fif'
@@ -1757,7 +1763,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             all_eeg = mne.concatenate_epochs(all_eeg)
             all_eeg.save(
                 self.folder_tracker(
-                    ext=['processed'],
+                    ext=['eeg', 'processed'],
                     fname=f'sub_{self.sj}_all_{preproc_name}-epo.fif'
                 ),
                 split_size='2GB',
@@ -2152,6 +2158,16 @@ class ArtefactReject(object):
         cnt = 0
 
         while True:
+            # step 2a: manually check selected component
+            if manual_correct:
+                ica = self.manual_check_ica(ica, sj, session)
+                if ica.exclude != exclude_prev:
+                    if report is not None:
+                        report.remove(title='ICA blink cleaning')
+                    exclude_prev = ica.exclude
+                else:
+                    break
+            
             if report is not None:
                 if eog_epochs is not None:
                     eog_evoked = eog_epochs.average()
@@ -2165,7 +2181,7 @@ class ArtefactReject(object):
                     eog_evoked=eog_evoked,
                     eog_scores=eog_scores,
                 )
-                report.save(report_path, overwrite=True)
+                report.save(report_path, overwrite=True, open_browser=False)
 
             if cnt > 0:
                 time.sleep(5)
@@ -2176,17 +2192,19 @@ class ArtefactReject(object):
                 )
                 if conf == 'y':
                     manual_correct = False
-
-            # step 2a: manually check selected component
-            if manual_correct:
-                ica = self.manual_check_ica(ica, sj, session)
-                if ica.exclude != exclude_prev:
-                    if report is not None:
-                        report.remove(title='ICA blink cleaning')
-                    exclude_prev = ica.exclude
-                else:
-                    break
             else:
+                # First iteration: ask user if they're satisfied
+                time.sleep(5)
+                flush_input()
+                conf = input(
+                    'Are you satisfied with the selected components? (y/n)'
+                )
+                if conf == 'y':
+                    manual_correct = False
+                else:
+                    manual_correct = True
+
+            if not manual_correct:
                 break
 
             # track report updates
@@ -2314,9 +2332,9 @@ class ArtefactReject(object):
         >>> print(f'Found {len(inds)} blink components')
         """
         ch_names = raw.copy().pick('eog').ch_names
-        pick_eog = [raw.ch_names.index(ch) for ch in ch_names]
+        pick_eog = np.array([raw.ch_names.index(ch) for ch in ch_names])
 
-        if pick_eog.any():
+        if pick_eog.size > 0:
             # create blink epochs
             eog_epochs = create_eog_epochs(
                 raw,
@@ -2390,8 +2408,10 @@ class ArtefactReject(object):
         time.sleep(5)
         flush_input()
         print(f'You are preprocessing subject {sj}, session {session}')
+        # Format excluded components as a clean list
+        excl_str = str(list(ica.exclude)) if ica.exclude else '[]'
         conf = input(
-            f'Advanced detection selected component(s) {ica.exclude} '
+            f'Advanced detection selected component(s) {excl_str} '
             '(see report). Do you agree (y/n)? '
         )
         if conf == 'n':

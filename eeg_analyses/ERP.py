@@ -67,7 +67,7 @@ from scipy.signal import butter, lfilter, freqz
 from sklearn.metrics import auc
 from support.FolderStructure import *
 from support.preprocessing_utils import (select_electrodes,trial_exclusion,
-                                        get_time_slice)
+                                        get_time_slice, format_subject_id)
 
 class ERP(FolderStructure):
     """
@@ -196,7 +196,7 @@ class ERP(FolderStructure):
         """
 
 
-        self.sj = sj
+        self.sj = format_subject_id(sj)
         self.l_filter = l_filter
         self.h_filter = h_filter
         self.epochs = epochs

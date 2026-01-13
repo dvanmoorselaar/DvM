@@ -40,7 +40,7 @@ from typing import Optional
 
 from eeg_analyses.EEG import *
 from support.FolderStructure import FolderStructure as FS
-from support.support import log_preproc
+from support.preprocessing_utils import log_preproc, format_subject_id
 
 def eeg_preprocessing_pipeline(
     sj: int,
@@ -288,9 +288,22 @@ def eeg_preprocessing_pipeline(
                         subject = f'{sj}_{session}')
 
     # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME 
-    EEG = mne.concatenate_raws([RAW(FS.folder_tracker(ext=['raw_eeg'], 
-                     fname=f'subject_{sj}_session_{session}_{run}.bdf'),
-                     eog=eog) for run in eeg_runs])
+    def build_raw_fname(sj, session, run=None):
+        """Build raw EEG filename with optional run component."""
+        fname = f'sub_{format_subject_id(sj)}_ses_{format_subject_id(session)}'
+        if run is not None:
+            fname += f'_run_{format_subject_id(run)}'
+        return fname + '.bdf'
+    
+    EEG = mne.concatenate_raws([
+        RAW(FS.folder_tracker(
+            ext=['eeg', 'raw'],
+            fname=build_raw_fname(
+                sj, session, 
+                run if len(eeg_runs) > 1 else None
+            )
+        ), eog=eog) for run in eeg_runs
+    ])
             
     EEG.info['bads'] = sj_info['bad_chs'] if type(sj_info['bad_chs']) \
                     == list else sj_info['bad_chs'][f'session_{session}']
@@ -328,7 +341,8 @@ def eeg_preprocessing_pipeline(
         freqs = [i for i in [50,100,150] if i < EEG.info['sfreq'] / 2]
         EEG.notch_filter(freqs=freqs, 
                  method='fir', phase='zero')
-        report = EEG.report_raw(report, events, event_id)
+        # Add PSD after notch filtering without duplicating events
+        report.add_raw(EEG, title='After Notch Filter', psd=True)
         report.save(report_file, overwrite = True, open_browser=False)
 
     # EPOCH DATA 
