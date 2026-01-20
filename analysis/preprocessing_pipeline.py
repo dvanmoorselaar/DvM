@@ -40,7 +40,7 @@ from typing import Optional
 
 from analysis.EEG import *
 from support.FolderStructure import FolderStructure as FS
-from support.preprocessing_utils import log_preproc, format_subject_id
+from support.preprocessing_utils import log_preproc, format_subject_id, find_raw_files
 
 def eeg_preprocessing_pipeline(
     sj: int,
@@ -290,21 +290,22 @@ def eeg_preprocessing_pipeline(
                         subject = f'{sj}_{session}')
 
     # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME 
-    def build_raw_fname(sj, session, run=None):
-        """Build raw EEG filename with optional run component."""
-        fname = f'sub_{format_subject_id(sj)}_ses_{format_subject_id(session)}'
-        if run is not None:
-            fname += f'_run_{format_subject_id(run)}'
-        return fname + '.bdf'
+    base_folder = FS.folder_tracker(ext=['eeg', 'raw'], fname='')
+    
+    raw_files = []
+    for run in eeg_runs:
+        files = find_raw_files(base_folder, sj, session, run, ext='bdf')
+        if not files:
+            run_str = f' (run {run})' if len(eeg_runs) > 1 else ''
+            raise FileNotFoundError(
+                f"No BDF file found for subject {sj}, session {session}{run_str}\n"
+                f"Searched in: {base_folder}\n"
+                f"Expected file pattern: sub_*_ses_*.bdf or sub_*_ses_*_run_*.bdf"
+            )
+        raw_files.append(files[0])
     
     EEG = mne.concatenate_raws([
-        RAW(FS.folder_tracker(
-            ext=['eeg', 'raw'],
-            fname=build_raw_fname(
-                sj, session, 
-                run if len(eeg_runs) > 1 else None
-            )
-        ), eog=eog) for run in eeg_runs
+        RAW(fpath, eog=eog) for fpath in raw_files
     ])
             
     EEG.info['bads'] = sj_info['bad_chs'] if type(sj_info['bad_chs']) \

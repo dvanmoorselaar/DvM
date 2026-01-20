@@ -425,8 +425,8 @@ class ERP(FolderStructure):
             evoked = evoked.crop(tmin = time_oi[0],tmax = time_oi[1])
         if save: 
             evoked.save(self.folder_tracker(['erp','evoked'],
-                                        f'{erp_name}-ave.fif',
-                                        overwrite=True))
+                                        f'{erp_name}-ave.fif'),
+                        overwrite=True)
             
         # split trials in fast and slow trials based on median RT
         if RT_split:
@@ -493,7 +493,8 @@ class ERP(FolderStructure):
             else:
                 report.add_evokeds(evokeds=evokeds[cnd],titles=cnd)
 
-        report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
+        report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
+                    overwrite=True, open_browser=False)
                         
     def condition_erps(
         self, 

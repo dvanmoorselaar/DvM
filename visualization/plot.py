@@ -15,7 +15,7 @@ from analysis.ERP import *
 from stats.stats_utils import bootstrap_SE
 from typing import Optional, Generic, Union, Tuple, Any, List, Dict
 from support.preprocessing_utils import get_time_slice, get_diff_pairs
-from visuals.visuals import MidpointNormalize
+from visualization.visuals import MidpointNormalize
 
 # set general plotting parameters
 # inspired by http://nipunbatra.github.io/2014/08/latexify/

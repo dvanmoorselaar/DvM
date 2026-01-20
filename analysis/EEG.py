@@ -57,10 +57,12 @@ import itertools
 import pickle
 import copy
 import glob
+import re
 import sys
 import time
 import warnings
 import platform
+from contextlib import redirect_stdout
 
 import numpy as np
 import pandas as pd
@@ -1184,6 +1186,12 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         # read in data file and select param of interest
         beh = self.read_raw_beh(self.sj, self.session)
         if len(beh) == 0:
+            # Debug: print what's being searched for
+            beh_folder = self.folder_tracker(ext=['behavioral', 'raw'], fname='')
+            print(f"DEBUG: No behavioral files found")
+            print(f"DEBUG: Searched in folder: {beh_folder}")
+            print(f"DEBUG: Looking for subject {self.sj}, session {self.session}")
+            print(f"DEBUG: Pattern: sub_{self.sj}_ses_{self.session}*.csv")
             return np.array([]), 'No behavior file found'
         
         # Validate required columns
@@ -1337,12 +1345,12 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             beh, self, idx = trial_exclusion(beh, self, excl_factor)
             if tracker:
                 eye = np.load(self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sj_{self.sj}_ses_{self.session}_xy_eye.npz'))
+                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz'))
                 eye_x, eye_y = eye['x'], eye['y']
                 eye_x = np.delete(eye_x, idx, axis=0)
                 eye_y = np.delete(eye_y, idx, axis=0)
                 np.savez(self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sj_{self.sj}_ses_{self.session}_xy_eye.npz'),
+                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz'),
                         times = eye['times'], x = eye_x, y = eye_y, 
                         sfreq = eye['sfreq'])       
 
@@ -1483,17 +1491,27 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         else:
             ext = '.asc'
         
-        # Format subject and session IDs with zero-padding for file matching
-        sj_fmt = format_subject_id(self.sj)
-        ses_fmt = format_subject_id(self.session)
+        # Extract numeric values from sj and session (they're already formatted strings like '02')
+        sj_num = int(self.sj) if isinstance(self.sj, str) else self.sj
+        ses_num = int(self.session) if isinstance(self.session, str) else self.session
         
-        eye_files = glob.glob(self.folder_tracker(ext = ['eye','raw'], \
-                fname = f'sub_{sj_fmt}_ses_{ses_fmt}*'
-                f'.{ext}') )
-        beh_files = glob.glob(self.folder_tracker(ext=[
-                'behavioral', 'raw'],
-                fname=f'sub_{sj_fmt}_ses_{ses_fmt}*.csv'))
+        eye_folder = self.folder_tracker(ext=['eye','raw'], fname='')
+        beh_folder = self.folder_tracker(ext=['behavioral', 'raw'], fname='')
+        
+        # Use flexible glob pattern that matches any digit padding
+        # Extract numeric values from filename and compare
+        eye_files = []
+        for f in glob.glob(os.path.join(eye_folder, f'sub_*_ses_*.{ext}')):
+            match = re.search(r'sub_(\d+)_ses_(\d+)', os.path.basename(f))
+            if match and int(match.group(1)) == sj_num and int(match.group(2)) == ses_num:
+                eye_files.append(f)
         eye_files = sorted(eye_files)
+        
+        beh_files = []
+        for f in glob.glob(os.path.join(beh_folder, 'sub_*_ses_*.csv')):
+            match = re.search(r'sub_(\d+)_ses_(\d+)', os.path.basename(f))
+            if match and int(match.group(1)) == sj_num and int(match.group(2)) == ses_num:
+                beh_files.append(f)
         beh_files = sorted(beh_files)
 
         tracker_data = False
@@ -1553,7 +1571,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             # save eye data 
             report_str += f'\n {bins.size} eye epochs linked to EEG'
             np.savez(self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sj_{self.sj}_ses_{self.session}_xy_eye.npz'),
+                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz'),
                         times = times,x = x,y = y, sfreq = eye_info['sfreq'])
  
         return tracker_data, report_str
@@ -1746,20 +1764,45 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         # check whether individual sessions need to be combined
         if combine_sessions and int(self.session) != 1:
             all_eeg = []
+            all_eye_x = []
+            all_eye_y = []
+            all_eye_times = None
+            all_eye_sfreq = None
+            eye_data_exists = True
+            
             for i in range(int(self.session)):
                 session = i + 1
+                session_str = format_subject_id(session)
+                
+                # Load EEG data
                 all_eeg.append(
                     mne.read_epochs(
                         self.folder_tracker(
                             ext=['eeg', 'processed'],
                             fname=(
-                                f'sub_{self.sj}_ses_{session}_'
+                                f'sub_{self.sj}_ses_{session_str}_'
                                 f'{preproc_name}-epo.fif'
                             )
                         )
                     )
                 )
+                
+                # Try to load eye tracking data
+                eye_file = self.folder_tracker(
+                    ext=['eye', 'processed'],
+                    fname=f'sub_{self.sj}_ses_{session_str}_{preproc_name}.npz'
+                )
+                if os.path.isfile(eye_file):
+                    eye_data = np.load(eye_file)
+                    all_eye_x.append(eye_data['x'])
+                    all_eye_y.append(eye_data['y'])
+                    if all_eye_times is None:
+                        all_eye_times = eye_data['times']
+                        all_eye_sfreq = eye_data['sfreq']
+                else:
+                    eye_data_exists = False
 
+            # Combine and save EEG data
             all_eeg = mne.concatenate_epochs(all_eeg)
             all_eeg.save(
                 self.folder_tracker(
@@ -1769,6 +1812,21 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
                 split_size='2GB',
                 overwrite=True
             )
+            
+            # Combine and save eye tracking data if it exists
+            if eye_data_exists and len(all_eye_x) > 0:
+                combined_eye_x = np.vstack(all_eye_x)
+                combined_eye_y = np.vstack(all_eye_y)
+                np.savez(
+                    self.folder_tracker(
+                        ext=['eye', 'processed'],
+                        fname=f'sub_{self.sj}_all_{preproc_name}.npz'
+                    ),
+                    times=all_eye_times,
+                    x=combined_eye_x,
+                    y=combined_eye_y,
+                    sfreq=all_eye_sfreq
+                )
 
 
     def selectBadChannels(self, run_ransac = True, channel_plots=True, inspect=True, n_epochs=10, n_channels=32, RT = None):
@@ -2144,8 +2202,10 @@ class ArtefactReject(object):
         """
         # step 1: fit the data (after dropping noise trials if Epochs)
         if isinstance(fit_inst, mne.Epochs):
-            reject = get_rejection_threshold(fit_inst, ch_types='eeg')
-            fit_inst.drop_bad(reject)
+            with open(os.devnull, 'w', encoding='utf-8') as f:
+                with redirect_stdout(f):
+                    reject = get_rejection_threshold(fit_inst, ch_types='eeg')
+                    fit_inst.drop_bad(reject)
         ica = self.fit_ICA(fit_inst, method=method)
 
         # step 2: select the blink component
@@ -2156,19 +2216,11 @@ class ArtefactReject(object):
         exclude_prev = [eog_inds[0]] if len(eog_inds) > 0 else []
         manual_correct = True
         cnt = 0
+        ica_added = False  # Track whether ICA has been added to report
 
         while True:
-            # step 2a: manually check selected component
-            if manual_correct:
-                ica = self.manual_check_ica(ica, sj, session)
-                if ica.exclude != exclude_prev:
-                    if report is not None:
-                        report.remove(title='ICA blink cleaning')
-                    exclude_prev = ica.exclude
-                else:
-                    break
-            
-            if report is not None:
+            # Add ICA to report BEFORE manual check so user can see it (only on first iteration)
+            if report is not None and not ica_added:
                 if eog_epochs is not None:
                     eog_evoked = eog_epochs.average()
                 else:
@@ -2182,33 +2234,61 @@ class ArtefactReject(object):
                     eog_scores=eog_scores,
                 )
                 report.save(report_path, overwrite=True, open_browser=False)
-
-            if cnt > 0:
-                time.sleep(5)
-                flush_input()
-                print('Please inspect the updated ICA report')
-                conf = input(
-                    'Are you satisfied with the selected components? (y/n)'
-                )
-                if conf == 'y':
-                    manual_correct = False
-            else:
-                # First iteration: ask user if they're satisfied
-                time.sleep(5)
-                flush_input()
-                conf = input(
-                    'Are you satisfied with the selected components? (y/n)'
-                )
-                if conf == 'y':
-                    manual_correct = False
-                else:
-                    manual_correct = True
-
-            if not manual_correct:
+                ica_added = True
+            
+            # Ask user if they agree with the components
+            time.sleep(5)
+            flush_input()
+            print(f'You are preprocessing subject {sj}, session {session}')
+            excl_list = [int(x) for x in ica.exclude] if ica.exclude else []
+            conf = input(
+                f'Advanced detection selected component(s) {excl_list} '
+                '(see report). Do you agree (y/n)? '
+            )
+            
+            if conf == 'y':
+                # User is satisfied, break out of loop
                 break
-
-            # track report updates
-            cnt += 1
+            else:
+                # User wants to manually select components
+                exclude_prev = ica.exclude
+                eog_inds = []
+                nr_comp = input(
+                    'How many components do you want to select (<10)? '
+                )
+                for i in range(int(nr_comp)):
+                    eog_inds.append(
+                        int(input(f'What is component nr {i + 1}? '))
+                    )
+                ica.exclude = eog_inds
+                
+                # Update report with new components
+                if report is not None:
+                    try:
+                        report.remove(title='ICA blink cleaning')
+                        print('Removed previous ICA section from report.')
+                    except:
+                        print('No previous ICA section to remove from report.')
+                        pass
+                    
+                    # Save after removing to ensure clean state
+                    report.save(report_path, overwrite=True, open_browser=False)
+                    
+                    if eog_epochs is not None:
+                        eog_evoked = eog_epochs.average()
+                    else:
+                        eog_evoked = None
+                    # Add updated ICA section
+                    report.add_ica(
+                        ica=ica,
+                        title='ICA blink cleaning',
+                        picks=range(15),
+                        inst=fit_inst,
+                        eog_evoked=eog_evoked,
+                        eog_scores=eog_scores,
+                    )
+                    report.save(report_path, overwrite=True, open_browser=False)
+                    print('Updated ICA components in report. Please review.')
 
         # step 3: apply ica
         ica_inst = self.apply_ICA(ica, ica_inst)
@@ -2580,8 +2660,11 @@ class ArtefactReject(object):
         # drop bad epochs
         if drop_bads:
             epochs.drop(np.array(bad_epochs), reason='Artefact reject')
+            # Format subject and session IDs with zero-padding
+            sj_fmt = format_subject_id(sj)
+            session_fmt = format_subject_id(session)
             file = FolderStructure().folder_tracker(ext=['eye','processed'],
-                        fname=f'sj_{sj}_ses_{session}_xy_eye.npz')
+                        fname=f'sub_{sj_fmt}_ses_{session_fmt}_xy_eye.npz')
 
             if os.path.isfile(file) and len(bad_epochs) > 0:
                 eye = np.load(file)
@@ -3140,7 +3223,6 @@ class ArtefactReject(object):
 
         return Z_n, elecs_z, z_thresh
     
-    @blockPrinting
     def iterative_interpolation(
         self, 
         epochs: mne.Epochs, 
@@ -3232,6 +3314,9 @@ class ArtefactReject(object):
         # track bad and cleaned epochs
         bad_epochs, cleaned_epochs = [], []
         for i, event in enumerate(noise_inf):
+            if (i + 1) % 100 == 0:
+                print(f'Processing artifact epoch {i + 1}/{len(noise_inf)}...')
+            
             bad_epoch = epochs[event[0]]
             # search for bad channels in detected artefact periods
             z = np.concatenate(
@@ -3242,28 +3327,34 @@ class ArtefactReject(object):
             ch_idx = np.argsort(z.mean(axis=1))[-self.max_bad:][::-1]
             interp_chs = channels[ch_idx]
 
+            cleaned = False
             for c, ch in enumerate(interp_chs):
                 # update heat map
                 bad_epoch.info['bads'] += [ch]
-                bad_epoch.interpolate_bads(exclude=epochs.info['bads'])
+                # suppress MNE interpolation messages but keep progress output
+                with open(os.devnull, 'w', encoding='utf-8') as f:
+                    with redirect_stdout(f):
+                        bad_epoch.interpolate_bads(exclude=epochs.info['bads'])
                 epochs._data[event[0]] = bad_epoch._data
                 # repeat preprocesing after interpolation to check whether 
-                # epoch is now 'clean'
-                Z_, _, _, _ = self.preprocess_epochs(
-                    epochs[event[0]], 
-                    band_pass=band_pass
-                )
+                # epoch is now 'clean' (also suppress filter output)
+                with open(os.devnull, 'w', encoding='utf-8') as f:
+                    with redirect_stdout(f):
+                        Z_, _, _, _ = self.preprocess_epochs(
+                            epochs[event[0]], 
+                            band_pass=band_pass
+                        )
 
                 if not np.any(abs(Z_) > z_thresh):
                     # epoch no longer marked as bad
+                    cleaned = True
+                    self.update_heat_map(channels, ch_idx[:c+1], i, 1)
+                    cleaned_epochs.append(event[0])
                     break
 
-            if ch == interp_chs[-1]:
+            if not cleaned:
                 self.update_heat_map(channels, ch_idx[:c+1], i, -1)
                 bad_epochs.append(event[0])
-            else:
-                self.update_heat_map(channels, ch_idx[:c+1], i, 1)
-                cleaned_epochs.append(event[0])
 
         return epochs, bad_epochs, cleaned_epochs
     

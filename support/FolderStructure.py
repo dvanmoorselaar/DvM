@@ -42,6 +42,8 @@ import copy
 
 import numpy as np
 import pandas as pd
+from IPython import embed
+from contextlib import redirect_stdout
 
 from typing import List, Optional, Union, Tuple
 from support.preprocessing_utils import (
@@ -49,7 +51,7 @@ from support.preprocessing_utils import (
     trial_exclusion,
     format_subject_id
 )
-
+from support.eye_utils import exclude_eye
 
 def blockPrinting(func):
     """Decorator to suppress console output during function execution.
@@ -308,7 +310,7 @@ class FolderStructure(object):
 
         Returns
         -------
-        beh : pd.DataFrame
+        df : pd.DataFrame
             Behavioral data aligned to epochs. Contains trial
             metadata and experimental variables.
         epochs : mne.Epochs
@@ -327,7 +329,7 @@ class FolderStructure(object):
         Examples
         --------
         >>> # Basic loading
-        >>> beh, epochs = self.load_processed_epochs(
+        >>> df, epochs = self.load_processed_epochs(
         ...     sj=1,
         ...     fname='main',
         ...     preproc_name='main'
@@ -340,7 +342,7 @@ class FolderStructure(object):
         ...     'angle_thresh': 100,
         ...     'use_tracker': True
         ... }
-        >>> beh, epochs = self.load_processed_epochs(
+        >>> df, epochs = self.load_processed_epochs(
         ...     sj=1,
         ...     fname='main',
         ...     preproc_name='main',
@@ -348,7 +350,7 @@ class FolderStructure(object):
         ... )
         >>> 
         >>> # Load with condition exclusion
-        >>> beh, epochs = self.load_processed_epochs(
+        >>> df, epochs = self.load_processed_epochs(
         ...     sj=1,
         ...     fname='main',
         ...     preproc_name='main',
@@ -356,7 +358,7 @@ class FolderStructure(object):
         ... )
         >>> 
         >>> # Load MEG data instead of EEG
-        >>> beh, epochs = self.load_processed_epochs(
+        >>> df, epochs = self.load_processed_epochs(
         ...     sj=1,
         ...     fname='main',
         ...     preproc_name='main',
@@ -404,9 +406,6 @@ class FolderStructure(object):
             else:
                 df = pd.DataFrame({'condition': epochs.events[:,2]})
 
-        # remove a subset of trials 
-        if type(excl_factor) == dict: 
-            df, epochs,_ = trial_exclusion(df, epochs, excl_factor)
 
         # reset index(to properly align beh and epochs)
         df.reset_index(inplace = True, drop = True)
@@ -417,18 +416,29 @@ class FolderStructure(object):
                             ext = ['preprocessing','group_info'],
                             fname = f'preproc_param_{preproc_name}.csv')
             # Check if the file exists before proceeding
+            # Extract session number from fname (format: 'ses_XX_...')
+            match = re.search(r'ses_(\d+)', fname)
+            session = match.group(1) if match else '1'
+            # Eye files are renamed 
+            # to sub_{sj}_ses_{session}_{preproc_name}.npz during preprocessing
             eye_file = self.folder_tracker(ext=['eye','processed'],
-                    fname=f'sub_{sj}_{fname}.npz')
+                    fname=f'sub_{sj}_ses_{session}_{preproc_name}.npz')
             if os.path.isfile(eye_file):
                 eye = np.load(eye_file)
-                df, epochs = exclude_eye(sj,df,epochs,eye_dict,eye,file)
+                df, epochs = exclude_eye(sj, int(session), df, epochs, 
+                                         eye_dict, eye, file)
             else:
                 print(f"Warning: Preprocessing parameter file not found: \
                       {file}. Eye exclusion based on EOG data only")
                 temp = eye_dict['use_tracker']
                 eye_dict['use_tracker'] = False
-                df, epochs = exclude_eye(sj,df,epochs,eye_dict,None,file)
+                df, epochs = exclude_eye(sj, int(session), df, epochs, 
+                                        eye_dict, None, file)
                 eye_dict['use_tracker'] = temp
+
+        # remove a subset of trials 
+        if type(excl_factor) == dict: 
+            df, epochs,_ = trial_exclusion(df, epochs, excl_factor)
 
         return df, epochs
 
@@ -485,11 +495,26 @@ class FolderStructure(object):
                     "Must provide either 'files' parameter with file "
                     "paths or both 'sj' and 'session' parameters"
                 )
-            sj_fmt = format_subject_id(sj)
-            session_fmt = format_subject_id(session)
-            files = sorted(glob.glob(self.folder_tracker(ext=[
-                    'behavioral', 'raw'],
-                    fname=f'sub_{sj_fmt}_ses_{session_fmt}*.csv')))
+            # Use flexible glob pattern that matches any digit padding
+            beh_folder = self.folder_tracker(ext=['behavioral', 'raw'], fname='')
+            pattern = os.path.join(beh_folder, 'sub_*_ses_*.csv')
+            all_files = glob.glob(pattern)
+            
+            # Extract numeric values from sj and session (they might be strings like '02')
+            sj_num = int(sj) if isinstance(sj, str) else sj
+            session_num = int(session) if isinstance(session, str) else session
+            
+            # Filter for exact subject and session match (independent of padding)
+            # Extract numeric values from filename and compare
+            files = []
+            for f in all_files:
+                match = re.search(r'sub_(\d+)_ses_(\d+)', os.path.basename(f))
+                if match:
+                    file_sj = int(match.group(1))
+                    file_ses = int(match.group(2))
+                    if file_sj == sj_num and file_ses == session_num:
+                        files.append(f)
+            files = sorted(files)
             if not files:
                 return []
         
@@ -596,7 +621,9 @@ class FolderStructure(object):
                 ]
 
             # read in actual data
-            erps[cnd] = [mne.read_evokeds(file)[0] for file in files]
+            with open(os.devnull, 'w', encoding='utf-8') as f:
+                with redirect_stdout(f):
+                    erps[cnd] = [mne.read_evokeds(file)[0] for file in files]
             if match:
                 nr_samples = [erp.times.size for erp in erps[cnd]]
                 if len(set(nr_samples)) > 1:

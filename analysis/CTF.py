@@ -66,7 +66,7 @@ from math import pi, sqrt
 from mne.filter import filter_data
 from scipy.signal import hilbert
 from scipy.optimize import curve_fit
-from visuals.plot_results import plot_ctf_timecourse
+from visualization.plot import plot_ctf_timecourse
 
 from support.preprocessing_utils import select_electrodes, trial_exclusion, \
 							get_time_slice,baseline_correction, format_subject_id 

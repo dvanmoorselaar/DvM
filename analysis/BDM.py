@@ -68,7 +68,7 @@ from support.preprocessing_utils import (
 )
 from scipy.stats import rankdata
 from analysis.TFR import TFR
-from visuals.plot_results import plot_bdm_timecourse
+from visualization.plot import plot_bdm_timecourse
 from IPython import embed
 import warnings
 
@@ -1446,7 +1446,7 @@ class BDM(FolderStructure):
 		positioning
 		
 		**Dependencies:**
-		- Requires plot_bdm_timecourse from visuals.plot_results module
+		- Requires plot_bdm_timecourse from visualization.plot module
 		- Automatic montage detection from epochs or explicit 
 		montage specification
 		- MNE-compatible electrode positioning for spatial 
