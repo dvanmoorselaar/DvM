@@ -26,6 +26,7 @@ Experimental design:
 """
 
 import os
+import json
 import mne
 import warnings
 import itertools
@@ -755,44 +756,41 @@ def log_preproc(
     to_update: Optional[dict] = None
     ) -> None:
     """
-    Log preprocessing parameters to multi-indexed CSV file.
+    Log preprocessing parameters to JSON file.
 
-    Creates or updates a preprocessing log file with multi-level 
-    indexing(subject_id, session). Useful for tracking preprocessing 
-    parameters across subjects and sessions.
+    Creates or updates a preprocessing log file with nested structure
+    organized by subject and session. More robust than CSV format.
+    Useful for tracking preprocessing parameters across subjects and 
+    sessions.
 
     Parameters
     ----------
     idx : tuple
-        Multi-index tuple (subject_id, session) for the row to update.
+        Tuple (subject_id, session) for the entry to update.
         Example: (1, 1) for subject 1, session 1.
     file : str
-        Path to CSV file for logging. Created if doesn't exist.
+        Path to JSON file for logging. Created if doesn't exist.
     nr_sj : int, default=1
         Number of subjects (used when creating new file).
     nr_sessions : int, default=1
         Number of sessions per subject (used when creating new file).
     to_update : dict, optional
-        Dictionary of {column_name: value} pairs to log. If column
-        doesn't exist, it's created. List values are converted to
-        strings. Default is None (no updates).
+        Dictionary of {key: value} pairs to log. Values can be any
+        JSON-serializable type (strings, numbers, lists, etc.).
+        Default is None (no updates).
 
     Returns
     -------
     None
-        File is saved to disk.
-
-    Warnings
-    --------
-    Modifies file in-place. All values are converted to strings.
+        File is saved to disk in JSON format.
 
     Notes
     -----
-    The function:
-    1. Loads existing file or creates new multi-indexed DataFrame
-    2. Adds missing columns with NaN
-    3. Updates specified row with new values
-    4. Saves back to CSV
+    JSON structure uses composite keys for subject and session:
+    {
+        "subject_01_session_01": {"key1": value1, "key2": value2},
+        "subject_01_session_02": {"key1": value1}
+    }
 
     Examples
     --------
@@ -805,7 +803,7 @@ def log_preproc(
     ... }
     >>> log_preproc(
     ...     idx=(1, 1),
-    ...     file='preprocessing/preproc_log.csv',
+    ...     file='preprocessing/preproc_log.json',
     ...     to_update=params
     ... )
 
@@ -813,28 +811,35 @@ def log_preproc(
     --------
     support.FolderStructure.folder_tracker : Generate file paths
     """
-
-    # check whether file exists
+    sj, session = idx
+    
+    # Create composite key for subject and session (ensure integers)
+    entry_key = f'subject_{int(sj):02d}_session_{int(session):02d}'
+    
+    # Load existing data or create new
     if os.path.isfile(file):
-        df = pd.read_csv(file, index_col=[0,1])
+        try:
+            with open(file, 'r') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            # File is corrupted or empty, start fresh
+            data = {}
     else:
-        arrays = [np.arange(nr_sj) + 1, list(np.arange(1)+1)*nr_sj]
-        multi_idx = pd.MultiIndex.from_arrays(
-            arrays, names=('subject_id', 'session')
-        )
-        df = pd.DataFrame(None, multi_idx, to_update.keys())
-
-    # do actual updating
-    if to_update != None:
+        data = {}
+    
+    # Ensure entry key exists
+    if entry_key not in data:
+        data[entry_key] = {}
+    
+    # Update with new values
+    if to_update is not None:
         for key, value in to_update.items():
-            if key not in df:
-                df[key] = np.nan 
-            # Convert column to object dtype to allow string assignment
-            if df[key].dtype != 'object':
-                df[key] = df[key].astype('object')
-            if type(value) == list:
-                value = str(value) 
-            df.loc[idx,key] = str(value)
-
-    # save datafile
-    df.to_csv(file)
+            # Convert lists to strings for readability
+            if isinstance(value, list):
+                value = str(value)
+            data[entry_key][key] = value
+    
+    # Save to JSON
+    os.makedirs(os.path.dirname(file), exist_ok=True)
+    with open(file, 'w') as f:
+            json.dump(data, f, indent=4)

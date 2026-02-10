@@ -8,10 +8,12 @@ Copyright (c) 2018 DvM. All rights reserved.
 import numpy as np
 import scipy.sparse as sparse
 import warnings
+import mne.stats
 
-from typing import Tuple
+from typing import Tuple, Union, Optional
 from math import sqrt
-from scipy.stats import ttest_rel, t
+from scipy.stats import ttest_rel, t, ttest_1samp
+from statsmodels.stats.multitest import fdrcorrection
 
 def bootstrap_SE(
 	X: np.ndarray, 
@@ -291,6 +293,192 @@ def connected_adjacency(
 	else:
 		raise ValueError(
 			f'Invalid parameter \'connect\'={connect!r}, must be "4" or "8".'
+		)
+
+def perform_stats(
+		y: np.ndarray, 
+		chance: float = 0, 
+		stat_test: str = 'perm',
+		p_thresh: float = 0.05,
+		statfun: Optional[callable] = None,
+		p_cluster: Optional[float] = None,
+		threshold: Optional[float] = None
+	) -> Tuple[np.ndarray, Union[list, np.ndarray], np.ndarray]:
+	"""Perform statistical testing on group-level neural data.
+
+	Conducts one-sample statistical tests comparing data against a 
+	chance level. Supports multiple testing approaches 
+	(permutation clustering, t-test, FDR correction) suitable for 
+	time-series and 2D (frequency X time) neural data.
+
+	Parameters
+	----------
+	y : np.ndarray
+		Data array for statistical testing. Shape should be:
+		- 2D array: (n_subjects, n_timepoints) for 1D data (timecourse)
+		- 3D array: (n_subjects, n_frequencies, n_timepoints) for 
+		  2D data (time-frequency)
+	chance : float, default=0
+		Chance level to test against. Data is centered on this value 
+		before testing (y - chance). Typically 0 for deviation from 
+		baseline, or 0.5 for classification accuracy.
+	stat_test : {'perm', 'ttest', 'fdr'}, default='perm'
+		Statistical test method:
+		- 'perm': Permutation cluster test with sign-flipping to 
+		  correct for multiple comparisons via spatiotemporal 
+		  clustering. Tests if data distributions differ from chance 
+		  level.
+		- 'ttest': One-sample t-test (no multiple comparison correction)
+		- 'fdr': T-test with False Discovery Rate correction
+	p_thresh : float, default=0.05
+		P-value threshold for filtering results. Only results with 
+		p-value <= p_thresh are included in the output. Interpretation 
+		varies by test type:
+		- 'perm': Cluster-level p-value threshold. Only clusters with 
+		  p <= p_thresh are returned (FWER control via clustering).
+		- 'ttest': Individual timepoint p-value threshold. Only 
+		  timepoints with p < p_thresh are marked as significant 
+		  (no multiple comparison correction).
+		- 'fdr': FDR-corrected p-value threshold. Only timepoints with 
+		  corrected p < p_thresh are marked as significant.
+	statfun : callable, optional
+		Custom statistical function for permutation test. Only used when 
+		stat_test='perm'. Function should accept data array and return 
+		test statistic. If None (default), uses MNE's default 1-sample 
+		t-test. For example: lambda x: np.mean(x, axis=0) for mean-based 
+		test.
+	p_cluster : float or None, default=None
+		Cluster-forming p-value threshold (only for stat_test='perm'). 
+		Use this for intuitive p-value-based specification. The 
+		threshold test statistic is automatically calculated as:
+		threshold = scipy.stats.t.ppf(1 - p_cluster/2, n_subjects - 1)
+		For example, p_cluster=0.05 uses the t-value corresponding to 
+		p=0.05 two-tailed. If both p_cluster and threshold are None 
+		(default), MNE uses automatic threshold (default p=0.05). If 
+		threshold is explicitly provided, p_cluster is ignored. Ignored 
+		for stat_test='ttest' or 'fdr'.
+	threshold : float or None, default=None
+		Cluster-forming threshold as a test statistic value (only for 
+		stat_test='perm'). Use this to directly specify the test 
+		statistic threshold if you prefer not to use p-values. 
+		For example:
+		- For t-statistic: threshold=2.0 includes points with |t| > 2.0
+		- For correlation: threshold=0.3 includes points with |r| > 0.3
+		If specified, overrides p_cluster. If both are None (default), 
+		MNE uses automatic threshold. 
+		Ignored for stat_test='ttest' or 'fdr'.
+
+	Returns
+	-------
+	test_stat : np.ndarray
+		Test statistic values with same shape as input data.
+	sig_mask : list or np.ndarray
+		Significance indicators. Content depends on test type:
+		- 'perm': List of significant clusters (filtered by p_thresh). 
+		  Each cluster is a tuple of indices. Empty list if no 
+		  significant clusters found.
+		- 'ttest'/'fdr': Boolean array of same shape as input data, 
+		  True for significant timepoints/pixels.
+	p_vals : np.ndarray
+		P-values for significant results only (filtered by p_thresh):
+		- 'perm': One p-value per significant cluster
+		- 'ttest'/'fdr': P-values for each significant timepoint/pixel
+
+	Notes
+	-----
+	**Permutation test details**: Uses MNE's implementation which 
+	performs a 1-sample cluster test via sign-flipping permutations. 
+	For each permutation, data signs are randomly flipped and test 
+	statistic recomputed. This naturally corrects for multiple 
+	comparisons via spatiotemporal clustering, making it more 
+	conservative than uncorrected tests.
+
+	**FDR correction**: Applied across all timepoints (flattened for 2D 
+	data) before reshaping back to original dimensions.
+
+	**Important - Statistical control differences**: The three tests use 
+	fundamentally different multiple comparison strategies:
+	- 'perm': Controls family-wise error rate (FWER) via clustering - 
+	  most conservative, best for strong effects
+	- 'fdr': Controls false discovery rate (FDR) - moderate 
+	  stringency, good balance
+	- 'ttest': No correction - most liberal, many false positives
+	
+	Results are NOT directly comparable between methods with the same 
+	p_thresh. Choose method based on your study design and effect size 
+	expectations.
+
+	Raises
+	------
+	ValueError
+		If stat_test is not one of 'perm', 'ttest', or 'fdr'.
+	TypeError
+		If statfun is not callable.
+
+	Examples
+	--------
+	>>> y = np.random.randn(30, 300)  # 30 subjects, 300 timepoints
+	>>> t_vals, sig_mask, p_vals = perform_stats(y, chance=0, 
+	...stat_test='ttest')
+	>>> significant_points = np.sum(sig_mask)
+	
+	>>> # Using custom statfun with permutation test
+	>>> custom_stat = lambda x: np.mean(x, axis=0)
+	>>> t_vals, sig_mask, p_vals = perform_stats(y, stat_test='perm', 
+	...                                            statfun=custom_stat)
+	"""
+	#TODO: add option to return a mask with significant points only
+
+	# Determine input data dimensionality
+	is_2d = y.ndim == 3
+
+	if stat_test == 'perm':
+		if statfun is not None and not callable(statfun):
+			raise TypeError("statfun must be callable or None")
+		
+		# Build kwargs for MNE function - only include threshold if provided
+		mne_kwargs = {'stat_fun': statfun}
+		
+		# Calculate threshold from p_cluster if provided and threshold is not
+		if threshold is None and p_cluster is not None:
+			# Convert p-value to t-statistic threshold
+			n_subjects = y.shape[0]
+			threshold = t.ppf(1 - p_cluster / 2, n_subjects - 1)
+		
+		if threshold is not None:
+			mne_kwargs['threshold'] = threshold
+		
+		(t_obs, 
+		clusters, 
+		p_vals, 
+		H0) = mne.stats.permutation_cluster_1samp_test(
+			y - chance, **mne_kwargs
+		)
+		
+		# Filter clusters by p_thresh to return only significant ones
+		sig_indices = np.where(p_vals <= p_thresh)[0]
+		significant_clusters = [clusters[i] for i in sig_indices]
+		significant_p_vals = p_vals[sig_indices]
+		
+		return t_obs, significant_clusters, significant_p_vals
+	elif stat_test == 'ttest':
+		t_vals, p_vals = ttest_1samp(y, chance, axis=0)
+		sig_mask = p_vals < p_thresh
+		return t_vals, sig_mask, p_vals
+	elif stat_test == 'fdr':
+		t_vals, p_vals = ttest_1samp(y, chance, axis=0)
+		if is_2d:
+			# Apply FDR correction across all 2D points
+			_, p_vals_fdr = fdrcorrection(p_vals.flatten())
+			p_vals_fdr = p_vals_fdr.reshape(p_vals.shape)
+		else:
+			_, p_vals_fdr = fdrcorrection(p_vals)
+		sig_mask = p_vals_fdr < p_thresh
+		
+		return t_vals, sig_mask, p_vals_fdr
+	else:
+		raise ValueError(
+			f"stat_test must be 'perm', 'ttest', or 'fdr', got '{stat_test}'"
 		)
 
 

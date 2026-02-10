@@ -410,9 +410,10 @@ class CTF(BDM):
 		Generate comprehensive HTML report for CTF analysis results.
 		
 		Creates an automated report containing visualizations of channel
-		tuning functions, slope parameters over time, and frequency-specific
-		analyses. The report includes both time-domain and time-frequency
-		representations of spatial encoding results.
+		tuning functions, slope parameters over time, and 
+		frequency-specificanalyses. The report includes both 
+		time-domain and time-frequency representations of spatial 
+		encoding results.
 
 		Parameters
 		----------
@@ -422,8 +423,8 @@ class CTF(BDM):
 			response matrices and metadata.
 		ctf_param : dict
 			#TODO: Clarify structure and contents of ctf_param
-			Dictionary containing extracted CTF parameters (e.g., slopes,
-			peaks) for statistical analysis.
+			Dictionary containing extracted CTF parameters (e.g., 
+			slopes, peaks) for statistical analysis.
 		freqs : str or dict
 			Frequency specification for analysis:
 			- str: Frequency band name (e.g., 'alpha')  
@@ -444,9 +445,9 @@ class CTF(BDM):
 		3. **Time-Frequency Plots**: If multiple frequencies analyzed
 		4. **Condition Comparisons**: Separate sections per condition
 		
-		Report files are saved in HTML format for easy viewing and sharing.
-		Figures are embedded directly in the report for self-contained
-		documentation.
+		Report files are saved in HTML format for easy viewing and 
+		sharing. Figures are embedded directly in the report for 
+		self-contained documentation.
 
 		Examples
 		--------
@@ -512,7 +513,8 @@ class CTF(BDM):
 						caption = f'CTF tuning function over time')
 					plt.close()
 			
-		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
+		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True,
+			  		open_browser=False)
 
 	def spatial_ctf(self, pos_labels: dict = 'all', cnds: dict = None,
 					excl_factor: dict = None, window_oi: tuple = (None, None),
@@ -591,14 +593,16 @@ class CTF(BDM):
 		- 'ctfs_{name}.pickle': Reconstructed channel tuning 
 		   functions. For filtered data: contains 'C2_E' 
 		   (evoked power) and 'C2_T' (total power). For broadband: 
-		   contains 'C2_envelope' (amplitude) and 'C2_voltage' 
-		   (raw ERPs).
+		   contains 'C2_voltage' (raw ERP) and 'C2_envelope' 
+		   (phase-locked amplitude via Hilbert transform).
 		- 'ctf_param_{name}.pickle': Extracted tuning parameters 
 		  (slopes, von Mises fits, Gaussian fits)
 		- 'ctf_info_{name}.pickle': Analysis metadata and indices
 		
 		If self.report=True, also generates an HTML report with 
-		visualizations of the results.		Notes
+		visualizations of the results.		
+		
+		Notes
 		-----
 		The spatial CTF analysis pipeline implements the following 
 		steps:
@@ -615,8 +619,11 @@ class CTF(BDM):
 			- For filtered data: Apply bandpass filtering, extract 
 			evoked power (phase-locked) and total power 
 			(non-phase-locked)
-			- For broadband: Extract raw voltages (ERPs) and amplitude 
-			envelope via Hilbert transform
+			- For broadband: Extract raw voltages (ERPs) and 
+			phase-locked amplitude envelope (via Hilbert transform 
+			after trial averaging). Voltage preserves polarity 
+			information; envelope is less sensitive to polarity 
+			reversals and reflects overall amplitude modulation
 		
 		4. **Cross-Validation Loop**:
 			- Partition data into training and testing sets
@@ -1859,6 +1866,12 @@ class CTF(BDM):
 		bands : list or None
 			List of sorted band names if custom dict provided, 
 			otherwise None.
+		
+		Raises
+		------
+		ValueError
+			If freqs is a string but not one of the valid options
+			('main_param' or 'broadband').
 		"""
 
 		bands = None
@@ -1876,6 +1889,18 @@ class CTF(BDM):
 			bands = sorted(freqs.keys(), key=lambda k: freqs[k][0])
 		elif freqs == 'broadband':
 			frex = [freqs]
+		elif isinstance(freqs, str):
+			# Invalid string option
+			raise ValueError(
+				f"Invalid frequency specification '{freqs}'. "
+				"String must be either 'main_param' or 'broadband'. "
+				"For custom bands, pass a dictionary."
+			)
+		else:
+			raise ValueError(
+				f"Invalid frequency specification type: {type(freqs)}. "
+				"Expected str ('main_param', 'broadband') or dict."
+			)
 		nr_frex = len(frex)
 
 		return frex, nr_frex, bands

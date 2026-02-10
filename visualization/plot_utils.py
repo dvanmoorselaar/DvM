@@ -7,24 +7,11 @@ Copyright (c) 2016 DvM. All rights reserved.
 """
 
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 
-class MidpointNormalize(Normalize):
-
-    # adapted from https://stackoverflow.com/questions/20144529/shifted-colorbar-matplotlib/20146989#20146989
-    def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
-        self.midpoint = midpoint
-        Normalize.__init__(self, vmin, vmax, clip)
-
-    def __call__(self, value, clip=None):
-        # I'm ignoring masked values and all kinds of edge cases to make a
-        # simple example...
-        x, y = [self.vmin, self.midpoint, self.vmax], [0, 0.5, 1]
-        return np.ma.masked_array(np.interp(value, x, y))
-
-
-def shiftedColorMap(cmap, min_val, max_val, name):
+def shifted_color_map(cmap, min_val, max_val, name):
     '''Function to offset the "center" of a colormap. 
     Useful for data with a negative min and positive max and you want the middle of 
     the colormap's dynamic range to be at zero. Function sets the new start 
@@ -66,5 +53,4 @@ def shiftedColorMap(cmap, min_val, max_val, name):
         cdict['blue'].append((si, b, b))
         cdict['alpha'].append((si, a, a))
     newcmap = matplotlib.colors.LinearSegmentedColormap(name, cdict)
-    plt.register_cmap(cmap=newcmap)
     return newcmap

@@ -378,7 +378,7 @@ class TFR(FolderStructure):
 		if elec_oi == 'all':
 			picks = mne.pick_types(epochs.info, eeg=True, csd = True)
 			elec_oi = np.array(epochs.ch_names)[picks]
-		epochs.pick_channels(elec_oi)		
+		epochs.pick(elec_oi)		
 	
 		return epochs, df
 	
@@ -589,7 +589,89 @@ class TFR(FolderStructure):
 
 	def generate_tfr_report(self,tfr:dict,info:mne.Info,
 						 report_name: str):
-		#TODO add docstring
+		"""
+		Generate HTML report with TFR visualizations for each condition.
+
+		Creates an interactive MNE Report containing 2D time-frequency 
+		representations and topographic plots for each experimental 
+		condition. The report includes both global TFR overviews and 
+		individual electrode-specific decompositions for comprehensive 
+		visualization of results.
+
+		Parameters
+		----------
+		tfr : dict
+			TFR results dictionary containing 'power', 'times', 'frex',
+			'ch_names', 'cnd_cnt' keys with condition-specific power 
+			arrays and metadata. Expected keys:
+			
+			- 'power': dict of condition-specific power arrays 
+			  (n_channels, n_frequencies, n_times)
+			- 'times': time points array
+			- 'frex': frequency array
+			- 'ch_names': channel names list
+			- 'cnd_cnt': dict with trial count per condition
+		info : mne.Info
+			MNE Info object containing channel information and 
+			metadata for the EEG recording. Used for constructing 
+			AverageTFR objects and ensuring MNE compatibility.
+		report_name : str
+			Base filename for the report (without extension). Report 
+			will be saved as HTML with format: 
+			'{report_name}.html' in the project's TFR report directory.
+
+		Returns
+		-------
+		None
+			Saves report directly to disk. No value returned.
+
+		Notes
+		-----
+		**Report Contents:**
+		
+		For each condition in the TFR results, the report includes:
+		1. **2D TFR & Topoplots**: Joint visualization showing time-
+		   frequency power with topographic maps at 3 frequencies 
+		   (or all if < 3) at the time point with maximum power
+		2. **Individual Electrode TFR**: Per-channel time-frequency 
+		   decomposition showing detailed spectral dynamics for each 
+		   electrode
+
+		**Frequency Selection:**
+		If more than 3 frequencies are available, 3 evenly-spaced 
+		frequencies are selected for topographic visualization to 
+		avoid overcrowding. Time point selection uses the global 
+		maximum power across all channels and frequencies for 
+		consistency across conditions.
+
+		**File Organization:**
+		Reports are saved in the project's TFR report directory 
+		structure. Filename format allows tracking of subject ID and 
+		analysis name through the report_name parameter.
+
+		**Interactive Features:**
+		The generated HTML report is fully interactive and can be 
+		viewed in any web browser. No external dependencies required 
+		for viewing.
+
+		Examples
+		--------
+		Generate report after TFR analysis:
+
+		>>> tfr_results = tfr.condition_tfrs(...)
+		>>> tfr.generate_tfr_report(
+		...     tfr=tfr_results, 
+		...     info=epochs.info,
+		...     report_name='sj_01_main'
+		... )
+		# Creates: tfr/report/sj_01_main.html
+
+		See Also
+		--------
+		condition_tfrs : Main TFR analysis pipeline that calls this
+		mne.Report : MNE Report class for flexible report generation
+		AverageTFR : MNE time-frequency object used for visualization
+		"""
 
 		report_name = self.folder_tracker(['tfr', 'report'],
 										f'{report_name}.h5')
@@ -613,22 +695,33 @@ class TFR(FolderStructure):
 			# change data into mne format (..., n_ch, n_freq, n_time)
 			x = np.swapaxes(x, 0, 1) if x.ndim == 3 else np.swapaxes(x, 1, 2)
 				
-			tfr_ = mne.time_frequency.AverageTFR(info,x,tfr['times'],self.frex,
-				       						tfr['cnd_cnt'][cnd], 
-											method = self.method,
-											comment = cnd)
+			# Create AverageTFR from pre-computed data using dict interface
+			tfr_dict = {
+				'info': info,
+				'data': x,
+				'times': tfr['times'],
+				'freqs': self.frex,
+				'nave': tfr['cnd_cnt'][cnd],
+				'method': self.method,
+				'comment': cnd
+			}
+			tfr_ = mne.time_frequency.AverageTFR(inst=tfr_dict)
 
-			section = "Condition: " + cnd	
+			fig1 = tfr_.plot_joint(timefreqs = time_freqs, show=False)
+			report.add_figure(fig1,
+						title = '2D TFR & Topos (collapsed over electrodes)',
+						section = f'Condition: {cnd}')
 
-			#TODO: add section after update mne (so that cnd info is displayed)
-			report.add_figure(tfr_.plot_joint(timefreqs = time_freqs),
-						title = '2D TFR & Topos (collapsed over electrodes)')
-
-			report.add_figure(fig=tfr_.plot(), 
+			fig2 = tfr_.plot(show=False)
+			report.add_figure(fig=fig2, 
 						title="Individual electrodes", 
-						caption=tfr['ch_names'])
+						caption=tfr['ch_names'],
+						section=f'Condition: {cnd}')
+			# Close all figures to prevent accumulation
+			plt.close('all')
 							
-		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', overwrite=True)
+		report.save(report_name.rsplit( ".", 1 )[ 0 ]+ '.html', 
+			  		open_browser = False, overwrite=True)
 
 	def compute_tfrs(
 		self, 
@@ -964,7 +1057,7 @@ class TFR(FolderStructure):
 			counter = c + 1 
 			print(f'Decomposing condition {counter}: {cnd} \n')
 			# set tfr name
-			tfr_name = f'sub_{self.sj}_{cnd}_{name}'
+			tfr_name = f'sub_{self.sj}_{name}'
 
 			# slice condition trials
 			if cnd == 'all_data':
@@ -1147,15 +1240,20 @@ class TFR(FolderStructure):
 			# change data into mne format (..., n_ch, n_freq, n_time)
 			x = np.swapaxes(x, 0, 1) if x.ndim == 3 else np.swapaxes(x, 1, 2)
 				
-			# create mne object
-			tfr_ = mne.time_frequency.AverageTFR(epochs.info,x,times,self.frex,
-				       						tfr['cnd_cnt'][cnd], 
-											method = self.method,
-											comment = tfr['base'])
-			
-			# save TFR object
+			# Create AverageTFR from pre-computed data using dict interface
+			tfr_dict = {
+				'info': epochs.info,
+				'data': x,
+				'times': times,
+				'freqs': self.frex,
+				'nave': tfr['cnd_cnt'][cnd],
+				'method': self.method,
+				'comment': tfr['base']
+			}
+			tfr_ = mne.time_frequency.AverageTFR(inst=tfr_dict)
+			# save TFR object with condition in filename
 			f_name = self.folder_tracker(['tfr',self.method],
-								f'{tfr_name}-tfr.h5')
+								f'{tfr_name}_{cnd}-tfr.h5')								
 			tfr_.save(f_name, overwrite = True)	
 			
 	def baseline_tfr(self,tfr:dict,base:dict,method:str,

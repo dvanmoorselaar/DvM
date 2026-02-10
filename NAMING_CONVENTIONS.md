@@ -440,7 +440,7 @@ my_study/
 └── preprocessing/
     ├── report/
     └── group_info/
-        └── preproc_param_main.csv
+        └── preproc_param_main.json
 ```
 
 ### Python Usage Examples

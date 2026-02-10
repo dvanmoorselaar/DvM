@@ -1287,7 +1287,7 @@ class BDM(FolderStructure):
 
 		# limit epochs object to electrodes of interest
 		picks = select_electrodes(epochs, self.elec_oi)
-		epochs = epochs.pick_channels(np.array(epochs.ch_names)[picks])
+		epochs = epochs.pick(np.array(epochs.ch_names)[picks])
 
 		# apply filtering and downsampling (if specified)
 		if self._data_type == 'tfr':
@@ -2300,16 +2300,16 @@ class BDM(FolderStructure):
 
 		# Initialize data arrays with proper dimensions
 		if X.ndim == 3:  # [trials × channels × time]		
-			Xtr = np.zeros((self.nr_folds, np.product(train_tr.shape[-2:]), 
+			Xtr = np.zeros((self.nr_folds, np.prod(train_tr.shape[-2:]), 
 				   			X.shape[1],X.shape[2]))
-			Xte = np.zeros((self.nr_folds, np.product(test_tr.shape[-2:]), 
+			Xte = np.zeros((self.nr_folds, np.prod(test_tr.shape[-2:]), 
 				   			X.shape[1],X.shape[2]))
 		else:
 			Xtr = np.zeros((self.nr_folds, X.shape[0], 
-						np.product(train_tr.shape[-2:]), 
+						np.prod(train_tr.shape[-2:]), 
 						X.shape[2], X.shape[3]))
 			Xte = np.zeros((self.nr_folds, X.shape[0], 
-						np.product(test_tr.shape[-2:]), 
+						np.prod(test_tr.shape[-2:]), 
 						X.shape[2], X.shape[3]))			
 
 		# select data for each fold

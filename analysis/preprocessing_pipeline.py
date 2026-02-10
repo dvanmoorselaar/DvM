@@ -405,7 +405,7 @@ def eeg_preprocessing_pipeline(
     # save
     epochs.save_preprocessed(preproc_name)
     log_file = FS.folder_tracker(ext=['preprocessing', 'group_info'], 
-                     fname=f'preproc_param_{preproc_name}.csv')
+                     fname=f'preproc_param_{preproc_name}.json')
     to_update = dict(nr_clean=len(epochs), z_thresh=z_thresh, 
                     nr_bads=len(bads), bad_el=bads)
     log_preproc((sj, session), log_file, nr_sj=nr_sjs, 

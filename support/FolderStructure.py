@@ -414,7 +414,7 @@ class FolderStructure(object):
         if eye_dict is not None:
             file = FolderStructure().folder_tracker(
                             ext = ['preprocessing','group_info'],
-                            fname = f'preproc_param_{preproc_name}.csv')
+                            fname = f'preproc_param_{preproc_name}.json')
             # Check if the file exists before proceeding
             # Extract session number from fname (format: 'ses_XX_...')
             match = re.search(r'ses_(\d+)', fname)
@@ -734,7 +734,7 @@ class FolderStructure(object):
                 ]
 
             # read in actual data
-            tfr[cnd] = [mne.time_frequency.read_tfrs(file)[0] 
+            tfr[cnd] = [mne.time_frequency.read_tfrs(file) 
                                                         for file in files]
 
         return tfr

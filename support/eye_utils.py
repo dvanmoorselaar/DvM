@@ -24,6 +24,7 @@ Copyright (c) 2026 DvM. All rights reserved.
 """
 
 import os
+import json
 import warnings
 import numpy as np
 import pandas as pd
@@ -217,20 +218,53 @@ def exclude_eye(
         perc_eog = 'eog not used for exclusion'
 
     perc_eye = np.round(sum(tracker_bins >= 1)/ tracker_bins.size*100,1)
-    # if it exists update preprocessing information
-    if os.path.isfile(preproc_file):
-        print('Eye exclusion info saved in preprocessing '
-              f'file (session {session})')
-        idx = (sj, session)
-        preproc_df = pd.read_csv(preproc_file, index_col=[0,1],
-                                 on_bad_lines='skip')
-        preproc_df = preproc_df.sort_index()  
-        preproc_df.loc[idx,'% tracker'] = f'{perc_tracker}%' 
-        preproc_df.loc[idx,'% eog'] = f'{perc_eog}% (N = {nan_idx.size})'
-        preproc_df.loc[idx,'eye_excl'] = f'{perc_eye}%' 
-
-        # save datafile
-        preproc_df.to_csv(preproc_file)
+    
+    # Save eye exclusion information to preprocessing file
+    print('Eye exclusion info saved in preprocessing '
+          f'file (session {session})')
+    
+    # Create composite key for subject and session (ensure integers)
+    entry_key = f'subject_{int(sj):02d}_session_{int(session):02d}'
+    
+    # Load existing data or create new
+    try:
+        with open(preproc_file, 'r') as f:
+            preproc_data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        # File doesn't exist or is corrupted, start fresh
+        preproc_data = {}
+    
+    # Ensure entry key exists
+    if entry_key not in preproc_data:
+        preproc_data[entry_key] = {}
+    
+    # Extract numeric percentage from perc_tracker string if needed
+    if isinstance(perc_tracker, str):
+        tracker_val = float(perc_tracker.rstrip('%')) if '%' in perc_tracker \
+                      else float(perc_tracker)
+    else:
+        tracker_val = perc_tracker
+    
+    # Extract numeric values from eog string
+    if isinstance(perc_eog, str):
+        eog_val = float(perc_eog.split('%')[0]) if '%' in perc_eog \
+                  else float(perc_eog)
+    else:
+        eog_val = perc_eog
+    
+    # Extract numeric value from eye exclusion percentage
+    eye_excl_val = perc_eye
+    
+    # Update eye exclusion info
+    preproc_data[entry_key]['tracker_percentage'] = tracker_val
+    preproc_data[entry_key]['eog_percentage'] = eog_val
+    preproc_data[entry_key]['eog_trials_n'] = int(nan_idx.size)
+    preproc_data[entry_key]['eye_exclusion_percentage'] = eye_excl_val
+    
+    # Save to JSON
+    os.makedirs(os.path.dirname(preproc_file), exist_ok=True)
+    with open(preproc_file, 'w') as f:
+        json.dump(preproc_data, f, indent=4)
 
     # remove trials from behavior and eeg
     if 'level_0' not in df:

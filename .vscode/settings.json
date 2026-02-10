@@ -1,0 +1,6 @@
+{
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportInconsistentTabsAndSpaces": "none"
+    },
+    "editor.rulers": [72, 79]
+}
