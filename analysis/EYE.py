@@ -633,7 +633,7 @@ class EYE(FolderStructure):
             Time window (start, end) in ms for drift correction 
             analysis.If specified, shifts coordinates based on fixation 
             deviation from screen center. Only applied to trials with no 
-            saccadesduring this window. 
+            saccades during this window. 
             Default is None (no correction).
             
         Returns

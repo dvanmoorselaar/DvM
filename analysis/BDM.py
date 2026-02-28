@@ -1762,7 +1762,7 @@ class BDM(FolderStructure):
 		
 		>>> epochs.get_data().shape  # (8, 64, 240)
 		>>> bdm.tr_avg = 4
-		>>> epochs_avg, beh_avg = bdm.average_trials(epochs, beh, 
+		>>> epochs_avg, beh_avg = bdm.average_trials(epochs, df, 
 														['label'])
 		>>> epochs_avg.get_data().shape  # (2, 64, 240)
 
@@ -1770,7 +1770,7 @@ class BDM(FolderStructure):
 		
 		>>> epochs.get_data().shape  # (8, 64, 240) 
 		>>> bdm.tr_avg = 3
-		>>> epochs_avg, beh_avg = bdm.average_trials(epochs, beh, 
+		>>> epochs_avg, df_avg = bdm.average_trials(epochs, df, 
 		...													['label'])
 		>>> epochs_avg.get_data().shape  # (4, 64, 240)
 		
@@ -1795,16 +1795,24 @@ class BDM(FolderStructure):
 		# initiate condition and label list
 		cnds, labels, X = [], [], []
 
-		# slice beh
-		df = df.loc[:,[h for h in beh_headers if h is not None]]
-		if beh.shape[-1] == 1:
+		# slice beh and filter out None values from headers
+		no_condition_specified = None in beh_headers 
+		beh_headers = [h for h in beh_headers if h is not None]
+		df = df.loc[:,beh_headers]
+		
+		# If cnd_header was originally None, add placeholder 'condition' column
+		if no_condition_specified:
 			cnd_header = 'condition'
 			df['condition'] = 'all_data'
+			# Insert 'condition' after to_decode
+			beh_headers.insert(1, 'condition')
 		else:
 			cnd_header = beh_headers[1]	
-			if df.shape[-1] == 3:
-				split_header = beh_headers[-1]
-				split = []
+		
+		# Check for split factor (3rd header) in both cases
+		if len(beh_headers) == 3:
+			split_header = beh_headers[-1]
+			split = []
 
 		# loop over each label and condition pair
 		options = dict(df.apply(lambda col: col.unique()))
@@ -2042,6 +2050,48 @@ class BDM(FolderStructure):
 		N = self.nr_folds
 		nr_labels = np.unique(labels).size
 		steps = int(max_tr/N)
+
+		# Check if there are enough trials for cross-validation
+		if steps == 0:
+			suggestions = [
+				f"(1) Reduce nr_folds from {N} to a smaller value"
+			]
+			
+			# Add suggestion based on what user is actually using
+			# Check if averaging trials
+			avg_trials_val = (
+				self.avg_trials[-1] 
+				if isinstance(self.avg_trials, list) 
+				else self.avg_trials
+			)
+			if avg_trials_val > 1:
+				msg = (
+					f"(2) Reduce avg_trials from {avg_trials_val} "
+					f"to average fewer trials"
+				)
+				suggestions.append(msg)
+			else:
+				msg = (
+					"(2) Use fewer subsets in split_fact if you are "
+					"splitting data into many subsets"
+				)
+				suggestions.append(msg)
+			
+			suggestion_str = ", or ".join(suggestions)
+			# Count trials per class
+			unique_labels = np.unique(labels)
+			trials_per_class = [
+				np.sum(labels == label) for label in unique_labels
+			]
+			min_trials_per_class = min(trials_per_class)
+			error_msg = (
+				f"Not enough trials for {N}-fold cross-validation.\n"
+				f"  Trials available per class: {min_trials_per_class}\n"
+				f"  Trials used for splitting: {max_tr}\n"
+				f"  Minimum required per fold: {N}\n"
+				f"  Suggestion: {suggestion_str}"
+			)
+			raise ValueError(error_msg)
 
 		# select final sample for BDM and store those trials in 
 		# dict so that they can be saved
