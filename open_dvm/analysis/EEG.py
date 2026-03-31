@@ -101,8 +101,8 @@ def flush_input():
         try:
             from termios import tcflush, TCIFLUSH
             tcflush(sys.stdin, TCIFLUSH)
-        except ImportError:
-            pass  # Fallback: do nothing if termios unavailable
+        except Exception:
+            pass  # Fallback: do nothing if termios unavailable or not a real terminal
     elif system == 'Windows':
         try:
             import msvcrt
