@@ -46,12 +46,12 @@ from IPython import embed
 from contextlib import redirect_stdout
 
 from typing import List, Optional, Union, Tuple
-from support.preprocessing_utils import (
+from open_dvm.support.preprocessing_utils import (
     match_epochs_times,
     trial_exclusion,
-    format_subject_id
+    format_subject_id,
 )
-from support.eye_utils import exclude_eye
+from open_dvm.support.eye_utils import exclude_eye
 
 def blockPrinting(func):
     """Decorator to suppress console output during function execution.

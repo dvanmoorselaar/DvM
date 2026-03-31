@@ -55,7 +55,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from typing import Optional, Generic, Union, Tuple, Any, List
-from support.FolderStructure import FolderStructure
+from open_dvm.support.FolderStructure import FolderStructure
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import LinearSVC
@@ -63,12 +63,15 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, confusion_matrix
-from support.preprocessing_utils import (
-	select_electrodes, trial_exclusion, get_time_slice, format_subject_id
+from open_dvm.support.preprocessing_utils import (
+    select_electrodes,
+    trial_exclusion,
+    get_time_slice,
+    format_subject_id,
 )
 from scipy.stats import rankdata
-from analysis.TFR import TFR
-from visualization.plot import plot_bdm_timecourse
+from open_dvm.analysis.TFR import TFR
+from open_dvm.visualization.plot import plot_bdm_timecourse
 from IPython import embed
 import warnings
 

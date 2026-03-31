@@ -43,7 +43,11 @@ import os.path
 
 import numpy
 
-from pygazeanalyser.detectors import blink_detection, fixation_detection, saccade_detection
+from open_dvm.pygazeanalyser.detectors import (
+    blink_detection,
+    fixation_detection,
+    saccade_detection,
+)
 from IPython import embed
 
 def read_eyetribe(filename, start, stop=None, missing=0.0, debug=False):

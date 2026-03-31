@@ -65,9 +65,13 @@ from IPython import embed
 from scipy.fftpack import fft, ifft
 from scipy.signal import butter, lfilter, freqz
 from sklearn.metrics import auc
-from support.FolderStructure import *
-from support.preprocessing_utils import (select_electrodes,trial_exclusion,
-                                        get_time_slice, format_subject_id)
+from open_dvm.support.FolderStructure import *
+from open_dvm.support.preprocessing_utils import (
+    select_electrodes,
+    trial_exclusion,
+    get_time_slice,
+    format_subject_id,
+)
 
 class ERP(FolderStructure):
     """

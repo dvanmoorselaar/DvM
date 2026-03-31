@@ -1,2 +1,31 @@
+# OS and IDE
 .DS_Store
+._*
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+__pycache__/
+.Python
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Analysis outputs and data (suggested - uncomment if needed)
+# /eeg/
+# /behavioral/
+# /eye/

@@ -59,17 +59,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from typing import Optional, Generic, Union, Tuple, Any
-from analysis.BDM import *  
-from support.FolderStructure import *
+from open_dvm.analysis.BDM import *  
+from open_dvm.support.FolderStructure import *
 from matplotlib import cm
 from math import pi, sqrt
 from mne.filter import filter_data
 from scipy.signal import hilbert
 from scipy.optimize import curve_fit
-from visualization.plot import plot_ctf_timecourse
+from open_dvm.visualization.plot import plot_ctf_timecourse
 
-from support.preprocessing_utils import select_electrodes, trial_exclusion, \
-							get_time_slice,baseline_correction, format_subject_id 
+from open_dvm.support.preprocessing_utils import (
+    select_electrodes,
+    trial_exclusion,
+    get_time_slice,
+    baseline_correction,
+    format_subject_id,
+) 
 from IPython import embed
 
 class CTF(BDM):

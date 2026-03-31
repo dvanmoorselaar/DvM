@@ -38,9 +38,13 @@ Copyright (c) 2021 DvM. All rights reserved.
 
 from typing import Optional
 
-from analysis.EEG import *
-from support.FolderStructure import FolderStructure as FS
-from support.preprocessing_utils import log_preproc, format_subject_id, find_raw_files
+from open_dvm.analysis.EEG import *
+from open_dvm.support.FolderStructure import FolderStructure as FS
+from open_dvm.support.preprocessing_utils import (
+    log_preproc,
+    format_subject_id,
+    find_raw_files,
+)
 
 def eeg_preprocessing_pipeline(
     sj: int,

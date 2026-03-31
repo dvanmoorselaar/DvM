@@ -10,11 +10,22 @@ import matplotlib.ticker as ticker
 from scipy import stats
 from scipy.signal import savgol_filter
 from scipy.ndimage.filters import gaussian_filter
-from analysis.ERP import *
-from stats.stats_utils import bootstrap_SE, perform_stats
-from typing import Optional, Generic, Union, Tuple, Any, List, Dict
-from support.preprocessing_utils import get_time_slice, get_diff_pairs
-from visualization.visuals import MidpointNormalize
+from open_dvm.analysis.ERP import *
+from open_dvm.stats.stats_utils import bootstrap_SE, perform_stats
+from typing import (
+    Optional,
+    Generic,
+    Union,
+    Tuple,
+    Any,
+    List,
+    Dict,
+)
+from open_dvm.support.preprocessing_utils import (
+    get_time_slice,
+    get_diff_pairs,
+)
+from open_dvm.visualization.visuals import MidpointNormalize
 
 # set general plotting parameters
 # inspired by http://nipunbatra.github.io/2014/08/latexify/
@@ -235,7 +246,7 @@ def plot_2d(Z:np.array,x_val:np.array=None,
 	>>> plt.ylabel('Frequency (Hz)')
 	
 	>>> # With statistical masking
-	>>> from stats.stats_utils import perform_stats
+	>>> from open_dvm.stats.stats_utils import perform_stats
 	>>> tfr_subjects = np.random.randn(20, 8, 300)
 	>>> # subjects x freqs x times
 	>>> _, sig_mask, _ = perform_stats(tfr_subjects, stats='ttest')

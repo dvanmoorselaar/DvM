@@ -75,11 +75,14 @@ from mne.io import BaseRaw
 
 from typing import Dict, List, Optional, Union, Tuple, Any
 from autoreject import get_rejection_threshold
-from support.preprocessing_utils import format_subject_id
-from analysis.EYE import *
+from open_dvm.support.preprocessing_utils import (
+    format_subject_id,
+    get_time_slice,
+    trial_exclusion,
+)
+from open_dvm.analysis.EYE import *
 from math import sqrt, ceil, floor
-from support.preprocessing_utils import get_time_slice, trial_exclusion
-from support.FolderStructure import *
+from open_dvm.support.FolderStructure import *
 from mne.viz.epochs import plot_epochs_image
 from mne.filter import filter_data
 from mne.preprocessing import ICA

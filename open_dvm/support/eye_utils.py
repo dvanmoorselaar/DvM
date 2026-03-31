@@ -33,7 +33,7 @@ from contextlib import redirect_stdout
 from numpy.lib.npyio import NpzFile
 from typing import Tuple, Optional
 from IPython import embed
-from support.preprocessing_utils import get_time_slice
+from open_dvm.support.preprocessing_utils import get_time_slice
 
 
 def exclude_eye(
@@ -174,7 +174,7 @@ def exclude_eye(
                 times = epochs.times[window_idx]
                 sfreq = epochs.info['sfreq']
 
-            from analysis.EYE import EYE
+            from open_dvm.analysis import EYE
             EO = EYE(sfreq = sfreq,
                     viewing_dist = eye_dict['viewing_dist'],
                     screen_res = eye_dict['screen_res'],

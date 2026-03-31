@@ -75,10 +75,13 @@ from math import degrees, atan2, floor, ceil
 from typing import Optional, Tuple, Union
 from numpy.lib.npyio import NpzFile
 from scipy.signal import savgol_filter
-from support.preprocessing_utils import get_time_slice, format_subject_id
-from support.FolderStructure import *
-from pygazeanalyser.edfreader import *
-from pygazeanalyser.eyetribereader import *
+from open_dvm.support.preprocessing_utils import (
+    get_time_slice,
+    format_subject_id,
+)
+from open_dvm.support.FolderStructure import *
+from open_dvm.pygazeanalyser.edfreader import *
+from open_dvm.pygazeanalyser.eyetribereader import *
 
 class EYE(FolderStructure):
     """

@@ -71,11 +71,11 @@ from mne.filter import filter_data
 from mne.time_frequency import tfr_array_morlet
 from mne.baseline import rescale
 from scipy.signal import hilbert
-from numpy.fft import fft, ifft,rfft, irfft
+from numpy.fft import fft, ifft, rfft, irfft
 
-from analysis.ERP import ERP
-from support.FolderStructure import *
-from support.preprocessing_utils import *
+from open_dvm.analysis.ERP import ERP
+from open_dvm.support.FolderStructure import *
+from open_dvm.support.preprocessing_utils import *
 from IPython import embed
 
 
