@@ -240,15 +240,25 @@ def exclude_eye(
     
     # Extract numeric percentage from perc_tracker string if needed
     if isinstance(perc_tracker, str):
-        tracker_val = float(perc_tracker.rstrip('%')) if '%' in perc_tracker \
-                      else float(perc_tracker)
+        try:
+            if '%' in perc_tracker:
+                tracker_val = float(perc_tracker.rstrip('%'))
+            else:
+                tracker_val = float(perc_tracker)
+        except ValueError:
+            tracker_val = None  # Handle non-numeric strings
     else:
         tracker_val = perc_tracker
     
     # Extract numeric values from eog string
     if isinstance(perc_eog, str):
-        eog_val = float(perc_eog.split('%')[0]) if '%' in perc_eog \
-                  else float(perc_eog)
+        try:
+            if '%' in perc_eog:
+                eog_val = float(perc_eog.split('%')[0])
+            else:
+                eog_val = float(perc_eog)
+        except ValueError:
+            eog_val = None  # Handle non-numeric strings
     else:
         eog_val = perc_eog
     
