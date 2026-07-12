@@ -854,7 +854,7 @@ class TFR(FolderStructure):
 		pos_labels: dict, 
 		cnds: dict = None, 
 		elec_oi: list = 'all', 
-		midline: dict = None, 
+		spatial_restriction: dict = None, 
 		topo_flip: dict = None, 
 		window_oi: tuple = None, 
 		excl_factor: dict = None, 
@@ -905,12 +905,11 @@ class TFR(FolderStructure):
 			- 'central': Central electrodes (motor, somatosensory 
 			   regions)
 			- list: Specific electrode names to select
-		midline : dict, optional
-			Trials with stimuli on the vertical midline for 
-			lateralization analysis. Dictionary specifying column name 
-			and values for midline trials, e.g., {'target_loc': [0]}. 
-			These trials are typically excluded from lateralization 
-			comparisons. Default is None.
+		spatial_restriction : dict, optional
+			Spatial position restriction filter for secondary stimuli. 
+			Dictionary specifying column name and position values, 
+			e.g., {'target_loc': [0]}. These trials are typically 
+			excluded from lateralization comparisons. Default is None.
 		topo_flip : dict, optional
 			Topography flipping specification for lateralization 
 			analysis. Dictionary mapping column name to condition 
@@ -1021,7 +1020,7 @@ class TFR(FolderStructure):
 		
 		# select trials of interest (e.g., lateralized stimuli)
 		if isinstance(pos_labels, dict):
-			idx = ERP.select_lateralization_idx(df, pos_labels, midline)
+			idx = ERP.select_lateralization_idx(df, pos_labels, spatial_restriction)
 		elif pos_labels is None:
 			idx = np.arange(len(df))
 		else:

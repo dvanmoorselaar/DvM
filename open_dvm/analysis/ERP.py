@@ -131,7 +131,7 @@ class ERP(FolderStructure):
                 RT_split=False, save=True)
         Create averaged ERP objects from epochs with optional 
         RT splitting.
-    condition_erps(pos_labels=None, cnds=None, midline=None, 
+    condition_erps(pos_labels=None, cnds=None, spatial_restriction=None, 
                    topo_flip=None, time_oi=None, excl_factor=None, 
                    RT_split=False, name='main')
         Generate condition-specific ERPs with flexible trial selection.
@@ -504,7 +504,7 @@ class ERP(FolderStructure):
         self, 
         pos_labels: Optional[dict] = None, 
         cnds: Optional[dict] = None, 
-        midline: Optional[dict] = None, 
+        spatial_restriction: Optional[dict] = None, 
         topo_flip: Optional[dict] = None, 
         time_oi: Optional[tuple] = None, 
         excl_factor: Optional[dict] = None, 
@@ -541,13 +541,24 @@ class ERP(FolderStructure):
             When None, creates single ERP collapsed across all selected 
             trials.Example: {'stimulus_type': ['standard', 'deviant']} 
             creates separate ERPs for standard and deviant stimuli.
-        midline : dict or None, default=None
-            Additional selection criteria for trials where other stimuli 
-            appear on the vertical midline. Useful for controlling 
-            distractor or non-target stimulus positions in lateralized 
-            designs. Format matches pos_labels and cnds.
-            Example: {'distractor_loc': [0]} limits analysis to trials 
-            where distractors appeared at central position.
+        spatial_restriction : dict or None, default=None
+            Spatial position restriction filter for secondary stimuli. 
+            This parameter restricts trials to only those where OTHER 
+            (non-primary) stimuli appear at specified positions. It is 
+            generic and position-label agnostic—works with any spatial 
+            encoding system. Key specifies behavioral column for 
+            secondary stimulus positions, value lists acceptable 
+            position labels. When multiple keys are provided, they are 
+            combined using AND logic (intersection)—trials must satisfy 
+            ALL key constraints. This enables experimental control without 
+            assuming specific position meanings. 
+            Example: {'distractor_loc': [0, 4, 8]} 
+            limits analysis to trials where distractors appeared at 
+            these positions, regardless of what 0, 4, 8 represent in 
+            your experimental design.
+            Example (multiple keys): {'dist1_loc': [0], 'dist2_loc': [4, 6]} 
+            limits analysis to trials where BOTH dist1_loc==0 AND 
+            dist2_loc in [4, 6].
         topo_flip : dict or None, default=None
             Topographic flipping criteria for lateralized analysis. 
             Key specifies behavioral column, value lists labels for 
@@ -637,12 +648,12 @@ class ERP(FolderStructure):
         ...     time_oi=(0.18, 0.28), name='N2pc_setsize'
         ... )
 
-        Complex lateralized design with distractor control:
+        Complex lateralized design with spatial restriction:
 
         >>> erp_analyzer.condition_erps(
         ...     pos_labels={'target_loc': [1, 3, 5, 7, 2, 4, 6, 8]},
         ...     cnds={'target_color': ['red', 'green']},
-        ...     midline={'distractor_loc': [0]},
+        ...     spatial_restriction={'distractor_loc': [0, 4, 8]},
         ...     topo_flip={'target_loc': [1, 3, 5, 7]},
         ...     excl_factor={'accuracy': ['error']},
         ...     RT_split=True, name='lateralized_attention'
@@ -662,7 +673,8 @@ class ERP(FolderStructure):
         
         # select trials of interest (e.g., lateralized stimuli)
         if isinstance(pos_labels, dict):
-            idx = ERP.select_lateralization_idx(df, pos_labels, midline)
+            idx = ERP.select_lateralization_idx(df, pos_labels, 
+                                                spatial_restriction)
         elif pos_labels is None:
             idx = np.arange(len(df))
         else:
@@ -697,7 +709,7 @@ class ERP(FolderStructure):
                                             erp_name, RT_split)
 
         if self.report:
-            self.generate_erp_report(evokeds,f'sub_{self.sj}_{name}'	)
+            self.generate_erp_report(evokeds,f'sub_{self.sj}_{name}')
 
     @staticmethod
     def flip_topography(
@@ -873,7 +885,7 @@ class ERP(FolderStructure):
     def select_lateralization_idx(
         df: pd.DataFrame, 
         pos_labels: dict, 
-        midline: Optional[dict] = None
+        spatial_restriction: Optional[dict] = None
     ) -> np.array:
         """
         Select trial indices for lateralized ERP analysis with optional 
@@ -907,14 +919,22 @@ class ERP(FolderStructure):
             non-lateralized position selection.
             Example: {'target_loc': [2, 4, 6, 8]} selects trials where 
             targets appeared at right visual field positions.
-        midline : dict or None, default=None
-            Additional spatial constraint for trials where other stimuli 
-            appear at midline positions. Key specifies behavioral column 
-            for secondary stimulus positions, value lists acceptable 
-            midline position labels. Used to control for distractor 
-            placement or enforce specific stimulus configurations.
-            Example: {'distractor_loc': [0]} limits selection to trials 
-            where distractors appeared at central fixation.
+        spatial_restriction : dict or None, default=None
+            Additional spatial constraint for trials where OTHER stimuli 
+            appear at specified positions. This is a generic, 
+            position-agnostic filter that works with any experimental 
+            design. Key specifies behavioral column for secondary 
+            stimulus positions, value lists acceptable position labels. 
+            Applied as an intersection filter with pos_labels (trials 
+            must satisfy BOTH criteria). When multiple keys are provided, 
+            they are combined using AND logic (intersection)—trials must 
+            satisfy ALL key constraints. Used to control for stimulus 
+            placement or enforce specific spatial configurations.
+            Example: {'distractor_loc': [0, 4, 8]} limits selection to 
+            trials where distractors appeared at positions 0, 4, or 8.
+            Example (multiple keys): {'dist1_loc': [0], 
+            'dist2_loc': [4]} limits selection to trials where BOTH 
+            dist1_loc==0 AND dist2_loc==4.
 
         Returns
         -------
@@ -929,8 +949,10 @@ class ERP(FolderStructure):
         Selection Logic:
         1. Extract position criteria from pos_labels dictionary
         2. Identify all trials matching position requirements
-        3. If midline specified, apply additional spatial constraints
-        4. Return intersection of position and midline criteria
+        3. If spatial_restriction specified, apply additional spatial
+          constraints
+        4. Return intersection of pos_labels and spatial_restriction 
+        criteria
 
         Spatial Position Systems:
         The method works with any spatial position encoding system 
@@ -941,10 +963,12 @@ class ERP(FolderStructure):
         - Custom encoding: any consistent position labeling scheme
 
         Multiple Constraint Handling:
-        When midline parameter is provided, the method applies 
-        intersection logic to ensure trials meet both primary position 
-        criteria and secondary midline constraints. This enables 
-        experimental control over stimulus configurations.
+        When spatial_restriction parameter is provided, the method
+        applies intersection logic to ensure trials meet both primary 
+        position criteria (pos_labels) and secondary spatial 
+        restrictions (spatial_restriction). This enables flexible 
+        experimental control over stimulus configurations without 
+        assuming what positions mean.
 
         Common Applications:
         - N2pc paradigms: Select lateral target trials with central 
@@ -963,12 +987,12 @@ class ERP(FolderStructure):
         ...     pos_labels={'target_position': [2, 4, 6, 8]}
         ... )
 
-        Complex selection with midline distractor control:
+        Complex selection with spatial restrictions:
 
         >>> controlled_trials = ERP.select_lateralization_idx(
         ...     behavioral_df,
         ...     pos_labels={'target_loc': [1, 3, 5, 7]},
-        ...     midline={'distractor_loc': [0]}
+        ...     spatial_restriction={'distractor_loc': [0, 4, 8]}
         ... )
 
         Memory paradigm with bilateral item selection:
@@ -976,16 +1000,16 @@ class ERP(FolderStructure):
         >>> memory_trials = ERP.select_lateralization_idx(
         ...     behavioral_df,
         ...     pos_labels={'memory_items': ['left', 'right']},
-        ...     midline={'central_cue': ['fixation']}
+        ...     spatial_restriction={'central_cue': ['fixation']}
         ... )
 
-        Multiple distractor positions with lateral targets:
+        Multiple spatial restrictions with lateral targets:
 
         >>> multi_constraint = ERP.select_lateralization_idx(
         ...     behavioral_df,
         ...     pos_labels={'target_side': [2, 8]},
-        ...     midline={'dist1_loc': [0], 'dist2_loc': [4, 6]}
-        ... )
+        ...     spatial_restriction={'dist1_loc': [0], 
+        ...                          'dist2_loc': [4, 6]})
 
         See Also
         --------
@@ -997,14 +1021,17 @@ class ERP(FolderStructure):
         (header, labels), = pos_labels.items()
         idx = np.hstack([np.where(df[header] == l)[0] for l in labels])
 
-        # limit to midline trials
-        if  midline is not  None:
-            idx_m = []
-            for key in midline.keys():
-                idx_m.append(np.hstack([np.where(df[key] == m)[0] 
-                                        for m in midline[key]]))
-            idx_m = np.hstack(idx_m)
-            idx = np.intersect1d(idx, idx_m)
+        # apply spatial restriction filter (AND logic between keys)
+        if  spatial_restriction is not  None:
+            idx_r = None
+            for key in spatial_restriction.keys():
+                key_idx = np.hstack([np.where(df[key] == r)[0] 
+                                    for r in spatial_restriction[key]])
+                if idx_r is None:
+                    idx_r = key_idx
+                else:
+                    idx_r = np.intersect1d(idx_r, key_idx)
+            idx = np.intersect1d(idx, idx_r)
 
         return idx
     
@@ -1861,9 +1888,13 @@ class ERP(FolderStructure):
             if type(erps) == dict:
                 x1 = ERP.select_waveform(erps[pair[0]], elec_oi)[:,window_idx]
                 x2 = ERP.select_waveform(erps[pair[1]], elec_oi)[:,window_idx]
+                cnd1_name = pair[0]
+                cnd2_name = pair[1]
             elif type(erps) == list:
                 x1 = erps[0][:,window_idx]
-                x2 = erps[1][:,window_idx]   
+                x2 = erps[1][:,window_idx]
+                cnd1_name = 'waveform1'
+                cnd2_name = 'waveform2'
 
             if phase == 'offset':
                 x1 = np.fliplr(x1)
@@ -1878,7 +1909,8 @@ class ERP(FolderStructure):
                 x2 *= -1
                 
             (d_latency, 
-            t) = ERP.jackknife_contrast(x1,x2,times_oi,percent_amp)
+            t) = ERP.jackknife_contrast(x1,x2,times_oi,percent_amp,
+                                        cnd1_name, cnd2_name)
 
             if len(pairs) == 1:
                 return (d_latency, t)
@@ -1892,7 +1924,9 @@ class ERP(FolderStructure):
         x1: np.ndarray, 
         x2: np.ndarray, 
         times: np.ndarray, 
-        percent_amp: int
+        percent_amp: int,
+        cnd1_name: str = 'waveform1',
+        cnd2_name: str = 'waveform2'
     ) -> Tuple[float, float]:
         """
         Perform jackknife-based latency contrast between ERP waveforms.
@@ -1913,6 +1947,10 @@ class ERP(FolderStructure):
         percent_amp : int
             Percentage of peak amplitude for latency threshold 
             calculation.
+        cnd1_name : str, optional
+            Name of condition 1 for output printing. Default is 'waveform1'.
+        cnd2_name : str, optional
+            Name of condition 2 for output printing. Default is 'waveform2'.
 
         Returns
         -------
@@ -1962,7 +2000,8 @@ class ERP(FolderStructure):
         c2 = max(x2_) * percent_amp/100.0 
 
         try:
-            d_latency = ERP.jack_latency_contrast(x1_,x2_,c1,c2,times,True)
+            d_latency = ERP.jack_latency_contrast(x1_,x2_,c1,c2,times,True,
+                                                   cnd1_name, cnd2_name)
         except ValueError as e:
             raise ValueError(f"Error in grand mean latency calculation: {e}")
 
@@ -2003,7 +2042,9 @@ class ERP(FolderStructure):
         c1: float, 
         c2: float, 
         times: np.ndarray, 
-        print_output: bool = False
+        print_output: bool = False,
+        cnd1_name: str = 'waveform1',
+        cnd2_name: str = 'waveform2'
     ) -> float:
         """
         Calculate latency difference at specified amplitude thresholds.
@@ -2028,6 +2069,10 @@ class ERP(FolderStructure):
         print_output : bool, optional
             Whether to print the estimated latencies for both 
             conditions. Default is False.
+        cnd1_name : str, optional
+            Name of condition 1 for output printing. Default is 'waveform1'.
+        cnd2_name : str, optional
+            Name of condition 2 for output printing. Default is 'waveform2'.
 
         Returns
         -------
@@ -2090,8 +2135,8 @@ class ERP(FolderStructure):
 
         d_latency = lat_2 - lat_1
         if print_output:
-            print(f'Estimated onset latency waveform1 = {lat_1:.2f}'
-                f' and waveform2 = {lat_2:.2f}')	
+            print(f'Estimated onset latency {cnd1_name} = {lat_1:.2f}'
+                f' and {cnd2_name} = {lat_2:.2f}')	
 
         return d_latency   
 
@@ -2198,7 +2243,7 @@ class ERP(FolderStructure):
           
     def residual_eye(self, left_info: dict = None, right_info: dict = None,
                     ch_oi: list = ['HEOG'], cnds: dict = None,
-                    midline: dict = None, window_oi: tuple = None,
+                    spatial_restriction: dict = None, window_oi: tuple = None,
                     excl_factor: dict = None, name: str = 'resid_eye'):
         """
         Calculate residual eye movement activity for lateralized designs.
@@ -2223,8 +2268,9 @@ class ERP(FolderStructure):
         cnds : dict, optional
             Dictionary specifying conditions for separate analysis. 
             Default is None.
-        midline : dict, optional
-            Dictionary specifying midline stimulus criteria to limit 
+        spatial_restriction : dict, optional
+            Spatial position restriction filter for secondary stimuli. 
+            Dictionary specifying stimulus position criteria to limit 
             trial selection. Default is None.
         window_oi : tuple, optional
             Time window of interest (start, end) in seconds. If None, 
@@ -2274,9 +2320,11 @@ class ERP(FolderStructure):
 
         # split left and right trials
         if left_info is not None:
-            idx_l = self.select_lateralization_idx(beh, left_info, midline)
+            idx_l = self.select_lateralization_idx(beh, left_info, 
+                                                   spatial_restriction)
         if right_info is not None:
-            idx_r = self.select_lateralization_idx(beh, right_info, midline)            
+            idx_r = self.select_lateralization_idx(beh, right_info, 
+                                                   spatial_restriction)            
 
        # loop over all conditions
         if cnds is None:

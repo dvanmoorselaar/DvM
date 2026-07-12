@@ -367,7 +367,9 @@ class EYE(FolderStructure):
         else: 
             np.hstack(trial_info)
         # filthy hack to deal with missing events
-        if np.where(np.isnan(trial_info))[0].size > 0:
+        if np.all(np.isnan(trial_info)):
+            trial_info = np.arange(eye.shape[0])
+        elif np.where(np.isnan(trial_info))[0].size > 0:
             for idx in np.where(np.isnan(trial_info))[0]:
                 trial_info[idx] = trial_info[np.array((idx-1,idx+1))].mean()
 
