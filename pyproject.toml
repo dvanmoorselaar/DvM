@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-dvm"
+version = "0.1.0"
+description = "Open Decoding Visual Mind: A comprehensive toolkit for analyzing ERP and eye-tracking data in cognitive neuroscience research"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "DVM Development Team"}
+]
+requires-python = ">=3.8"
+
+dependencies = [
+    "numpy>=1.19.0",
+    "pandas>=1.1.0",
+    "scipy>=1.5.0",
+    "scikit-learn>=0.23.0",
+    "mne>=0.23.0",
+    "matplotlib>=3.0.0",
+    "IPython>=7.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.10",
+    "pytest-xdist>=2.0",
+    "black>=21.0",
+    "flake8>=3.9",
+    "isort>=5.0",
+    "mypy>=0.900",
+]
+
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme>=1.0",
+    "sphinx-autodoc-typehints>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/open-dvm"
+Documentation = "https://open-dvm.readthedocs.io"
+Repository = "https://github.com/yourusername/open-dvm"
+Issues = "https://github.com/yourusername/open-dvm/issues"
+
+[tool.setuptools]
+packages = ["open_dvm", "open_dvm.analysis", "open_dvm.support", "open_dvm.stats", "open_dvm.visualization", "open_dvm.pygazeanalyser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+]
+
+[tool.coverage.run]
+source = ["open_dvm"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
