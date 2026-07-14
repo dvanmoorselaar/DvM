@@ -488,7 +488,7 @@ class BDM(FolderStructure):
 			weights = clf.coef_[0]
 		elif hasattr(clf, 'calibrated_classifiers_'):
 			# For CalibratedClassifierCV (SVM)
-			base_clf = clf.calibrated_classifiers_[0].base_estimator
+			base_clf = clf.calibrated_classifiers_[0].estimator
 			weights = base_clf.coef_[0]
 		else:
 			weights = np.zeros(Xtr_.shape[1])
@@ -1271,6 +1271,8 @@ class BDM(FolderStructure):
 				if excl_factor is None:
 					excl_factor = {}
 				excl_factor.setdefault(cnd_header, []).extend(to_exclude)
+				print(f"Automatically excluding {cnd_header}={to_exclude} "
+					  f"(not specified in cnds parameter)")
 
 		if excl_factor is not None:
 			df, epochs,_ = trial_exclusion(df, epochs, excl_factor)
