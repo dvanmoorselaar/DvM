@@ -52,9 +52,6 @@ Copyright (c) 2015 DvM. All rights reserved.
 
 import mne
 import os
-import logging
-import itertools
-import pickle
 import copy
 import glob
 import re
@@ -83,10 +80,9 @@ from open_dvm.support.preprocessing_utils import (
 from open_dvm.analysis.EYE import *
 from math import sqrt, ceil, floor
 from open_dvm.support.FolderStructure import *
-from mne.viz.epochs import plot_epochs_image
 from mne.filter import filter_data
 from mne.preprocessing import ICA
-from mne.preprocessing import create_eog_epochs, create_ecg_epochs
+from mne.preprocessing import create_eog_epochs
 from autoreject import Ransac, AutoReject
 
 def flush_input():
@@ -1278,13 +1274,27 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
                 idx_remove = np.arange(eeg_triggers.size)[nr_miss:]
                 nr_miss = 0
             else:
+                # excess EEG triggers are interleaved rather than trailing:
+                # walk forward on a scratch copy, removing the first
+                # mismatched EEG trigger one at a time (mirrors the
+                # nr_miss > 0 branch below), and record original indices
                 idx_remove = []
-
-            while nr_miss < 0:
-                # continue to remove EEG triggers until data files are lined up
-                for i, tr in enumerate(beh_triggers):
-                    if tr != eeg_triggers[i]:
-                        nr_miss += 1
+                working_triggers = eeg_triggers.copy()
+                working_positions = np.arange(eeg_triggers.size)
+                while nr_miss < 0:
+                    stop = True
+                    limit = min(working_triggers.size, beh_triggers.size)
+                    for i in range(limit):
+                        if working_triggers[i] != beh_triggers[i]:
+                            idx_remove.append(int(working_positions[i]))
+                            working_triggers = np.delete(working_triggers, i)
+                            working_positions = np.delete(working_positions, i)
+                            nr_miss += 1
+                            stop = False
+                            break
+                    if stop:
+                        break
+                idx_remove = np.array(idx_remove, dtype=int)
 
             self.drop(idx_remove)
             eeg_triggers = np.delete(eeg_triggers, idx_remove)
@@ -1485,7 +1495,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             hEOG = [ch for ch in hEOG if ch in self.ch_names] if hEOG else []
             
             if len(vEOG) > 0 or len(hEOG) > 0:
-                eog = self.copy().pick('eog')
+                eog = self.copy().pick(['eeg', 'eog'])
                 ch_names = eog.ch_names
                 
                 # Get indices for vertical and horizontal EOG channels
@@ -1857,73 +1867,6 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
                 )
 
 
-    def selectBadChannels(self, run_ransac = True, channel_plots=True, inspect=True, n_epochs=10, n_channels=32, RT = None):
-        '''
-
-        '''
-
-        logging.info('Start selection of bad channels')
-        #matplotlib.style.use('classic')
-
-        # select channels to display
-        picks = self.copy().pick('eeg', exclude='bads').ch_names
-        picks = [self.ch_names.index(ch) for ch in picks]
-
-        # plot epoched data
-        if channel_plots:
-
-            for ch in picks:
-                # plot evoked responses across channels
-                try:  # handle bug in mne for plotting undefined x, y coordinates
-                    plot_epochs_image(self.copy().crop(self.tmin + self.flt_pad,self.tmax - self.flt_pad), ch, show=False, overlay_times = RT)
-                    plt.savefig(self.FolderTracker(extension=[
-                                'preprocessing', 'subject-{}'.format(self.sj), self.session, 'channel_erps'], filename='{}.pdf'.format(self.ch_names[ch])))
-                    plt.close()
-
-                except:
-                    plt.savefig(self.FolderTracker(extension=[
-                                'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='{}.pdf'.format(self.ch_names[ch])))
-                    plt.close()
-
-                self.plot_psd(picks = [ch], show = False)
-                plt.savefig(self.FolderTracker(extension=[
-                                'preprocessing', 'subject-{}'.format(self.sj), self.session,'channel_erps'], filename='_psd_{}'.format(self.ch_names[ch])))
-                plt.close()
-
-            # plot power spectra topoplot to detect any clear bad electrodes
-            self.plot_psd_topomap(bands=[(0, 4, 'Delta'), (4, 8, 'Theta'), (8, 12, 'Alpha'), (
-                12, 30, 'Beta'), (30, 45, 'Gamma'), (45, 100, 'High')], show=False)
-            plt.savefig(self.FolderTracker(extension=[
-                        'preprocessing', 'subject-{}'.format(self.sj), self.session], filename='psd_topomap.pdf'))
-            plt.close()
-
-        if run_ransac:
-            self.applyRansac()
-
-        if inspect:
-            # display raw eeg with 50mV range
-            self.plot(block=True, n_epochs=n_epochs,
-                      n_channels=n_channels, picks=picks, scalings=dict(eeg=50))
-
-            if self.info['bads'] != []:
-                with open(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj),
-                	self.session], filename='marked_bads.txt'), 'wb') as handle:
-                    pickle.dump(self.info['bads'], handle)
-
-        else:
-            try:
-                with open(self.FolderTracker(extension=['preprocessing', 'subject-{}'.format(self.sj),
-                	self.session], filename='marked_bads.txt'), 'rb') as handle:
-                    self.info['bads'] = pickle.load(handle)
-
-                print('The following channals were read in as bads from a txt file: {}'.format(
-                    self.info['bads']))
-            except:
-                print('No bad channels selected')
-
-        logging.info('{} channels marked as bad: {}'.format(
-            len(self.info['bads']), self.info['bads']))
-
     def baseline_by_condition(
         self,
         df: pd.DataFrame,
@@ -1941,13 +1884,13 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
 
         Parameters
         ----------
-        beh : pd.DataFrame
+        df : pd.DataFrame
             Behavioral data with condition labels for each epoch.
         cnds : list
-            List of condition values to process. Must exist in 
-            beh[cnd_header].
+            List of condition values to process. Must exist in
+            df[cnd_header].
         cnd_header : str
-            Column name in beh DataFrame containing condition labels.
+            Column name in df DataFrame containing condition labels.
         base_period : tuple, default=(-0.1, 0)
             Baseline time window in seconds (start, end).
         nr_elec : int, default=64
@@ -1983,7 +1926,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         --------
         >>> # Apply -100 to 0ms baseline per condition
         >>> epochs.baseline_by_condition(
-        ...     beh=beh,
+        ...     df=beh,
         ...     cnds=['cue_left', 'cue_right'],
         ...     cnd_header='condition',
         ...     base_period=(-0.1, 0)
@@ -2006,8 +1949,9 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             # Get base_mean (per electrode)
             X_base = X[:, :, start:end].mean(axis=(0, 2))
 
-            # Do baselining per electrode
-            for i in range(nr_elec):
+            # Do baselining per electrode (X.shape[1] <= nr_elec: numpy
+            # slicing above already clips to however many channels exist)
+            for i in range(X.shape[1]):
                 X[:, i, :] -= X_base[i]
 
             self._data[idx, :nr_elec] = X
@@ -2016,7 +1960,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
 
     def shift_by_condition(
         self,
-        beh: pd.DataFrame,
+        df: pd.DataFrame,
         cnd_info: dict,
         cnd_header: str
     ) -> 'Epochs':
@@ -2032,11 +1976,11 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         df : pd.DataFrame
             Behavioral data with condition labels.
         cnd_info : dict
-            Dictionary mapping condition values to shift amounts in 
-            seconds. Positive values shift forward (delay), negative 
+            Dictionary mapping condition values to shift amounts in
+            seconds. Positive values shift forward (delay), negative
             shift backward. Example: {'fast': -0.1, 'slow': 0.1}
         cnd_header : str
-            Column name in beh containing condition labels (keys from 
+            Column name in df containing condition labels (keys from
             cnd_info).
 
         Returns
@@ -2075,7 +2019,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         --------
         >>> # Shift slow trials backward by 100ms, fast forward by 100ms
         >>> epochs.shift_by_condition(
-        ...     beh=beh,
+        ...     df=beh,
         ...     cnd_info={'slow': -0.1, 'fast': 0.1},
         ...     cnd_header='rt_bin'
         ... )
@@ -2097,8 +2041,8 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         for cnd in cnd_info.keys():
             # Set how much data needs to be shifted
             to_shift = cnd_info[cnd]
-            to_shift = int(np.diff([np.argmin(abs(self.times - t)) 
-                                   for t in (0, to_shift)]))
+            to_shift = int(np.diff([np.argmin(abs(self.times - t))
+                                   for t in (0, to_shift)])[0])
             
             if to_shift < 0:
                 print(f'EEG data is shifted backward in time for all '
@@ -2108,7 +2052,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
                       f'{cnd} trials')
 
             # Find indices of epochs to shift
-            mask = (beh[cnd_header] == cnd).values
+            mask = (df[cnd_header] == cnd).values
 
             # Do actual shifting
             self._data[mask] = np.roll(self._data[mask], to_shift, axis=2)
@@ -2241,9 +2185,6 @@ class ArtefactReject(object):
         eog_inds,
         eog_scores) = self.automated_ica_blink_selection(ica, raw, threshold)
         ica.exclude = [eog_inds[0]] if len(eog_inds) > 0 else []
-        exclude_prev = [eog_inds[0]] if len(eog_inds) > 0 else []
-        manual_correct = True
-        cnt = 0
         ica_added = False  # Track whether ICA has been added to report
 
         while True:
@@ -2279,7 +2220,6 @@ class ArtefactReject(object):
                 break
             else:
                 # User wants to manually select components
-                exclude_prev = ica.exclude
                 eog_inds = []
                 nr_comp = input(
                     'How many components do you want to select (<10)? '
@@ -2439,8 +2379,8 @@ class ArtefactReject(object):
         ... )
         >>> print(f'Found {len(inds)} blink components')
         """
-        ch_names = raw.copy().pick('eog').ch_names
-        pick_eog = np.array([raw.ch_names.index(ch) for ch in ch_names])
+        pick_eog = mne.pick_types(raw.info, eog=True)
+        ch_names = [raw.ch_names[i] for i in pick_eog]
 
         if pick_eog.size > 0:
             # create blink epochs
@@ -2465,75 +2405,6 @@ class ArtefactReject(object):
             )
 
         return eog_epochs, eog_inds, eog_scores
-
-    def manual_check_ica(
-        self,
-        ica: ICA,
-        sj: int,
-        session: int
-    ) -> ICA:
-        """
-        Allow manual verification and override of ICA component 
-        selection.
-
-        Prompts user via terminal to confirm or override automatically 
-        detected ICA components. User can specify custom component 
-        indices to exclude.
-
-        Parameters
-        ----------
-        ica : mne.preprocessing.ICA
-            ICA object with automatically selected components in 
-            ica.exclude.
-        sj : int
-            Subject number for display in prompts.
-        session : int
-            Session number for display in prompts.
-
-        Returns
-        -------
-        ica : mne.preprocessing.ICA
-            ICA object with potentially updated exclude list based on 
-            user input.
-
-        Notes
-        -----
-        - Clears input buffer before prompting to avoid stale input
-        - User should inspect ICA report before responding
-        - If user disagrees, prompts for number of components and their 
-          indices
-        - Component indices are 0-based
-
-        Examples
-        --------
-        >>> ar = ArtefactReject()
-        >>> ica = ar.fit_ICA(epochs)
-        >>> ica.exclude = [0, 5]  # Automatically detected
-        >>> ica = ar.manual_check_ica(ica, sj=1, session=1)
-        # User prompted: "Advanced detection selected component(s) 
-        # [0, 5]. Do you agree (y/n)?"
-        """
-        time.sleep(5)
-        flush_input()
-        print(f'You are preprocessing subject {sj}, session {session}')
-        # Format excluded components as a clean list (convert numpy types)
-        excl_list = [int(x) for x in ica.exclude] if ica.exclude else []
-        conf = input(
-            f'Advanced detection selected component(s) {excl_list} '
-            '(see report). Do you agree (y/n)? '
-        )
-        if conf == 'n':
-            eog_inds = []
-            nr_comp = input(
-                'How many components do you want to select (<10)? '
-            )
-            for i in range(int(nr_comp)):
-                eog_inds.append(
-                    int(input(f'What is component nr {i + 1}? '))
-                )
-            ica.exclude = eog_inds
-
-        return ica
 
     def apply_ICA(
         self,
@@ -2583,7 +2454,7 @@ class ArtefactReject(object):
         session: int,
         drop_bads: bool,
         z_thresh: float = 4.0,
-        band_pass: List[int] = [110, 140],
+        band_pass: Optional[List[int]] = None,
         report: Optional[mne.Report] = None
     ) -> Tuple[mne.Epochs, float, Optional[mne.Report]]:
         """
@@ -2665,10 +2536,12 @@ class ArtefactReject(object):
         ... )
         >>> bad_count = epochs_clean.metadata['bad_epochs'].sum()
         """
+        if band_pass is None:
+            band_pass = [110, 140]
 
         # z score data (after hilbert transform)
         (Z, elecs_z,
-        z_thresh, times) = self.preprocess_epochs(epochs, band_pass)
+        z_thresh, times) = self.preprocess_epochs(epochs, band_pass, z_thresh)
 
         # mark noise epochs
         noise_inf = self.mark_bads(Z,z_thresh,times)
@@ -2702,6 +2575,8 @@ class ArtefactReject(object):
                 np.savez(file,times = eye['times'], x = eye_x, y = eye_y, 
                         sfreq = eye['sfreq'])   
         else:
+            if epochs.metadata is None:
+                epochs.metadata = pd.DataFrame(index=range(len(epochs)))
             epochs.metadata.reset_index(inplace=True)
             epochs.metadata['bad_epochs'] = 0
             epochs.metadata.loc[
@@ -2719,7 +2594,8 @@ class ArtefactReject(object):
     def preprocess_epochs(
         self,
         epochs: mne.Epochs,
-        band_pass: List[int] = [110, 140]
+        band_pass: Optional[List[int]] = None,
+        z_thresh: Optional[float] = None
     ) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray]:
         """
         Preprocess epochs for artifact detection using FieldTrip method.
@@ -2733,9 +2609,13 @@ class ArtefactReject(object):
         epochs : mne.Epochs
             Epoched data to preprocess for artifact detection.
         band_pass : list of int, optional
-            [lower, upper] frequency bounds in Hz for bandpass filter. 
-            Upper bound is automatically adjusted if it exceeds Nyquist 
+            [lower, upper] frequency bounds in Hz for bandpass filter.
+            Upper bound is automatically adjusted if it exceeds Nyquist
             frequency. Default is [110, 140].
+        z_thresh : float, optional
+            Starting z-value threshold for artifact detection. If None,
+            uses self.z_thresh (set at ArtefactReject construction).
+            Default is None.
 
         Returns
         -------
@@ -2776,6 +2656,10 @@ class ArtefactReject(object):
         ... )
         >>> print(f'Threshold: {thresh:.2f}, Shape: {Z.shape}')
         """
+        if band_pass is None:
+            band_pass = [110, 140]
+        if z_thresh is None:
+            z_thresh = self.z_thresh
 
         # set params
         flt_pad = self.flt_pad
@@ -2811,7 +2695,7 @@ class ArtefactReject(object):
                 [tmin + flt_pad[0], tmax - flt_pad[1]]
             )
         Z, elecs_z, z_thresh = self.z_score_data(
-            X, self.z_thresh, mask, (self.filter_z, sfreq)
+            X, z_thresh, mask, (self.filter_z, sfreq)
         )
 
         # control for filter padding
@@ -3108,7 +2992,8 @@ class ArtefactReject(object):
             # mask noise samples
             noise_mask = abs(x) > z_thresh
             # get start and end point of continuous noise segments
-            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:]))
+            # (+1: point at the first noisy sample, not the sample before it)
+            starts = np.argwhere((~noise_mask[:-1] & noise_mask[1:])) + 1
             if noise_mask[0]:
                 starts = np.insert(starts, 0, 0)
             ends = np.argwhere((noise_mask[:-1] & ~noise_mask[1:])) + 1
@@ -3116,11 +3001,16 @@ class ArtefactReject(object):
             if starts.size > 0:
                 starts = np.hstack(starts)
                 if ends.size == 0:
-                    ends = np.array([times.size-1])
+                    # segment runs through the epoch's last sample: keep the
+                    # same exclusive "one past the last noisy sample"
+                    # convention used everywhere else (times.size), but the
+                    # end-time lookup below must stay within times' bounds
+                    ends = np.array([times.size])
                 else:
                     ends = np.hstack(ends)
                 ep_noise = [ep] + [
-                    (slice(s, e), times[s], times[e], abs(times[e] - times[s])) 
+                    (slice(s, e), times[s], times[min(e, times.size - 1)],
+                     abs(times[min(e, times.size - 1)] - times[s]))
                     for s, e in zip(starts, ends)
                 ]
                 noise_events.append(ep_noise)
@@ -3233,7 +3123,6 @@ class ArtefactReject(object):
         if mask is not None:
             Z_n[mask] = X_z[:, mask].sum(axis=0) / sqrt(nr_elec)
         if filter_z[0]:
-            print(Z_n.shape)
             Z_n = filter_data(
                 Z_n, filter_z[1], None, 4, pad='reflect_limited'
             )
