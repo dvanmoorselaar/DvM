@@ -936,18 +936,22 @@ class TFR(FolderStructure):
 
 		Returns
 		-------
-		None
-			This method does not return data directly. Instead, it saves 
-			condition-specific TFR results to disk in MNE-Python 
-			AverageTFR format. Files are saved in the TFR analysis 
-			directory with names following the pattern: 
-			'sj_{subject}_{name}_{condition}-tfr.h5'.
+		dict
+			Dictionary mapping condition names to mne.time_frequency.AverageTFR 
+			objects. Each object contains:
+			- data: Power array with shape (n_channels, n_frequencies, n_times)
+			- times: Time points (in seconds)
+			- freqs: Frequency array (in Hz)
+			- info: MNE Info object with channel information
+			- nave: Number of averaged epochs per condition
+			
+			Results are also saved to disk in MNE-compatible format.
 
 		Notes
 		-----
 		**Processing Pipeline:**
 		
-		1. **Data Selection**: Applies electrode selection,
+		1. **Data Selection**: Appliexs electrode selection,
 		   trial exclusion, and topography flipping as specified
 		2. **Lateralization**: If pos_labels provided, selects trials 
 		   based on stimulus positions for lateralization analysis
@@ -1035,6 +1039,10 @@ class TFR(FolderStructure):
 			s, e = self.baseline
 			base_idx = get_time_slice(times, s, e)
 		
+		# Use full epoch window if window_oi not specified
+		if window_oi is None:
+			window_oi = (times[0], times[-1])
+		
 		time_idx = np.where((times >= window_oi[0]) * 
 					  		(times <= window_oi[1]))[0] 
 		idx_2_save = np.array([idx for i, idx in enumerate(time_idx) if 
@@ -1105,8 +1113,11 @@ class TFR(FolderStructure):
 			self.generate_tfr_report(tfr,
 							epochs.info,f'sj_{self.sj}_{name}')
 
-		# save output
-		self.save_to_mne_format(tfr,epochs,tfr_name)
+		# save output and return as MNE AverageTFR objects
+		tfr_output = self.save_to_mne_format(tfr,epochs,tfr_name)
+		
+		# return computed TFR data as dictionary of MNE AverageTFR objects
+		return tfr_output
 
 	def tfr_loop(self, epochs: mne.Epochs) -> np.array:
 		"""
@@ -1219,6 +1230,13 @@ class TFR(FolderStructure):
 			Base filename for saved TFR files. Each condition will be 
 			saved as '{tfr_name}_{condition}-tfr.h5'.
 
+		Returns
+		-------
+		dict
+			Dictionary mapping condition names to mne.time_frequency.AverageTFR 
+			objects. Each object contains the condition-specific time-frequency 
+			power data in MNE format, ready for visualization and analysis.
+
 		Notes
 		-----
 		Files are saved in the project's TFR directory structure 
@@ -1231,7 +1249,8 @@ class TFR(FolderStructure):
 		"""
 
 		# set output parameters
-		times =tfr['times']
+		times = tfr['times']
+		tfr_output = {}
 
 		for cnd in tfr['power'].keys():
 			x = tfr['power'][cnd]
@@ -1250,10 +1269,17 @@ class TFR(FolderStructure):
 				'comment': tfr['base']
 			}
 			tfr_ = mne.time_frequency.AverageTFR(inst=tfr_dict)
+			
 			# save TFR object with condition in filename
 			f_name = self.folder_tracker(['tfr',self.method],
 								f'{tfr_name}_{cnd}-tfr.h5')								
-			tfr_.save(f_name, overwrite = True)	
+			tfr_.save(f_name, overwrite = True)
+			
+			# store in output dictionary
+			tfr_output[cnd] = tfr_
+		
+		# return dictionary of AverageTFR objects
+		return tfr_output	
 			
 	def baseline_tfr(self,tfr:dict,base:dict,method:str,
 		 			elec_oi:str='all') -> dict:
@@ -1435,6 +1461,10 @@ class TFR(FolderStructure):
 			base_power = np.repeat(base_power[...,np.newaxis],nr_time,axis=-1)
 		else:
 			raise ValueError('base_power should be either 2D or 3D array')
+		
+		# DEBUG: Print info about power and baseline during conversion
+		print(f"  [DEBUG db_convert] power shape: {power.shape}, mean: {power.mean():.6f}")
+		print(f"  [DEBUG db_convert] base_power shape: {base_power.shape}, mean: {base_power.mean():.6f}")
 		
 		norm_power = 10*(np.log10(power+1e-12)-np.log10(base_power+1e-12))
 

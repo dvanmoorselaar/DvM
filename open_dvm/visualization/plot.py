@@ -1097,6 +1097,17 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
     if isinstance(elec_oi[0],str): 
         elec_oi = [elec_oi]
 
+    # Normalize tfr dict: wrap single TFR objects in lists for consistent handling
+    # Create a copy to avoid modifying the input dict
+    tfr_normalized = {}
+    for cnd in cnds:
+        if not isinstance(tfr[cnd], list):
+            tfr_normalized[cnd] = [tfr[cnd]]
+        else:
+            tfr_normalized[cnd] = tfr[cnd]
+    
+    tfr = tfr_normalized  # Use normalized copy for processing
+
     times = tfr[cnds[0]][0].times
     # Convert times from seconds to milliseconds if needed
     time_diff = np.diff(times).mean()
@@ -1139,6 +1150,14 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
         else:
             labels = [f'{cnd} contra', f'{cnd} ipsi']
                 
+        # Determine colorbar label based on baseline correction
+        # Check if baseline correction was applied by examining the first TFR object's comment field
+        cbar_label = 'Power (au)'
+        if len(tfr[cnds[0]]) > 0 and hasattr(tfr[cnds[0]][0], 'comment'):
+            comment = tfr[cnds[0]][0].comment
+            if comment == 'baseline':
+                cbar_label = 'Power (dB)'
+        
         # set up timecourses to plot	
         if lateralized:
             y = [y[0] - y[1]]
@@ -1165,14 +1184,14 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
 
                     # Step 2: Overlay only significant data in color
                     plot_2d(y_, x_val=times, y_val=freqs, colorbar=True,
-                            cbar_label='Power (au)',
+                            cbar_label=cbar_label,
                             mask=sig_mask,  
                             mask_value=np.nan,  # Hide non-significant 
                             p_vals=p_vals, p_thresh=p_thresh,
                             diverging_cmap=divergence_cmap, **kwargs)
                 else:
                     plot_2d(y_, x_val=times, y_val=freqs, 
-                            cbar_label='Power (au)',colorbar=True,
+                            cbar_label=cbar_label,colorbar=True,
                             mask=None,mask_value=0, p_vals=p_vals, 
                             p_thresh=p_thresh,
                             diverging_cmap=divergence_cmap,**kwargs)
