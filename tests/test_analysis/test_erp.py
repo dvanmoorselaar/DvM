@@ -269,17 +269,21 @@ class TestCreateErps:
         df = pd.DataFrame({'RT': [100, 900, 200, 800]})
         return epochs, df, data
 
-    def test_idx_none_raises_typeerror(self):
-        """Regression/documentation test: create_erps does NOT support
-        idx=None despite the docstring saying "If None, all epochs are
-        averaged" -- df.iloc[None] raises. Callers must pass an explicit
-        index array (e.g. np.arange(len(df))) to average all trials.
-        """
-        epochs, df, _ = self._build_epochs_df()
+    def test_idx_none_averages_all_trials(self):
+        """idx=None should average all trials, per the docstring."""
+        epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        with pytest.raises(TypeError):
-            erp.create_erps(epochs, df, idx=None, erp_name='x', save=False)
+        evoked = erp.create_erps(epochs, df, idx=None, erp_name='x', save=False)
+
+        baseline_idx = epochs.times <= 0
+        manual = data.copy()
+        for t in range(len(df)):
+            manual[t] -= manual[t][:, baseline_idx].mean(axis=1, keepdims=True)
+        manual_avg = manual.mean(axis=0)
+
+        assert evoked.nave == len(df)
+        np.testing.assert_allclose(evoked.data, manual_avg, atol=1e-8)
 
     def test_averages_and_baseline_corrects_selected_trials(self):
         epochs, df, data = self._build_epochs_df()
@@ -588,6 +592,32 @@ class TestSelectErpWindow:
         assert len(window) == 3
         assert window[1] - window[0] == pytest.approx(0.02, abs=1e-6)
 
+    @pytest.mark.unit
+    def test_cnd_avg_accepts_flat_list_of_evoked(self, peaked_erps):
+        """Bug fix: cnd_avg previously crashed on list input
+        (`AttributeError: 'list' object has no attribute 'items'`) despite
+        the docstring documenting erps as 'dict or list'. A flat list has
+        no conditions, so it's just averaged directly."""
+        window = ERP.select_erp_window(
+            peaked_erps['cond1'], elec_oi=['Cz', 'Pz'], method='cnd_avg',
+            polarity='pos', window_size=0.02
+        )
+
+        assert window[2] == 'pos'
+        assert window[0] == pytest.approx(0.09, abs=1e-6)
+        assert window[1] == pytest.approx(0.11, abs=1e-6)
+
+    @pytest.mark.unit
+    def test_cnd_spc_rejects_flat_list_with_clear_error(self, peaked_erps):
+        """cnd_spc computes one window per condition, which is meaningless
+        for a flat list -- this should fail loudly and clearly rather than
+        with a cryptic AttributeError."""
+        with pytest.raises(TypeError, match="cnd_spc"):
+            ERP.select_erp_window(
+                peaked_erps['cond1'], elec_oi=['Cz', 'Pz'], method='cnd_spc',
+                polarity='pos', window_size=0.02
+            )
+
 
 # ============================================================================
 # jackknife_contrast / jack_latency_contrast
@@ -803,20 +833,68 @@ class TestGroupERPAnalysis:
 
     @pytest.mark.unit
     def test_group_lateralized_erp_difference_and_topography(self, biosemi64_evoked_pair):
-        """Uses a real biosemi64 montage so all required electrode pairs
-        exist (the previous test using standard_1020 channel names skipped
-        every run because it never matched the montage)."""
+        """Uses a real biosemi64 montage (the previous test using
+        standard_1020 channel names skipped every run because it never
+        matched the old hardcoded-biosemi64 electrode dictionary)."""
         diff, evoked_lat = ERP.group_lateralized_erp(
             biosemi64_evoked_pair, ['O1', 'P7'], ['O2', 'P8']
         )
 
         # O1-O2 = 5-2 = 3, P7-P8 = 3-1 = 2, mean = 2.5
+        assert diff.shape == (2, 10)  # (n_subjects, n_times), set_mean=False
         np.testing.assert_allclose(diff, 2.5)
 
         ch_names = evoked_lat.ch_names
         assert evoked_lat.data[ch_names.index('O1'), 0] == pytest.approx(3.0)
         assert evoked_lat.data[ch_names.index('O2'), 0] == pytest.approx(-3.0)
         assert evoked_lat.data[ch_names.index('Cz'), 0] == pytest.approx(0.0)
+
+    @pytest.mark.unit
+    def test_group_lateralized_erp_set_mean_averages_across_subjects(
+        self, biosemi64_evoked_pair
+    ):
+        """Regression test: set_mean was previously a dead parameter
+        (declared and documented but never used in the function body)."""
+        diff, _ = ERP.group_lateralized_erp(
+            biosemi64_evoked_pair, ['O1', 'P7'], ['O2', 'P8'], set_mean=True
+        )
+
+        assert diff.shape == (10,)  # (n_times,), averaged over subjects
+        np.testing.assert_allclose(diff, 2.5)
+
+    @pytest.mark.unit
+    def test_group_lateralized_erp_works_on_non_biosemi64_montage(self):
+        """The electrode pairing is now auto-generated from the naming
+        convention (odd/even digit suffix), so it isn't limited to a
+        hardcoded biosemi64 electrode list -- any montage with that
+        left/right numbering convention works, including subsets."""
+        ch_names = ['A1', 'A2', 'B3', 'B4', 'Cz']
+        info = mne.create_info(ch_names, 100, ch_types='eeg')
+        data = np.zeros((len(ch_names), 5))
+        for name, val in zip(ch_names, [1, 2, 3, 4, 5]):
+            data[ch_names.index(name)] = val
+        erp_list = [mne.EvokedArray(data.copy(), info, tmin=-0.05) for _ in range(2)]
+
+        diff, evoked_lat = ERP.group_lateralized_erp(erp_list, ['A1', 'B3'], ['A2', 'B4'])
+
+        # (1-2) and (3-4), mean = -1
+        np.testing.assert_allclose(diff, -1.0)
+        assert evoked_lat.data[ch_names.index('A1'), 0] == pytest.approx(-1.0)
+        assert evoked_lat.data[ch_names.index('A2'), 0] == pytest.approx(1.0)
+        assert evoked_lat.data[ch_names.index('Cz'), 0] == pytest.approx(0.0)
+
+    @pytest.mark.unit
+    def test_group_lateralized_erp_accepts_custom_flip_dict(self, biosemi64_evoked_pair):
+        """An explicit flip_dict overrides the auto-generated pairing."""
+        diff, evoked_lat = ERP.group_lateralized_erp(
+            biosemi64_evoked_pair, ['O1', 'P7'], ['O2', 'P8'],
+            flip_dict={'O1': 'O2'}
+        )
+
+        ch_names = evoked_lat.ch_names
+        assert evoked_lat.data[ch_names.index('O1'), 0] == pytest.approx(3.0)
+        # P7/P8 untouched since they weren't in the custom flip_dict
+        assert evoked_lat.data[ch_names.index('P7'), 0] == pytest.approx(3.0)
 
 
 class TestSelectWaveformVariations:
@@ -929,10 +1007,8 @@ class TestResidualEye:
         self, residual_eye_data, tmp_path, monkeypatch
     ):
         """residual = mean(mean(left HEOG), -mean(right HEOG)), per the
-        method's own docstring. Note the source carries an unresolved
-        `#TODO: check whether function is correct` -- this test only
-        confirms the implementation matches its documented formula, not
-        that the formula is the right scientific choice."""
+        method's own docstring, using the default heog_right_positive=True
+        (i.e. no sign correction applied)."""
         monkeypatch.chdir(tmp_path)
         epochs, trial_info, expected = residual_eye_data
 
@@ -951,6 +1027,31 @@ class TestResidualEye:
 
         assert set(result.keys()) == {'all_data'}
         np.testing.assert_allclose(result['all_data'], expected)
+
+    @pytest.mark.unit
+    def test_heog_right_positive_false_flips_result_sign(
+        self, residual_eye_data, tmp_path, monkeypatch
+    ):
+        """A lab whose HEOG convention is reversed (rightward eye movement
+        = negative deflection) should set heog_right_positive=False, which
+        must produce exactly the negated result of the default convention
+        for the same underlying data."""
+        monkeypatch.chdir(tmp_path)
+        epochs, trial_info, expected = residual_eye_data
+
+        erp = ERP(sj=1, epochs=epochs, df=trial_info, baseline=(-0.1, 0))
+        erp.residual_eye(
+            left_info={'target_loc': [1]}, right_info={'target_loc': [2]},
+            ch_oi=['HEOG'], name='probe_resid_flipped',
+            heog_right_positive=False
+        )
+
+        path = tmp_path / 'erp' / 'eog' / 'sub_01_probe_resid_flipped.p'
+        import pickle
+        with open(path, 'rb') as f:
+            result = pickle.load(f)
+
+        np.testing.assert_allclose(result['all_data'], -expected)
 
 
 # ============================================================================

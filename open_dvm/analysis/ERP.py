@@ -418,6 +418,9 @@ class ERP(FolderStructure):
         ... )
         """
 
+        if idx is None:
+            idx = np.arange(len(df))
+
         df = df.iloc[idx].copy()
         epochs = epochs[idx]
 
@@ -1218,10 +1221,13 @@ class ERP(FolderStructure):
         if method == 'cnd_avg':
             # find peak in grand average waveform
             # step 1: create condition averaged waveform
-            grand_mean = mne.combine_evoked(
-                        [mne.combine_evoked(v,weights='equal') 
-                                        for (k,v) in erps.items()]
-                                ,weights = 'equal')
+            if isinstance(erps, dict):
+                grand_mean = mne.combine_evoked(
+                            [mne.combine_evoked(v,weights='equal')
+                                            for (k,v) in erps.items()]
+                                    ,weights = 'equal')
+            else:
+                grand_mean = mne.combine_evoked(erps, weights='equal')
 
             # step 2: limit data to electrodes of interest
             if isinstance(elec_oi[0], str):
@@ -1242,6 +1248,13 @@ class ERP(FolderStructure):
                          polarity]
         
         elif method == 'cnd_spc':
+            if not isinstance(erps, dict):
+                raise TypeError(
+                    "method='cnd_spc' requires erps to be a dict mapping "
+                    "condition name -> list of evoked objects (it computes "
+                    f"one window per condition); got a {type(erps).__name__}. "
+                    "Use method='cnd_avg' for a flat list of evoked objects."
+                )
             erp_window = {}
             # loop over conditins
             for cnd in list(erps.keys()):
@@ -2143,15 +2156,15 @@ class ERP(FolderStructure):
     @staticmethod
     def group_lateralized_erp(erp: list, elec_oi_c: list,
                              elec_oi_i: list, set_mean: bool = False,
-                             montage: str = 'biosemi64') -> Tuple[np.array, 
+                             flip_dict: Optional[dict] = None) -> Tuple[np.array,
                                                                   mne.Evoked]:
         """
-        Create group-level lateralized difference waveforms and 
+        Create group-level lateralized difference waveforms and
         topographies.
 
-        This function combines individual ERP data to create lateralized 
-        difference waveforms (contralateral - ipsilateral) and generates 
-        topographic lateralized evoked objects where each electrode 
+        This function combines individual ERP data to create lateralized
+        difference waveforms (contralateral - ipsilateral) and generates
+        topographic lateralized evoked objects where each electrode
         represents the difference from its contralateral counterpart.
 
         Parameters
@@ -2163,34 +2176,43 @@ class ERP(FolderStructure):
         elec_oi_i : list
             Names of ipsilateral electrodes of interest.
         set_mean : bool, optional
-            If True, returns averaged data across subjects. If False, 
-            returns individual subject data stacked in first dimension. 
-            Default is False.
-        montage : str, optional
-            EEG montage name for electrode layout. Currently supports 
-            'biosemi64'. Default is 'biosemi64'.
+            If True, averages the difference waveform across subjects
+            before returning (shape (n_times,)). If False, returns
+            individual subject data stacked in the first dimension
+            (shape (n_subjects, n_times)). Default is False.
+        flip_dict : dict, optional
+            Custom electrode pairing for the lateralized topography
+            (e.g. {'O1': 'O2', 'P7': 'P8'}). If None, pairs are
+            generated automatically from the electrode naming
+            convention (odd-numbered = left, even-numbered = right,
+            e.g. O1<->O2) -- the same convention flip_topography uses.
+            EEG/CSD electrodes with no digit suffix (e.g. Cz, Pz, Fz)
+            are treated as midline and zeroed in the output topography.
+            Default is None.
 
         Returns
         -------
         diff : np.ndarray
-            Lateralized difference waveform data. Shape depends on 
-            set_mean parameter: (n_subjects, n_times) or (n_times,).
+            Lateralized difference waveform data (contralateral minus
+            ipsilateral electrodes of interest, averaged over
+            electrodes). Shape (n_subjects, n_times), or (n_times,) if
+            set_mean=True.
         evoked : mne.Evoked
-            Evoked object with lateralized topography where each 
-            electrode contains the difference from its mirror electrode 
-            (e.g., O1 contains O1-O2 data).
+            Evoked object with lateralized topography where each
+            EEG/CSD electrode contains the difference from its mirror
+            electrode (e.g., O1 contains O1-O2 data); midline
+            electrodes are set to 0.
 
         Notes
         -----
-        The lateralized topography is created by subtracting each 
-        electrode's mirror counterpart based on the standard electrode 
-        naming convention (odd numbers = left, even numbers = right).
+        The difference waveform is computed via select_waveform for
+        both electrode groups -- the same general-purpose electrode
+        averaging utility used elsewhere in this module -- so this is
+        equivalent to:
+            select_waveform(erp, elec_oi_c) - select_waveform(erp, elec_oi_i)
 
-        Midline electrodes (Fz, Cz, Pz, etc.) are preserved as-is 
-        since they don't have lateral counterparts.
-
-        This method is particularly useful for analyzing lateralized 
-        ERP components such as N2pc, SPCN, or lateralized readiness 
+        This method is particularly useful for analyzing lateralized
+        ERP components such as N2pc, SPCN, or lateralized readiness
         potentials.
 
         Examples
@@ -2200,94 +2222,108 @@ class ERP(FolderStructure):
         ... )
         """
 
-        #TODO: check whether function is still necessary
-        #TODO2: add more montages
-
-        # get mean and individual data
-        evoked_X = np.stack([evoked._data for evoked in erp])
-        evoked = mne.combine_evoked(erp, weights = 'equal')
-        
-        # calculate difference waveform
-        (contra_idx, 
-        ipsi_idx) = ERP.lateralized_erp_idx(erp, elec_oi_c, elec_oi_i)
-        diff = evoked_X[:,contra_idx] - evoked_X[:,ipsi_idx]
-        # average over electrodes
-        diff = diff.mean(axis = 1)
+        # difference waveform, reusing the same general-purpose
+        # electrode-averaging utility used elsewhere in this class
+        diff = ERP.select_waveform(erp, elec_oi_c) - ERP.select_waveform(erp, elec_oi_i)
+        if set_mean:
+            diff = diff.mean(axis=0)
 
         # set lateralized topography
+        evoked = mne.combine_evoked(erp, weights = 'equal')
         channels = evoked.ch_names
 
-        if montage == 'biosemi64':
-            lat_dict = {'Fp1':'Fp2','AF7':'AF8','AF3':'AF4','F7':'F8',
-                            'F5':'F6','F3':'F4','F1':'F2','FT7':'FT8','FC5':'FC6',
-                            'FC3':'FC4','FC1':'FC2','T7':'T8','C5':'C6','C3':'C4',
-                            'C1':'C2','TP7':'TP8','CP5':'CP6','CP3':'CP4',
-                            'CP1':'CP2','P9':'P10','P7':'P8','P5':'P6','P3':'P4',
-                            'P1':'P2','PO7':'PO8','PO3':'PO4','O1':'O2',
-                            'Fpz':'Fpz','AFz':'AFz','Fz':'Fz','FCz':'FCz',
-                            'Cz':'Cz','CPz':'CPz','Pz':'Pz','POz':'POz','Oz':'Oz',
-                            'Iz':'Iz'
-                            }
-        else:
-            print(f'The {montage} montage is not yet supported')
-            return diff
+        if flip_dict is None:
+            picks = mne.pick_types(evoked.info, eeg=True, csd=True)
+            eeg_channels = [channels[i] for i in picks]
+            flip_dict = {}
+            for elec in eeg_channels:
+                if elec[-1].isdigit():
+                    base_name = elec[:-1]
+                    number = int(elec[-1])
+                    if number % 2 == 1:
+                        mirror_elec = f"{base_name}{number + 1}"
+                        if mirror_elec in eeg_channels:
+                            flip_dict[elec] = mirror_elec
+                else:
+                    # no digit suffix -> midline electrode, zeroed below
+                    flip_dict[elec] = elec
 
         pre_flip = np.copy(evoked._data)
-        for elec_1, elec_2 in lat_dict.items():
+        for elec_1, elec_2 in flip_dict.items():
             elec_1_data = pre_flip[channels.index(elec_1)]
             elec_2_data = pre_flip[channels.index(elec_2)]
             evoked._data[channels.index(elec_1)] = elec_1_data - elec_2_data
             evoked._data[channels.index(elec_2)] = elec_2_data - elec_1_data
 
-        return diff, evoked                        
+        return diff, evoked
           
     def residual_eye(self, left_info: dict = None, right_info: dict = None,
                     ch_oi: list = ['HEOG'], cnds: dict = None,
                     spatial_restriction: dict = None, window_oi: tuple = None,
-                    excl_factor: dict = None, name: str = 'resid_eye'):
+                    excl_factor: dict = None, name: str = 'resid_eye',
+                    heog_right_positive: bool = True):
         """
         Calculate residual eye movement activity for lateralized designs.
 
-        This method computes residual eye movement waveforms by averaging 
-        HEOG activity for left and right stimulus presentations, accounting 
-        for the expected directional differences in eye movements. This is 
-        useful for validating that observed lateralized ERP effects are 
+        This method computes residual eye movement waveforms by averaging
+        HEOG activity for left and right stimulus presentations, accounting
+        for the expected directional differences in eye movements. This is
+        useful for validating that observed lateralized ERP effects are
         not contaminated by systematic eye movements.
 
         Parameters
         ----------
         left_info : dict, optional
-            Dictionary specifying criteria for left stimulus trials. 
+            Dictionary specifying criteria for left stimulus trials.
             Format: {column_name: [labels]}. Default is None.
         right_info : dict, optional
-            Dictionary specifying criteria for right stimulus trials. 
+            Dictionary specifying criteria for right stimulus trials.
             Format: {column_name: [labels]}. Default is None.
         ch_oi : list, optional
-            List of eye movement channels to analyze (typically HEOG). 
+            List of eye movement channels to analyze (typically HEOG).
             Default is ['HEOG'].
         cnds : dict, optional
-            Dictionary specifying conditions for separate analysis. 
+            Dictionary specifying conditions for separate analysis.
             Default is None.
         spatial_restriction : dict, optional
-            Spatial position restriction filter for secondary stimuli. 
-            Dictionary specifying stimulus position criteria to limit 
+            Spatial position restriction filter for secondary stimuli.
+            Dictionary specifying stimulus position criteria to limit
             trial selection. Default is None.
         window_oi : tuple, optional
-            Time window of interest (start, end) in seconds. If None, 
+            Time window of interest (start, end) in seconds. If None,
             uses full epoch time range. Default is None.
         excl_factor : dict, optional
-            Dictionary specifying trial exclusion criteria. 
+            Dictionary specifying trial exclusion criteria.
             Default is None.
         name : str, optional
             Base name for output file. Default is 'resid_eye'.
+        heog_right_positive : bool, optional
+            Whether a rightward eye movement produces a positive
+            deflection on the ch_oi channel(s) in your recording setup.
+            This depends on how HEOG was derived at acquisition (e.g.
+            left-canthus minus right-canthus, or the reverse) and is
+            therefore lab/hardware specific -- it cannot be inferred
+            from the data. Set to False if your convention is reversed
+            (rightward movement = negative deflection). This only
+            corrects the sign used internally to combine left- and
+            right-trial waveforms; it does not affect which trials are
+            treated as 'left'/'right' (that's controlled by left_info/
+            right_info). Default is True.
 
         Notes
         -----
         The function calculates residual eye movements as:
         residual = mean(left_trials, right_trials * -1)
 
-        This approach accounts for the expected opposite polarity of 
-        eye movements to left vs right stimuli, allowing detection of 
+        where left_trials and right_trials are first sign-corrected
+        according to heog_right_positive so that the result is
+        interpretable the same way regardless of HEOG wiring
+        convention: a genuine target-following eye-movement bias
+        produces the same residual sign whether heog_right_positive is
+        True or False for a given lab's hardware.
+
+        This approach accounts for the expected opposite polarity of
+        eye movements to left vs right stimuli, allowing detection of
         systematic biases or artifacts.
 
         Output is saved as a pickled dictionary in the 'erp/eog' subfolder.
@@ -2302,10 +2338,8 @@ class ERP(FolderStructure):
         ... )
         """
 
-        #TODO: check whether function is correct
-
         # set file name
-        erp_name= f'sub_{self.sj}_{name}.p'	
+        erp_name= f'sub_{self.sj}_{name}.p'
         f_name = self.folder_tracker(['erp', 'eog'],erp_name)
         # get data
         beh, epochs = self.select_erp_data(excl_factor)
@@ -2320,11 +2354,11 @@ class ERP(FolderStructure):
 
         # split left and right trials
         if left_info is not None:
-            idx_l = self.select_lateralization_idx(beh, left_info, 
+            idx_l = self.select_lateralization_idx(beh, left_info,
                                                    spatial_restriction)
         if right_info is not None:
-            idx_r = self.select_lateralization_idx(beh, right_info, 
-                                                   spatial_restriction)            
+            idx_r = self.select_lateralization_idx(beh, right_info,
+                                                   spatial_restriction)
 
        # loop over all conditions
         if cnds is None:
@@ -2333,9 +2367,13 @@ class ERP(FolderStructure):
             (cnd_header, cnds), = cnds.items()
         eye_dict = {cnd:[] for cnd in cnds}
 
+        # normalize HEOG polarity so the residual is interpretable the
+        # same way regardless of hardware/referencing convention
+        polarity_sign = 1 if heog_right_positive else -1
+
         for cnd in cnds:
             # set erp name
-            erp_name = f'sub_{self.sj}_{cnd}_{name}'	
+            erp_name = f'sub_{self.sj}_{cnd}_{name}'
 
             # slice condition trials
             if cnd == 'all_data':
@@ -2347,13 +2385,16 @@ class ERP(FolderStructure):
                 idx_c_r = np.intersect1d(idx_r, idx_c)
 
             # extract data
-            left_wave = epochs._data[idx_c_l][:,ch_oi_idx].mean(axis=(0,1))
-            right_wave = epochs._data[idx_c_r][:,ch_oi_idx].mean(axis=(0,1))
+            left_wave = (epochs._data[idx_c_l][:,ch_oi_idx].mean(axis=(0,1))
+                         * polarity_sign)
+            right_wave = (epochs._data[idx_c_r][:,ch_oi_idx].mean(axis=(0,1))
+                          * polarity_sign)
             eye_wave = np.mean((left_wave, right_wave*-1), axis = 0)
             eye_dict[cnd] = eye_wave[time_idx]
 
         # save data
-        pickle.dump(eye_dict, open(f_name, 'wb'))
+        with open(f_name, 'wb') as f:
+            pickle.dump(eye_dict, f)
 
 
 
