@@ -1833,10 +1833,10 @@ class BDM(FolderStructure):
 						df_filt += f' and {k} == {v}'
 
 			# select subset of data and average across random selection
-			avg_idx = df.query(df_filt).index.values
+			avg_idx = list(df.query(df_filt).index.values)
 			random.shuffle(avg_idx)
 			avg_idx = [avg_idx[i:i+avg_trials] 
-						for i in np.arange(0,avg_idx.size, avg_trials)]
+						for i in np.arange(0, len(avg_idx), avg_trials)]
 			X += [epochs._data[idx].mean(axis = 0) for idx in avg_idx]
 			labels  += [var_combo[self.to_decode]] * len(avg_idx)
 			cnds += [var_combo[cnd_header]] * len(avg_idx)
