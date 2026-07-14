@@ -182,6 +182,146 @@ def create_lateralization_test_data() -> Tuple[np.ndarray, pd.DataFrame]:
     return data, trial_info
 
 
+def create_lateralized_flip_epochs() -> Tuple[mne.Epochs, pd.DataFrame]:
+    """
+    Create deterministic epochs for testing ERP.flip_topography.
+
+    Data is constant across time so the only thing that can change a
+    value is the flip itself: for trial ``t`` and channel index ``c``,
+    every sample equals ``t * 10 + c``. This makes the expected
+    post-flip values trivial to compute by hand.
+
+    Returns
+    -------
+    epochs : mne.Epochs
+        3 trials x 5 channels (O1, O2, P7, P8, HEOG) x 10 samples.
+    trial_info : pd.DataFrame
+        Contains 'target_loc' with trials 0 and 2 marked as left (1)
+        and trial 1 marked as right (2).
+    """
+    ch_names = ['O1', 'O2', 'P7', 'P8', 'HEOG']
+    n_trials, n_samples, sfreq = 3, 10, 100
+
+    data = np.zeros((n_trials, len(ch_names), n_samples))
+    for t in range(n_trials):
+        for c in range(len(ch_names)):
+            data[t, c, :] = t * 10 + c
+
+    info = mne.create_info(ch_names, sfreq,
+                            ch_types=['eeg', 'eeg', 'eeg', 'eeg', 'eog'])
+    epochs = mne.EpochsArray(data, info, tmin=-0.05)
+    trial_info = pd.DataFrame({'target_loc': [1, 2, 1]})
+
+    return epochs, trial_info
+
+
+def create_peaked_erps(
+    peak_times: Tuple[float, float] = (0.1, 0.2),
+    peak_polarities: Tuple[int, int] = (1, -1),
+    n_subjects: int = 5,
+    seed: int = 42
+) -> Dict[str, list]:
+    """
+    Create two conditions of synthetic evoked data with known peaks.
+
+    Used for testing peak-detection/latency methods (select_erp_window,
+    compare_latencies) where the true peak location must be known in
+    advance to check the result.
+
+    Returns
+    -------
+    erps : dict
+        {'cond1': [mne.Evoked, ...], 'cond2': [mne.Evoked, ...]}, each
+        with a +/-5 uV spike at the specified peak time (plus small
+        per-subject noise so jackknife variance is non-zero) on a
+        2-channel ('Cz', 'Pz') montage spanning -0.1 to 0.3 s at 100 Hz.
+    """
+    rng = np.random.default_rng(seed)
+    ch_names = ['Cz', 'Pz']
+    sfreq = 100
+    tmin, tmax = -0.1, 0.3
+    n_samples = int(round((tmax - tmin) * sfreq)) + 1
+    times = np.round(np.linspace(tmin, tmax, n_samples), 8)
+    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+
+    erps = {}
+    for cnd, peak_t, sign in zip(
+        ['cond1', 'cond2'], peak_times, peak_polarities
+    ):
+        peak_idx = int(np.argmin(np.abs(times - peak_t)))
+        evokeds = []
+        for _ in range(n_subjects):
+            d = rng.normal(0, 0.1, size=(len(ch_names), n_samples))
+            d[:, peak_idx] += sign * 5
+            evokeds.append(mne.EvokedArray(d, info, tmin=tmin))
+        erps[cnd] = evokeds
+
+    return erps
+
+
+def create_biosemi64_evoked_pair() -> list:
+    """
+    Create two evoked objects on a real biosemi64 montage with a known
+    contra/ipsi amplitude difference, for testing
+    ERP.group_lateralized_erp without depending on montage-name luck.
+
+    O1=5, O2=2, P7=3, P8=1 (all other channels/timepoints are 0), so
+    the expected contra ('O1','P7') minus ipsi ('O2','P8') difference,
+    averaged over those two electrode pairs, is (3 + 2) / 2 = 2.5.
+
+    Returns
+    -------
+    list of mne.Evoked
+        Two (identical) subject-level evoked objects.
+    """
+    ch_names = mne.channels.make_standard_montage('biosemi64').ch_names
+    sfreq, n_samples = 100, 10
+    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+
+    data = np.zeros((len(ch_names), n_samples))
+    data[ch_names.index('O1')] = 5
+    data[ch_names.index('O2')] = 2
+    data[ch_names.index('P7')] = 3
+    data[ch_names.index('P8')] = 1
+
+    return [mne.EvokedArray(data.copy(), info, tmin=-0.05) for _ in range(2)]
+
+
+def create_residual_eye_data() -> Tuple[mne.Epochs, pd.DataFrame, float]:
+    """
+    Create epochs with a HEOG channel and known per-trial values for
+    testing ERP.residual_eye.
+
+    Returns
+    -------
+    epochs : mne.Epochs
+        4 trials x 2 channels ('Cz', 'HEOG') x 20 samples, HEOG constant
+        across time per trial.
+    trial_info : pd.DataFrame
+        'target_loc' marks trials 0, 2 as left (1) and 1, 3 as right (2).
+    expected : float
+        The residual eye value ERP.residual_eye should compute:
+        mean(mean(left HEOG trials), -mean(right HEOG trials)).
+    """
+    ch_names = ['Cz', 'HEOG']
+    sfreq, n_samples = 100, 20
+    info = mne.create_info(ch_names, sfreq, ch_types=['eeg', 'eog'])
+
+    heog_vals = [2.0, -3.0, 6.0, 1.5]
+    data = np.zeros((len(heog_vals), len(ch_names), n_samples))
+    for t, val in enumerate(heog_vals):
+        data[t, 1, :] = val
+
+    epochs = mne.EpochsArray(data, info, tmin=-0.1)
+    trial_info = pd.DataFrame({'target_loc': [1, 2, 1, 2]})
+
+    left_wave = np.mean([heog_vals[0], heog_vals[2]])
+    right_wave = np.mean([heog_vals[1], heog_vals[3]])
+    expected = float(np.mean([left_wave, right_wave * -1]))
+
+    return epochs, trial_info, expected
+
+
 def create_multilocation_test_data() -> Tuple[np.ndarray, pd.DataFrame]:
     """
     Create test data with multiple location values for testing AND logic with multiple constraints.

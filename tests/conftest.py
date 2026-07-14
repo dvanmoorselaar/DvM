@@ -17,6 +17,10 @@ from tests.fixtures.sample_data import (
     create_sample_waveforms,
     create_lateralization_test_data,
     create_multilocation_test_data,
+    create_lateralized_flip_epochs,
+    create_peaked_erps,
+    create_biosemi64_evoked_pair,
+    create_residual_eye_data,
 )
 
 
@@ -59,6 +63,31 @@ def multilocation_test_data():
     """Fixture for testing multi-constraint AND logic."""
     data, trial_info = create_multilocation_test_data()
     return data, trial_info
+
+
+@pytest.fixture
+def lateralized_flip_epochs():
+    """Fixture providing deterministic epochs for flip_topography tests."""
+    epochs, trial_info = create_lateralized_flip_epochs()
+    return epochs, trial_info
+
+
+@pytest.fixture
+def peaked_erps():
+    """Fixture providing two conditions with known peak locations."""
+    return create_peaked_erps()
+
+
+@pytest.fixture
+def biosemi64_evoked_pair():
+    """Fixture providing evoked data on a real biosemi64 montage."""
+    return create_biosemi64_evoked_pair()
+
+
+@pytest.fixture
+def residual_eye_data():
+    """Fixture providing epochs/trial_info/expected value for residual_eye."""
+    return create_residual_eye_data()
 
 
 @pytest.fixture
