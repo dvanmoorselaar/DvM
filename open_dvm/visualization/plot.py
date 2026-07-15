@@ -318,7 +318,7 @@ def plot_2d(Z:np.array,x_val:np.array=None,
             nr_ticks_y = 5 if len(y_val) > 5 else len(y_val)	
         idx = np.linspace(0, len(y_val)-1, nr_ticks_y).astype(int)
         ticks = y_val[idx]
-        if np.allclose(np.diff(y_val),np.diff(y_val)[0],rtol=1e-2, atol=1e-8):
+        if len(y_val) < 2 or np.allclose(np.diff(y_val),np.diff(y_val)[0],rtol=1e-2, atol=1e-8):
             plt.yscale('linear')
         else:
             plt.yscale('log')
@@ -1134,8 +1134,11 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
             idx = [tfr[cnd][0].ch_names.index(e) for e in elec]
             y_ = np.stack([tfr_.data[idx] for tfr_ in tfr[cnd]]).mean(axis = 1)
             if freq_oi is not None:
-                if isinstance(freq_idx, int):
-                    y_ = np.expand_dims(y_[:, freq_idx], axis=-1)
+                # np.abs(...).argmin() returns np.integer, not a plain int;
+                # scalar indexing would drop the freq axis that the 1d
+                # branch's later .mean(axis=1) still expects
+                if isinstance(freq_idx, (int, np.integer)):
+                    y_ = np.expand_dims(y_[:, freq_idx], axis=1)
                 else:
                     y_ = y_[:, freq_idx]
             y.append(y_)

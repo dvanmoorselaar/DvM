@@ -25,6 +25,11 @@ venv/
 env/
 ENV/
 
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+
 # Analysis outputs and data (suggested - uncomment if needed)
 # /eeg/
 # /behavioral/
