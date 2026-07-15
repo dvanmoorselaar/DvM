@@ -269,15 +269,15 @@ class TFR(FolderStructure):
 		
 		Checks if wavelets need regeneration based on parameter changes 
 		and creates new wavelets/frequency bands as needed. Handles both 
-		waveletand Hilbert transform methods.
+		wavelet and Hilbert transform methods. This enables changing the 
+		method attribute after initialization with automatic regeneration 
+		of the appropriate decomposition artifacts.
 		"""
-		if self.method != 'wavelet':
-			return
-			
 		current_hash = self._get_wavelet_params_hash()
 		
 		if self.method == 'wavelet':
-			if (self.wavelets is None or self.frex is None or 
+			if (not hasattr(self, 'wavelets') or self.wavelets is None or 
+				not hasattr(self, 'frex') or self.frex is None or 
 				self._wavelet_params_hash != current_hash):
 				
 				s_freq = self.epochs.info['sfreq']
@@ -288,7 +288,8 @@ class TFR(FolderStructure):
 					nr_time, s_freq, self.normalize_wavelets)
 				self._wavelet_params_hash = current_hash
 		elif self.method == 'hilbert':
-			if (self.freq_bands is None or self.frex is None or 
+			if (not hasattr(self, 'freq_bands') or self.freq_bands is None or 
+				not hasattr(self, 'frex') or self.frex is None or 
 				self._wavelet_params_hash != current_hash):
 
 				self.freq_bands = self.create_freq_bands()
@@ -1461,11 +1462,7 @@ class TFR(FolderStructure):
 			base_power = np.repeat(base_power[...,np.newaxis],nr_time,axis=-1)
 		else:
 			raise ValueError('base_power should be either 2D or 3D array')
-		
-		# DEBUG: Print info about power and baseline during conversion
-		print(f"  [DEBUG db_convert] power shape: {power.shape}, mean: {power.mean():.6f}")
-		print(f"  [DEBUG db_convert] base_power shape: {base_power.shape}, mean: {base_power.mean():.6f}")
-		
+				
 		norm_power = 10*(np.log10(power+1e-12)-np.log10(base_power+1e-12))
 
 		return norm_power
