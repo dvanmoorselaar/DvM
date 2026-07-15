@@ -638,6 +638,22 @@ class TestPlotTfrTimecourse:
         np.testing.assert_allclose(line.get_ydata(), 2.0, atol=1e-10)
 
     @pytest.mark.unit
+    def test_elec_oi_all_averages_every_channel(self):
+        # regression: elec_oi='all' is a toolbox-wide convention (ERP.py,
+        # TFR.py, BDM.py, CTF.py) but was crashing here -- 'all' got
+        # wrapped to ['all'] and then indexed character-by-character
+        # ('a', 'l', 'l') against ch_names
+        tfr = make_average_tfr(ch_names=['C3', 'C4'], freqs=np.linspace(4, 20, 8),
+                                amplitude_by_channel={'C3': 2.0, 'C4': 4.0})
+        tfr_dict = {'A': tfr}
+
+        plot_tfr_timecourse(tfr_dict, elec_oi='all', timecourse='1d',
+                             freq_oi=(8, 12), cnds=['A'])
+
+        line = plt.gca().get_lines()[0]
+        np.testing.assert_allclose(line.get_ydata(), 3.0, atol=1e-10)  # mean(2, 4)
+
+    @pytest.mark.unit
     def test_lateralized_computes_contra_minus_ipsi(self):
         tfr = make_average_tfr(ch_names=['C3', 'C4'], freqs=np.linspace(4, 20, 8),
                                 amplitude_by_channel={'C3': 3.0, 'C4': 1.0})

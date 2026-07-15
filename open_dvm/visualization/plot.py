@@ -1094,7 +1094,13 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
         print('not enough colors specified. Using default colors')
         colors = list(mcolors.TABLEAU_COLORS.values())
 
-    if isinstance(elec_oi[0],str): 
+    if elec_oi == 'all':
+        # 'all' is a toolbox-wide convention (ERP.group_erp, TFR.py, BDM.py,
+        # CTF.py) meaning "average across every channel"; match it here
+        first_tfr = tfr[cnds[0]]
+        first_tfr = first_tfr[0] if isinstance(first_tfr, list) else first_tfr
+        elec_oi = first_tfr.ch_names
+    if isinstance(elec_oi[0],str):
         elec_oi = [elec_oi]
 
     # accept a single AverageTFR (e.g. from condition_tfrs()) or a per-subject
