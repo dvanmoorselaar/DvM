@@ -62,7 +62,6 @@ from sklearn.svm import LinearSVC
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import roc_auc_score, confusion_matrix
 from open_dvm.support.preprocessing_utils import (
     select_electrodes,
     trial_exclusion,
@@ -72,8 +71,6 @@ from open_dvm.support.preprocessing_utils import (
 from scipy.stats import rankdata
 from open_dvm.analysis.TFR import TFR
 from open_dvm.visualization.plot import plot_bdm_timecourse
-from IPython import embed
-import warnings
 
 warnings.simplefilter('default')
 
@@ -362,7 +359,7 @@ class BDM(FolderStructure):
 							", max_freq)")
 		elif self._data_type == 'raw':
 			if tfr is not None or min_freq is not None:
-				raise Warning("TFR parameters ignored when data_type='raw'")
+				warnings.warn("TFR parameters ignored when data_type='raw'")
 			self.tfr = None
 		else:
 			raise ValueError(f"data_type must be 'raw' or 'tfr', "
@@ -523,11 +520,15 @@ class BDM(FolderStructure):
 			
 			Cross-condition decoding (train on first, test on second):
 				``{'condition_column': [['train_cond'], 'test_cond']}``
-			
-			Multiple training/testing conditions:
-				``{'condition_column': [['train1', 'train2'], 
+
+			Multiple training/testing conditions -- decoded as separate
+			(train, test) pairs, NOT pooled together:
+				``{'condition_column': [['train1', 'train2'],
 										['test1', 'test2']]}``
-			
+				Produces one run per combination (train1-test1,
+				train1-test2, train2-test1, train2-test2), each stored
+				under its own ``'{train_cnd}_{test_cnd}'`` key.
+
 			If None, decoding performed on all data.
 			
 		window_oi : tuple, optional
@@ -610,6 +611,9 @@ class BDM(FolderStructure):
 		- Class balancing prevents bias toward majority classes
 		- Progress information printed during execution
 		"""
+
+		# avoid mutating the caller's dict across repeated calls
+		excl_factor = copy.deepcopy(excl_factor) if excl_factor is not None else None
 
 		# select condition specific data
 		if cnds is None:
@@ -758,7 +762,7 @@ class BDM(FolderStructure):
 																	axis = 0)
 				bdm_params[key]['W'] = W
 			else:
-				bdm_params = {key: {}}
+				bdm_params[key] = {}
 			
 		return bdm_scores, bdm_params, bdm_info
 
@@ -850,12 +854,16 @@ class BDM(FolderStructure):
 									labels.size))
 
 				# permutation loop (if perm is 1, train labels are not shuffled)
-				#TODO: check position of permutation loop
 				for p in range(nr_perm):
 
 					if p > 0: # shuffle condition labels
 						np.random.shuffle(cnd_labels)
-				
+
+					# y_perm reflects the (possibly shuffled) label
+					# assignment; identical to y when p == 0
+					y_perm = y.copy()
+					y_perm.iloc[cnd_idx] = cnd_labels
+
 					for i, n in enumerate(tr_max):
 						if i > 0:
 							print(f'Minimum condition label downsampled to {n}')
@@ -863,28 +871,30 @@ class BDM(FolderStructure):
 
 						# select train and test trials
 						self.run_info = 1
+						Xtr_runs = []
 						for run in range(self.avg_runs):
 							bdm_info.update({'run_' +str(self.run_info): {}})
 							if self.cross:
-								# TODO1: make sure that multiple test conditions can be classified
-								# TODO2: make sure that bdm_info is saved 
+								#TODO: make sure that multiple test conditions can be classified
+								#TODO: make sure that bdm_info is saved 
 								test_idx = np.where(df[cnd_head] == te_cnd)[0]
-								(Xtr, Xte, 
-								Ytr, Yte) = self.train_test_cross(X, y, 
+								(Xtr, Xte,
+								Ytr, Yte) = self.train_test_cross(X, y_perm,
 																cnd_idx,test_idx)
 								
 							else:
 								(train_tr, test_tr, 
 								bdm_info) = self.train_test_split(cnd_idx, 
 														cnd_labels, n, bdm_info) 
-								(Xtr, Xte, 
-								Ytr, Yte) = self.train_test_select(X, y,
+								(Xtr, Xte,
+								Ytr, Yte) = self.train_test_select(X, y_perm,
 																train_tr,test_tr)
 							
 							# restrict to training and test time window
 							Xtr = Xtr[..., tr_idx]
 							Xte = Xte[..., te_idx]
-							(class_acc[run, p], 
+							Xtr_runs.append(Xtr)
+							(class_acc[run, p],
 							weights[run, p],
 							conf_matrix[run,p]) = self.cross_time_decoding(Xtr,
 													  				Xte, Ytr, 
@@ -900,24 +910,27 @@ class BDM(FolderStructure):
 						W = weights.mean(axis = 0)[0]
 						conf_M = conf_matrix.mean(axis = 0)
 
-						if i == 0:
+						# only capture on p == 0: bdm_info reflects the real run
+						if i == 0 and p == 0:
 							# get standard dec scores
 							cnd_inf = str(tr_cnd)
 							if te_cnd is not None:
 								cnd_inf += f'_{te_cnd}'
 
-							W = self.set_bdm_weights(W, Xtr, nr_elec, nr_time)
-							
+							W = self.set_bdm_weights(
+								W, np.concatenate(Xtr_runs, axis=0),
+								nr_elec, nr_time)
+
 							dec_scores = copy.copy(np.squeeze(mean_class[0]))
-							bdm_scores.update({cnd_inf:{'dec_scores': 
-								   			dec_scores}, 
+							bdm_scores.update({cnd_inf:{'dec_scores':
+								   			dec_scores},
 												'bdm_info': bdm_info})
 
-							bdm_params.update({cnd_inf:{'W':W, 
+							bdm_params.update({cnd_inf:{'W':W,
 											'conf_matrix':copy.copy(conf_M[0])
 											}})
 
-						else:
+						elif i > 0 and p == 0:
 							bdm_scores[cnd_inf]['{}-nrlabels'.format(n)] = \
 											copy.copy(mean_class[0])
 
@@ -961,32 +974,33 @@ class BDM(FolderStructure):
 			max_tr) = self.get_condition_labels(beh_te,cnd_header_te,cnd,max_tr, 
 												labels_oi_te)
 
-			# initiate decoding arrays
-			if GAT:
-				class_acc = np.empty((self.avg_runs, nr_perm,
-								nr_time_tr, nr_time_te)) * np.nan
-				conf_matrix = np.empty((self.avg_runs, nr_perm, 
-								nr_time_tr, nr_time_te, 
-								len(labels_oi_te), len(labels_oi_tr))) * np.nan
-				weights = np.empty((self.avg_runs, nr_perm,
-									nr_time_tr, nr_time_te, 
-									nr_elec)) * np.nan
-			else:	
-				#TODO: check whether time assignment works
-				class_acc = np.empty((self.avg_runs,nr_perm,
-								nr_time_te)) * np.nan	
-				conf_matrix = np.empty((self.avg_runs, nr_perm, 
-								nr_time_tr, len(labels_oi_te), 
-								len(labels_oi_tr))) * np.nan
-				weights = np.empty((self.avg_runs, nr_perm,
-									nr_time_te, nr_elec)) * np.nan
+			# initiate decoding arrays. cross_time_decoding always
+			# returns a (nr_freq, nr_time_tr, nr_time_te) shaped result
+			# (nr_time_te collapses to 1 when GAT=False) regardless of
+			# GAT, so a single shape covers both cases here
+			nr_freq = 1
+			class_acc = np.empty((self.avg_runs, nr_perm, nr_freq,
+							nr_time_tr, nr_time_te)) * np.nan
+			conf_matrix = np.empty((self.avg_runs, nr_perm, nr_freq,
+							nr_time_tr, nr_time_te,
+							len(labels_oi_te), len(labels_oi_tr))) * np.nan
+			weights = np.empty((self.avg_runs, nr_perm, nr_freq,
+								nr_time_tr, nr_time_te,
+								nr_elec)) * np.nan
 
 			# permutation loop (if perm is 1, train labels are not shuffled)
 			for p in range(nr_perm):
 
 				if p > 0: # shuffle condition labels
 					np.random.shuffle(cnd_labels)
-			
+
+				# y_te_perm reflects the (possibly shuffled) test-label
+				# assignment; identical to y_te when p == 0. Only the
+				# test side is permuted -- the trained classifier itself
+				# is always real
+				y_te_perm = y_te.copy()
+				y_te_perm.iloc[cnd_idx_te] = cnd_labels
+
 				for i, n in enumerate([1]):
 					if i > 0:
 						print(f'Minimum condition label downsampled to {n}')
@@ -996,15 +1010,15 @@ class BDM(FolderStructure):
 					self.run_info = 1
 					for run in range(self.avg_runs):
 						#bdm_info.update({'run_' +str(self.run_info): {}})
-						# TODO2: make sure that bdm_info is saved 
+						# TODO2: make sure that bdm_info is saved
 
 						# split independent training and test data
-						(Xtr, _, 
-						Ytr, _) = self.train_test_cross(X_tr, y_tr, 
+						(Xtr, _,
+						Ytr, _) = self.train_test_cross(X_tr, y_tr,
 														cnd_idx_tr,False)
-												
-						(Xte, _, 
-						Yte, _) = self.train_test_cross(X_te, y_te, 
+
+						(Xte, _,
+						Yte, _) = self.train_test_cross(X_te, y_te_perm,
 														cnd_idx_te,False,
 														max_tr)
 
@@ -1037,12 +1051,8 @@ class BDM(FolderStructure):
 						bdm_scores[cnd]['{}-nrlabels'.format(n)] = \
 										copy.copy(mean_class[0])
 
-				# bdm_scores.update({cnd:{'dec_scores': 
-				# 						copy.copy(np.squeeze(mean_class[0]))},
-				# 						'label_inf':copy.copy(label_inf)})
-
-				bdm_scores.update({cnd:{'dec_scores': 
-										copy.copy(np.squeeze(mean_class[0]))}})
+				if nr_perm > 1:
+					bdm_scores[cnd].update({'perm_scores': mean_class[1:]})
 				
 		return bdm_scores, bdm_params
 
@@ -1093,11 +1103,11 @@ class BDM(FolderStructure):
 		if isinstance(self.avg_trials, list):
 			self.avg_trials += [self.avg_trials[1]]
 		print('prepare testing data')
-		(X_te, 
-		y_te,	
-		beh_te, 
+		(X_te,
+		y_te,
+		beh_te,
 		times_te) = self.select_bdm_data(self.epochs[1].copy(),
-										self.beh[1].copy(),te_window_oi,
+										self.df[1].copy(),te_window_oi,
 										te_excl_factor,[cnd_header])
 
 		max_tr = self.select_max_trials(beh_te,cnds,te_labels_oi,cnd_header)
@@ -1188,8 +1198,8 @@ class BDM(FolderStructure):
 		
 		# limit to labels of interest
 		if labels_oi == 'all':
-			labels_oi = np.unique(df[self.to_decode])		
-		mask = np.in1d(beh[self.to_decode], labels_oi)
+			labels_oi = np.unique(df[self.to_decode])
+		mask = np.isin(df[self.to_decode], labels_oi)
 		y = df[self.to_decode][mask].reset_index(drop = True)
 		X = X[mask]
 		cnd_idx = np.arange(y.size)
@@ -1255,8 +1265,8 @@ class BDM(FolderStructure):
 		"""
 
 		# remove a subset of trials (including conditiions not of interest)
-		cnd_header = headers[0]
-		if headers is not None and cnds is not None and cnds != ['all_data']:
+		if headers and cnds is not None and cnds != ['all_data']:
+			cnd_header = headers[0]
 			# exclude trials based on condition info
 			flat_cnds = []
 			for item in cnds:
@@ -1264,12 +1274,13 @@ class BDM(FolderStructure):
 					flat_cnds.extend(item)
 				else:
 					flat_cnds.append(item)
-			to_exclude = [cnd for cnd in df[cnd_header].unique() 
+			to_exclude = [cnd for cnd in df[cnd_header].unique()
 				 									if cnd not in flat_cnds]
 
 			if to_exclude:
-				if excl_factor is None:
-					excl_factor = {}
+				# work on a copy so mutating excl_factor here doesn't
+				# leak into the caller's dict
+				excl_factor = copy.deepcopy(excl_factor) if excl_factor else {}
 				excl_factor.setdefault(cnd_header, []).extend(to_exclude)
 				print(f"Automatically excluding {cnd_header}={to_exclude} "
 					  f"(not specified in cnds parameter)")
@@ -1670,7 +1681,8 @@ class BDM(FolderStructure):
 		"""
 
 		# Handle both 3D and 4D inputs
-		if X.ndim == 3:
+		was_3d = X.ndim == 3
+		if was_3d:
 			n_obs, n_elec, n_time = X.shape
 			n_freq = 1
 			X = X[np.newaxis, ...]  # Add frequency dimension
@@ -1678,10 +1690,10 @@ class BDM(FolderStructure):
 			n_freq, n_obs, n_elec, n_time = X.shape
 		else:
 			raise ValueError("Input must be 3D or 4D array")
-		
+
 		if window_size <= 1 or n_time < window_size:
 			print('Input data not suitable. Data will be returned')
-			return X
+			return X[0] if was_3d else X
 
 		# predefine variables
 		if avg_window:
@@ -1955,7 +1967,8 @@ class BDM(FolderStructure):
 			# reset max_tr again such that analysis is not underpowered
 			max_tr = [self.select_max_trials(df, ['yes'], labels,'collapsed')]
 			cnd_idx = np.where(df.collapsed == 'yes')[0]
-		cnd_labels = df[self.to_decode][cnd_idx].values
+		# force a writable copy (pandas CoW can make .values read-only)
+		cnd_labels = np.array(df[self.to_decode][cnd_idx].values)
 
 		# make sure that labels that should not be in analysis are excluded
 		# if not already done so
@@ -2692,7 +2705,7 @@ class BDM(FolderStructure):
 								Xtr_ = pca.fit_transform(Xtr_)
 								Xte_ = pca.transform(Xte_)
 							elif self.pca_components[1] == 'all':
-								if X != []:
+								if len(X) > 0:
 									if X.ndim == 3:
 										X_ = X[..., tr_t]
 									else:
@@ -2704,7 +2717,9 @@ class BDM(FolderStructure):
 									pca = PCA(
 										n_components=self.pca_components[0])
 									pca.fit(X_)
-									Xtr_ = pca.fit_transform(Xtr_)
+									# reuse this shared train+test fit for
+									# both -- do not re-fit on Xtr_ alone
+									Xtr_ = pca.transform(Xtr_)
 									Xte_ = pca.transform(Xte_)
 
 						# Train and test classifier
@@ -2714,15 +2729,11 @@ class BDM(FolderStructure):
 						predict = clf.predict(Xte_)
 
 						# Compute performance metrics
-						if bool(set(Ytr_)& set(Yte_)):
-							class_perf = self.compute_class_perf(scores, Yte_, 
-										  np.unique(Ytr_), predict) #
-							conf_m = confusion_matrix(Yte_, predict,
-								 							labels=labels[0])
-						else:
-							class_perf = 0
-							conf_m = self.get_fake_confusion_matrix(Yte_,
-											   						 predict) 
+						class_perf = self.compute_class_perf(
+							scores, Yte_, np.unique(Ytr_), predict
+						) if bool(set(Ytr_) & set(Yte_)) else 0
+						conf_m = self.get_fake_confusion_matrix(
+							Yte_, predict, labels[1], labels[0])
 
 						# store results
 						# TODO: create interpretable weights
@@ -2731,6 +2742,10 @@ class BDM(FolderStructure):
 						if not self.pca_components[0]:
 							weights[n, freq, tr_t, te_t] = (
 								self.get_classifier_weights(clf, Xtr_))
+						elif first_iter:
+							warnings.warn('Classifier weights are not '
+							'computed when PCA is enabled; W/topography '
+							'output will be all zeros')
 						# pairs = list(zip(Yte_, predict))
 
 		weights = np.mean(weights, axis=0)
@@ -2740,15 +2755,16 @@ class BDM(FolderStructure):
 		return class_acc, weights, conf_matrix
 
 	def get_fake_confusion_matrix(self,y_true:np.array,
-			       				y_pred:np.array)->np.array:
+			       				y_pred:np.array,row_labels:np.array=None,
+								col_labels:np.array=None)->np.array:
 
-		row_values = np.unique(y_true)
-		col_values = np.unique(y_pred)
-		output = np.zeros((row_values.size, col_values.size)) 
+		row_values = np.unique(y_true) if row_labels is None else row_labels
+		col_values = np.unique(y_pred) if col_labels is None else col_labels
+		output = np.zeros((len(row_values), len(col_values)))
 
 		for r,r_value in enumerate(row_values):
 			for c,c_value in enumerate(col_values):
-				output[r,c] = sum(y_pred[y_true == r_value] == c_value)
+				output[r,c] = np.sum(y_pred[y_true == r_value] == c_value)
 
 		return output
 
@@ -2981,6 +2997,10 @@ class BDM(FolderStructure):
 		Fawcett, T. (2006). An introduction to ROC analysis. Pattern 
 		Recognition Letters, 27(8), 861-874.
 		"""
+
+		# rank[labels] below needs a boolean mask, not integer fancy
+		# indexing -- coerce so 0/1 int labels work as documented
+		labels = np.asarray(labels).astype(bool)
 
 		num_pos = np.sum(labels)
 		num_neg = labels.size - num_pos
