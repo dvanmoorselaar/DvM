@@ -162,8 +162,17 @@ def find_raw_files(folder: str, sj: int, session: int,
                 # If run not specified, only take files without run
                 elif file_run is None:
                     candidates.append(fpath)
-    
-    return sorted(candidates)
+
+    candidates = sorted(candidates)
+    if len(candidates) > 1:
+        run_str = f', run {run}' if run is not None else ''
+        raise FileNotFoundError(
+            f'Multiple files match subject {sj}, session {session}'
+            f'{run_str}: {candidates}. Please ensure file naming is '
+            'unambiguous.'
+        )
+
+    return candidates
 
 def select_electrodes(
     epochs: mne.Epochs,
@@ -258,8 +267,10 @@ def select_electrodes(
     available_electrodes = [e for e in elec_oi if e in ch_names]
 
     if not available_electrodes:
-        warnings.warn(f'None of the specified electrodes found in channel \
-                    names. 'f'Available channels: {list(ch_names)[:10]}...')
+        warnings.warn(
+            'None of the specified electrodes found in channel names. '
+            f'Available channels: {list(ch_names)[:10]}...'
+        )
         return np.array([], dtype=int)
         
     # Log how many electrodes were found vs requested
