@@ -73,14 +73,14 @@ def blockPrinting(func):
     library output when not needed.
     """
     def func_wrapper(*args, **kwargs):
-        # block all printing to the console
-        sys.stdout = open(os.devnull, 'w', encoding='utf-8')
-        # call the method in question
-        value = func(*args, **kwargs)
-        # enable all printing to the console
-        sys.stdout = sys.__stdout__
-        # pass the return value of the method back
-        return value
+        original_stdout = sys.stdout
+        devnull = open(os.devnull, 'w', encoding='utf-8')
+        try:
+            sys.stdout = devnull
+            return func(*args, **kwargs)
+        finally:
+            sys.stdout = original_stdout
+            devnull.close()
 
     return func_wrapper
 
@@ -249,11 +249,16 @@ class FolderStructure(object):
         if not os.path.isdir(path):
             os.makedirs(path)
 
-        if fname != '':
+        if fname:
             if not overwrite:
                 while os.path.isfile(os.path.join(path,fname)):
-                    end_idx = len(fname) - fname.index('.')
-                    fname = fname[:-end_idx] + '+' + fname[-end_idx:]
+                    dot_idx = fname.rfind('.')
+                    if dot_idx == -1:
+                        # no extension to preserve -- just append
+                        fname = fname + '+'
+                    else:
+                        end_idx = len(fname) - dot_idx
+                        fname = fname[:-end_idx] + '+' + fname[-end_idx:]
             path = os.path.join(path,fname)
 
         return path
@@ -428,13 +433,15 @@ class FolderStructure(object):
                 df, epochs = exclude_eye(sj, int(session), df, epochs, 
                                          eye_dict, eye, file)
             else:
-                print(f"Warning: Preprocessing parameter file not found: \
-                      {file}. Eye exclusion based on EOG data only")
+                print(f"Warning: Preprocessing parameter file not found: "
+                      f"{file}. Eye exclusion based on EOG data only")
                 temp = eye_dict['use_tracker']
                 eye_dict['use_tracker'] = False
-                df, epochs = exclude_eye(sj, int(session), df, epochs, 
-                                        eye_dict, None, file)
-                eye_dict['use_tracker'] = temp
+                try:
+                    df, epochs = exclude_eye(sj, int(session), df, epochs,
+                                            eye_dict, None, file)
+                finally:
+                    eye_dict['use_tracker'] = temp
 
         # remove a subset of trials 
         if type(excl_factor) == dict: 
@@ -869,7 +876,8 @@ class FolderStructure(object):
         for sj_files in zip(*all_files):
 
             # load initial file to get reference data
-            ref_data = pickle.load(open(sj_files[0], "rb"))
+            with open(sj_files[0], "rb") as f:
+                ref_data = pickle.load(f)
             ref_times = ref_data['info']['times']
 
             # initialize combined data
@@ -880,8 +888,10 @@ class FolderStructure(object):
 
             # process individual files
             for i, file in enumerate(sj_files):
-                data = pickle.load(open(file, "rb"))
-                
+                with open(file, "rb") as f:
+                    data = pickle.load(f)
+
+
                 # check time alignment
                 if not np.array_equal(data['info']['times'], ref_times):
                     raise ValueError(f"Time mismatch in {file}")
@@ -900,21 +910,13 @@ class FolderStructure(object):
                 # Add condition results with custom or default naming
                 for key in data.keys():
                     if key not in ['info', 'bdm_info']:
-                        update = False
                         if len(all_files) == 1:
                             new_key = key
                         elif analysis_labels and i < len(analysis_labels):
                             new_key = f"{analysis_labels[i]}_{key}"
-                            update = True
                         else:
                             new_key = f"{analysis}_{key}"
-                            update = True
 
-                        if update and len(data.keys()) == 3:
-                            last_underscore = new_key.rfind('_')
-                            if last_underscore != -1:
-                                new_key = new_key[:last_underscore]
-                        
                         combined_data[new_key] = data[key]
 
             bdm.append(combined_data)
@@ -1019,6 +1021,9 @@ class FolderStructure(object):
                 for sj in sjs
             ]
 
-        ctfs = [pickle.load(open(file, 'rb')) for file in files]
+        ctfs = []
+        for file in files:
+            with open(file, 'rb') as f:
+                ctfs.append(pickle.load(f))
 
         return ctfs
