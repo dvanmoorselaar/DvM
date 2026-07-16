@@ -44,15 +44,17 @@ Examples
 --------
 Basic time-frequency analysis:
 
->>> tfr = TFR(sj=1, epochs=epochs, df=behavioral_data, 
+>>> tfr = TFR(sj=1, epochs=epochs, df=behavioral_data,
 ...           min_freq=4, max_freq=40, num_frex=25)
->>> tfr_results = tfr.compute_tfrs(conditions={'condition': ['A', 'B']})
+>>> tfr_results = tfr.condition_tfrs(pos_labels=None,
+...                                  cnds={'condition': ['A', 'B']})
 
 Custom wavelet parameters:
 
 >>> tfr = TFR(sj=1, epochs=epochs, df=behavioral_data,
 ...           cycle_range=(4, 12), freq_scaling='linear')
->>> tfr.condition_tfrs(conditions=['encoding', 'retrieval'])
+>>> tfr.condition_tfrs(pos_labels=None,
+...                     cnds={'condition': ['encoding', 'retrieval']})
 
 Created by Dirk van Moorselaar on 13-06-2018.
 Copyright (c) 2018 DvM. All rights reserved.
@@ -61,6 +63,7 @@ import os
 import mne
 import pickle
 import math
+import copy
 
 import numpy as np
 import pandas as pd
@@ -155,23 +158,23 @@ class TFR(FolderStructure):
 	Examples
 	--------
 	Basic time-frequency analysis:
-	
+
 	>>> tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=40)
-	>>> results = tfr.compute_tfrs(conditions=['condition_A', 
-	...   'condition_B'])
-	
+	>>> results = tfr.condition_tfrs(pos_labels=None,
+	...     cnds={'condition': ['condition_A', 'condition_B']})
+
 	Custom wavelet parameters with baseline correction:
-	
-	>>> tfr = TFR(sj=1, epochs=epochs, df=df, 
+
+	>>> tfr = TFR(sj=1, epochs=epochs, df=df,
 	...           cycle_range=(4, 12), baseline=(-0.2, 0))
-	>>> tfr.condition_tfrs(conditions=['encoding', 
-	...   'retrieval'])
-	
+	>>> tfr.condition_tfrs(pos_labels=None,
+	...     cnds={'condition': ['encoding', 'retrieval']})
+
 	High-frequency analysis with linear scaling:
-	
-	>>> tfr = TFR(sj=1, epochs=epochs, df=df, 
+
+	>>> tfr = TFR(sj=1, epochs=epochs, df=df,
 	...           min_freq=20, max_freq=80, freq_scaling='linear')
-	>>> results = tfr.compute_tfrs()
+	>>> results = tfr.condition_tfrs(pos_labels=None)
 	
 	Notes
 	-----
@@ -377,9 +380,11 @@ class TFR(FolderStructure):
 			
 		# limit analysis to electrodes of interest
 		if elec_oi == 'all':
+			# csd=True too: self.laplacian may have converted channel types
 			picks = mne.pick_types(epochs.info, eeg=True, csd = True)
-			elec_oi = np.array(epochs.ch_names)[picks]
-		epochs.pick(elec_oi)		
+		else:
+			picks = select_electrodes(epochs, elec_oi)
+		epochs.pick(np.array(epochs.ch_names)[picks])
 	
 		return epochs, df
 	
@@ -558,26 +563,31 @@ class TFR(FolderStructure):
 		"""
 		Performs wavelet convolution for time-frequency analysis.
 
-		This function convolves the input data (`X`) with a Morlet 
-		wavelet in the frequency domain using the Fast Fourier Transform 
-		(FFT). The convolution is performed efficiently by leveraging 
-		the FFT and Inverse FFT (IFFT), and the result is reshaped to 
+		This function convolves the input data (`X`) with a Morlet
+		wavelet in the frequency domain using the Fast Fourier Transform
+		(FFT). The convolution is performed efficiently by leveraging
+		the FFT and Inverse FFT (IFFT), and the result is reshaped to
 		match the time-frequency structure of the input data.
 
-		Args:
-			X (np.ndarray): Input data in the frequency domain 
-				(FFT of the signal).
-			wavelet (np.ndarray): The Morlet wavelet to convolve with 
-				the input data.
-			l_conv (int): Length of the convolution (in samples).
-			nr_time (int): Number of time points in the output.
-			nr_epochs (int): Number of epochs in the input data.
+		Parameters
+		----------
+		X : np.ndarray
+			Input data in the frequency domain (FFT of the signal).
+		wavelet : np.ndarray
+			The Morlet wavelet to convolve with the input data.
+		l_conv : int
+			Length of the convolution (in samples).
+		nr_time : int
+			Number of time points in the output.
+		nr_epochs : int
+			Number of epochs in the input data.
 
-		Returns:
-			np.ndarray: The result of the wavelet convolution, 
-				reshaped into a 2D array of shape `(nr_epochs, nr_time)`, 
-				where each row corresponds to an epoch and each 
-				column corresponds to a time point.
+		Returns
+		-------
+		np.ndarray
+			The result of the wavelet convolution, reshaped into a 2D
+			array of shape (nr_epochs, nr_time), where each row
+			corresponds to an epoch and each column to a time point.
 		"""
 
 		# Perform convolution in frequency domain
@@ -744,65 +754,66 @@ class TFR(FolderStructure):
 		visualization/statistics it uses decibel conversion with log 
 		baseline correction.
 
-		Args:
-			epochs (mne.Epochs): Preprocessed EEG data segmented into 
-				epochs.
-				The data is used for time-frequency decomposition.
-			output (str, optional): Type of output to compute. 
-				Supported values:
-				- 'power': Compute instantaneous power 
-				  (magnitude squared)
-				- 'phase': Compute instantaneous phase (cosine of 
-				  phase angle)
-				Defaults to 'power'.
-			for_decoding (bool, optional): Whether the output will be 
-			    used for classification/decoding analysis. When True, 
-				applies percent change baseline correction (or raw power 
-				if no baseline) which preserves linear relationships 
-				needed for most classifiers. When False, applies 
-				log-based decibel conversion for
-				visualization/statistics. Defaults to False.
-			cnd_idx (Optional[list], optional): List of trial indices 
-			    for each condition when computing induced power 
-				(self.power='induced'). Each element should be an array 
-				of trial indices belonging to the same condition. 
-				Required when self.power='induced' to enable 
-				condition-specific evoked response subtraction. 
-				Defaults to None.
+		Parameters
+		----------
+		epochs : mne.Epochs
+			Preprocessed EEG data segmented into epochs, used for
+			time-frequency decomposition.
+		output : str, default='power'
+			Type of output to compute:
+			- 'power': Compute instantaneous power (magnitude squared)
+			- 'phase': Compute instantaneous phase (cosine of phase
+			  angle)
+		for_decoding : bool, default=False
+			Whether the output will be used for classification/decoding
+			analysis. When True, applies percent change baseline
+			correction (or raw power if no baseline) which preserves
+			linear relationships needed for most classifiers. When
+			False, applies log-based decibel conversion for
+			visualization/statistics.
+		cnd_idx : list, optional
+			List of trial indices for each condition when computing
+			induced power (self.power='induced'). Each element should
+			be an array of trial indices belonging to the same
+			condition. Required when self.power='induced' to enable
+			condition-specific evoked response subtraction.
 
-		Returns:
-			np.ndarray: Time-frequency representation with shape 
-				(nr_frequencies, nr_epochs, nr_channels, nr_time) for 
-				epoched data or (nr_frequencies, nr_channels, nr_time) 
-				for averaged data. Shape depends on input epochs
-				structure and the power type (evoked vs. epoched data).
+		Returns
+		-------
+		np.ndarray
+			Time-frequency representation with shape (nr_frequencies,
+			nr_epochs, nr_channels, nr_time) for epoched data or
+			(nr_frequencies, nr_channels, nr_time) for averaged data.
+			Shape depends on input epochs structure and the power type
+			(evoked vs. epoched data).
 
-		Notes:
-			- Power types (controlled by self.power):
-				* 'total': Standard power computation without evoked 
-				   subtraction
-				* 'induced': Subtracts condition-specific evoked 
-				   response from each trial before TFR computation 
-				   (requires cnd_idx parameter)
-				* 'evoked': Computes power of the averaged evoked 
-				   response
-			- For decoding (for_decoding=True): Uses percent change from 
-			baseline when self.baseline is specified, or raw power when 
-			no baseline. This preserves the linear feature space needed 
-			for classification.
-			- For statistics/visualization (for_decoding=False): Uses 
-			decibel conversion (10*log10(power/baseline)) when baseline 
-			is specified.
-			- The baseline period is defined by self.baseline tuple 
-			(start, end) in seconds.
-			- Power computation: real²+ imag² of the complex analytic 
-			signal.
-			- Phase computation: cosine of the phase angle of the 
-			analytic signal.
+		Raises
+		------
+		ValueError
+			If self.power='induced' but cnd_idx is not provided, or if
+			an unsupported output type is specified.
 
-		Raises:
-			ValueError: If self.power='induced' but cnd_idx is not 
-			provided, or if an unsupported output type is specified.	
+		Notes
+		-----
+		Power types (controlled by self.power):
+
+		- 'total': Standard power computation without evoked
+		  subtraction
+		- 'induced': Subtracts condition-specific evoked response from
+		  each trial before TFR computation (requires cnd_idx)
+		- 'evoked': Computes power of the averaged evoked response
+
+		For decoding (for_decoding=True): Uses percent change from
+		baseline when self.baseline is specified, or raw power
+		otherwise, preserving the linear feature space classifiers need.
+
+		For statistics/visualization (for_decoding=False): Uses decibel
+		conversion (10*log10(power/baseline)) when baseline is
+		specified. The baseline period is self.baseline (start, end) in
+		seconds.
+
+		Power = real^2 + imag^2 of the complex analytic signal. Phase =
+		cosine of the phase angle of the analytic signal.
 		"""
 
 		if self.power == 'induced':
@@ -816,7 +827,7 @@ class TFR(FolderStructure):
 			'evoked from each trial')
 			for idx in cnd_idx:
 				evoked = epochs[idx].average()
-				epochs[idx]._data = epochs[idx].subtract_evoked(evoked)._data
+				epochs._data[idx] = epochs[idx].subtract_evoked(evoked)._data
 
 		# Ensure wavelets are generated TFR decomposition
 		self._ensure_wavelets()
@@ -1025,7 +1036,8 @@ class TFR(FolderStructure):
 		
 		# select trials of interest (e.g., lateralized stimuli)
 		if isinstance(pos_labels, dict):
-			idx = ERP.select_lateralization_idx(df, pos_labels, spatial_restriction)
+			idx = ERP.select_lateralization_idx(df, pos_labels, 
+									   			spatial_restriction)
 		elif pos_labels is None:
 			idx = np.arange(len(df))
 		else:
@@ -1108,7 +1120,7 @@ class TFR(FolderStructure):
 			tfr['power'][cnd] = power
 
 		# baseline correction
-		tfr = self.baseline_tfr(tfr,base,self.base_method,elec_oi)
+		tfr = self.baseline_tfr(tfr,base,self.base_method)
 
 		if self.report:
 			self.generate_tfr_report(tfr,
@@ -1163,22 +1175,22 @@ class TFR(FolderStructure):
 		s_freq = epochs.info['sfreq']
 		nr_time = epochs.times.size
 		nr_ch = len(epochs.ch_names)
-		if isinstance(epochs, mne.epochs.EpochsFIF):
-			nr_epochs = len(epochs.events)
-		else:  # mne.epochs.EpochsArray
-			nr_epochs = 1
-			epochs._data = epochs._data[np.newaxis, ...]  # Add epoch dimension
+		# Evoked data is 2D (n_ch, n_times); Epochs data is always 3D
+		data = epochs._data
+		if data.ndim == 2:
+			data = data[np.newaxis, ...]
+		nr_epochs = data.shape[0]
 
 		l_conv = 2**self.nextpow2(nr_time * nr_epochs + nr_time - 1)
-		raw_conv = np.zeros((nr_epochs, self.num_frex, nr_ch, 
+		raw_conv = np.zeros((nr_epochs, self.num_frex, nr_ch,
 							nr_time), dtype = complex)
 
-		# loop over channels			
+		# loop over channels
 		for ch_idx in range(nr_ch):
-			print(f'Decomposing channel {ch_idx+1} out of {nr_ch} channels', 
+			print(f'Decomposing channel {ch_idx+1} out of {nr_ch} channels',
 				  end='\r')
 
-			x = epochs._data[:, ch_idx]
+			x = data[:, ch_idx]
 			if self.method == 'wavelet':
 				# fft decomposition
 				x_fft = fft(x.ravel(), l_conv)
@@ -1234,9 +1246,10 @@ class TFR(FolderStructure):
 		Returns
 		-------
 		dict
-			Dictionary mapping condition names to mne.time_frequency.AverageTFR 
-			objects. Each object contains the condition-specific time-frequency 
-			power data in MNE format, ready for visualization and analysis.
+			Dictionary mapping condition names to 
+			mne.time_frequency.AverageTFR objects. Each object contains 
+			the condition-specific time-frequency power data in MNE 
+			format, ready for visualization and analysis.
 
 		Notes
 		-----
@@ -1282,8 +1295,7 @@ class TFR(FolderStructure):
 		# return dictionary of AverageTFR objects
 		return tfr_output	
 			
-	def baseline_tfr(self,tfr:dict,base:dict,method:str,
-		 			elec_oi:str='all') -> dict:
+	def baseline_tfr(self,tfr:dict,base:dict,method:str) -> dict:
 		"""
 		Apply baseline correction to time-frequency power data.
 
@@ -1319,11 +1331,6 @@ class TFR(FolderStructure):
 			- 'norm': Apply normalization procedure 
 			  (electrode-dependent)
 			- None: Simple trial averaging without baseline correction
-		elec_oi : str or list, default='all'
-		    # TODO: check this
-			Electrode specification. Required for normalization methods 
-			that depend on electrode topography ('norm', 'Z'). Usually 
-			matches the electrode selection used in analysis.
 
 		Returns
 		-------
@@ -1369,8 +1376,8 @@ class TFR(FolderStructure):
 		"""
 
 		cnds = list(tfr['power'].keys())
-		
-		if method == 'cnd_avg':
+
+		if method == 'cnd_avg' and base:
 			cnd_avg = np.mean(np.stack([base[cnd] for cnd in cnds]), axis = 0)
 
 		for cnd in cnds:
@@ -1378,13 +1385,16 @@ class TFR(FolderStructure):
 			power = tfr['power'][cnd]  
 			tfr['cnd_cnt'][cnd] = power.shape[0]
 
-			if method == 'trial_spec':
+			if method is None or not base:
+				# Simply average across trials when no baseline correction
+				tfr['power'][cnd] = np.mean(power, axis = 0)
+			elif method == 'trial_spec':
 				#  baseline correct individual trials, then average
 				power = self.db_convert(power, base[cnd])
 				tfr['power'][cnd] = np.mean(power, axis = 0)
 			elif method == 'cnd_spec' or method == 'cnd_avg':
 				# average first, then baseline correct
-				avg_power = np.mean(power, axis=0)  
+				avg_power = np.mean(power, axis=0)
 				if method == 'cnd_spec':
 					tfr['power'][cnd] = self.db_convert(avg_power, base[cnd])
 				else:
@@ -1393,13 +1403,12 @@ class TFR(FolderStructure):
 				print('For normalization procedure it is assumed that it is as'
 				 	 ' if all stimuli of interest are presented right')
 				# Average first for normalization
-				avg_power = np.mean(power, axis=0)  
-				tfr['power'][cnd], info = self.normalize_power(avg_power, 
-															 list(elec_oi)) 
+				avg_power = np.mean(power, axis=0)
+				# use tfr['ch_names'] rather than elec_oi: elec_oi may still
+				# be the literal string 'all' at this point
+				tfr['power'][cnd], info = self.normalize_power(avg_power,
+															 list(tfr['ch_names']))
 				tfr.update({'norm_info':info})
-			elif method is None or not base:
-				# Simply average across trials when no baseline correction
-				tfr['power'][cnd] = np.mean(power, axis = 0)
 			else:
 				raise ValueError(f'Invalid method specified: {method}')
 
@@ -1467,6 +1476,43 @@ class TFR(FolderStructure):
 
 		return norm_power
 
+	def normalize_power(self, avg_power: np.ndarray,
+					 ch_names: list) -> Tuple[np.ndarray, dict]:
+		"""
+		Compute per-electrode lateralization index.
+
+		lx = (contra - ipsi) / (contra + ipsi)
+
+		Assumes stimuli of interest are presented right (i.e., left
+		hemifield), matching the convention used elsewhere in this class.
+		Electrode pairing follows get_diff_pairs' 10-20 odd/even
+		convention; midline electrodes pair to themselves (lx = 0).
+
+		Parameters
+		----------
+		avg_power : np.ndarray
+			Condition-averaged power, shape (n_freq, n_channels, n_time).
+		ch_names : list of str
+			Channel names matching avg_power's channel axis, in order.
+
+		Returns
+		-------
+		lx_power : np.ndarray
+			Lateralization index, same shape as avg_power.
+		info : dict
+			Electrode name -> (contra_idx, ipsi_idx) pairing used.
+		"""
+
+		pairs = get_diff_pairs(ch_names)
+		lx_power = np.zeros_like(avg_power)
+		for ch, (contra_idx, ipsi_idx) in pairs.items():
+			ch_idx = ch_names.index(ch)
+			contra = avg_power[:, contra_idx]
+			ipsi = avg_power[:, ipsi_idx]
+			lx_power[:, ch_idx] = (contra - ipsi) / (contra + ipsi)
+
+		return lx_power, pairs
+
 	#TODO: update fucnction (make it more general)
 	@staticmethod
 	def lateralization_index(tfr:dict,elec_oi:list='all',
@@ -1486,26 +1532,28 @@ class TFR(FolderStructure):
 		index is computed as the average lateralization index across 
 		electrodes.					 
 
-		Args:
-			tfr (dict): dictionary as returned by read_tfr with 
-	        time-frequencypower per condition (n_ch, nr_freq, n_times)
-			elec_oi (list): list of electrodes of interest
-			elec_pairs (dict): dictionary with ipsi- and contra-lateral		
-			electrode pairs. Within this list, each unique electrode of 
-			interest needs to be coupled once to its mirror electrode in 
-			the other hemifield in a list. In case, the analysis is run 
-	        to create topoplots, midline electrodes are unique and 
-	        should be coupled to themselves (i.e., lx = 0). If not the 
-	        function will assume a biosemi64 configuration.
+		Parameters
+		----------
+		tfr : dict
+			Dictionary as returned by read_tfr, with time-frequency
+			power per condition (n_ch, nr_freq, n_times).
+		elec_oi : list
+			List of electrodes of interest.
+		elec_pairs : list, optional
+			Ipsi- and contra-lateral electrode pairs. Each unique
+			electrode of interest is coupled once to its mirror
+			electrode in the other hemifield. For topoplots, midline
+			electrodes are coupled to themselves (i.e., lx = 0). If
+			None, assumes a biosemi64 configuration.
 
-			For example: [['Fp1':'Fp2']] will create a lateralization 
-			index based on the difference between Fp1 and Fp2, where Fp1
-			is assumed to be the contralateral electrode.
+			For example: [['Fp1', 'Fp2']] computes the lateralization
+			index from the Fp1-Fp2 difference, with Fp1 assumed
+			contralateral.
 
-
-		Returns:
-			tfr (dict): modified instance of tfr with normalized power 
-			values	
+		Returns
+		-------
+		tfr : dict
+			Modified instance of tfr with normalized power values.
 		"""
 
 		# make a copy of the original tfr
@@ -1536,10 +1584,12 @@ class TFR(FolderStructure):
 			pair_idx = [i for i, p in enumerate(ch_pairs) if p[0] in elec_oi]
 			contra_idx = [channels.index(ch_pairs[idx][0]) for idx in pair_idx]
 			ipsi_idx = [channels.index(ch_pairs[idx][1]) for idx in pair_idx]
-			output = np.zeros((nr_sj,nr_freqs,nr_times))
 
 		# frequency and condition loop
 		for cnd in tfr_.keys():
+			if isinstance(elec_oi, list):
+				# fresh per condition
+				output = np.zeros((nr_sj,nr_freqs,nr_times))  
 			for f in range(nr_freqs):
 				X =	np.stack([t._data[:,f,:] for t in tfr_[cnd]])
 				if elec_oi == 'all':
