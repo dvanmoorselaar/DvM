@@ -1385,7 +1385,8 @@ class TFR(FolderStructure):
 			power = tfr['power'][cnd]  
 			tfr['cnd_cnt'][cnd] = power.shape[0]
 
-			if method is None or not base:
+			needs_base = method in ('trial_spec', 'cnd_spec', 'cnd_avg')
+			if method is None or (needs_base and not base):
 				# Simply average across trials when no baseline correction
 				tfr['power'][cnd] = np.mean(power, axis = 0)
 			elif method == 'trial_spec':

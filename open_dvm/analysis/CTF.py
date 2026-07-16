@@ -524,7 +524,7 @@ class CTF(BDM):
 	def spatial_ctf(self, pos_labels: dict = 'all', cnds: dict = None,
 					excl_factor: dict = None, window_oi: tuple = (None, None),
 					freqs: dict = 'main_param', GAT: bool = False, 
-					nr_perm: int = 0, collapse: bool = False, name: str = 'main'):
+					nr_perm: int = 0, collapse: bool = False, f_name: str = None):
 		"""
 		Perform spatial channel tuning function analysis across 
 		conditions.
@@ -585,27 +585,33 @@ class CTF(BDM):
 		collapse : bool, default=False
 			Whether to collapse across specific conditions or factors.
 			Note: This feature is currently under development.
-		name : str, default='main'
-			Analysis name identifier used for file naming and 
-			organization. Results will be saved with this name as 
-			suffix.
+		f_name : str, optional, default=None
+			Filename for saving results. If None (default), results are 
+			returned as dictionaries but not saved to disk. If provided,
+			results are saved as pickle files with this name as suffix.
 
 		Returns
 		-------
-		None
-		Function performs analysis and saves results to pickle 
-		files:
-		- 'ctfs_{name}.pickle': Reconstructed channel tuning 
-		   functions. For filtered data: contains 'C2_E' 
-		   (evoked power) and 'C2_T' (total power). For broadband: 
-		   contains 'C2_voltage' (raw ERP) and 'C2_envelope' 
-		   (phase-locked amplitude via Hilbert transform).
-		- 'ctf_param_{name}.pickle': Extracted tuning parameters 
-		  (slopes, von Mises fits, Gaussian fits)
-		- 'ctf_info_{name}.pickle': Analysis metadata and indices
+		tuple of (ctfs, ctf_param, info)
+			ctfs : dict
+				Reconstructed channel tuning functions. For filtered data: 
+				contains 'C2_E' (evoked power) and 'C2_T' (total power). 
+				For broadband: contains 'C2_voltage' (raw ERP) and 
+				'C2_envelope' (phase-locked amplitude via Hilbert 
+				transform).
+			ctf_param : dict
+				Extracted tuning parameters (slopes, von Mises fits, 
+				Gaussian fits).
+			info : dict
+				Analysis metadata and cross-validation indices.
 		
-		If self.report=True, also generates an HTML report with 
-		visualizations of the results.		
+		If f_name is not None, also saves:
+		- 'ctfs_{f_name}.pickle': Reconstructed tuning functions
+		- 'ctf_param_{f_name}.pickle': Tuning parameters
+		- 'ctf_info_{f_name}.pickle': Analysis metadata
+		
+		If self.report=True and f_name is not None, also generates 
+		an HTML report with visualizations.		
 		
 		Notes
 		-----
@@ -661,20 +667,22 @@ class CTF(BDM):
 		
 		Examples
 		--------
-		Basic analysis with default settings:
+		Basic analysis returning data without saving:
 		
 		>>> ctf = CTF(sj=1, to_decode='target_loc')
-		>>> ctf.spatial_ctf()
+		>>> ctfs, ctf_param, info = ctf.spatial_ctf()
 		
-		Cross-condition analysis:
+		Cross-condition analysis with file saving:
 		
 		>>> conditions = {'condition': [['easy'], 'hard']}
-		>>> ctf.spatial_ctf(cnds=conditions, name='cross_difficulty')
+		>>> ctfs, ctf_param, info = ctf.spatial_ctf(
+		...     cnds=conditions, f_name='cross_difficulty')
 		
 		Multi-frequency analysis with custom bands:
 		
 		>>> freq_bands = {'alpha': [8, 12], 'beta': [13, 30]}
-		>>> ctf.spatial_ctf(freqs=freq_bands, name='multi_band')
+		>>> ctfs, ctf_param, info = ctf.spatial_ctf(
+		...     freqs=freq_bands, f_name='multi_band')
 		"""
 		
 		# Input validation and setup
@@ -706,7 +714,11 @@ class CTF(BDM):
 		 	"is not equal to desired downsample ({self.downsample}).")	
 
 		nr_itr = self.nr_iter * self.nr_folds
-		ctf_name = f'sub_{self.sj}_{name}'
+		# Always create ctf_name for reporting; use f_name if provided
+		if f_name is not None:
+			ctf_name = f'sub_{self.sj}_{f_name}'
+		else:
+			ctf_name = f'sub_{self.sj}_ctf'
 		nr_perm += 1
 		nr_elec = len(epochs.ch_names)
 		tois = get_time_slice(epochs.times, window_oi[0], window_oi[1])
@@ -912,14 +924,12 @@ class CTF(BDM):
 		ctf_param.update({'info':{'times':times_oi,
 							'freqs':freqs,'bands':bands}})
 
-		if self.ctf_param:
-			with open(self.folder_tracker(['ctf',self.to_decode], 
-					fname=f'{ctf_name}_param.pickle'),'wb') as handle:
-				print('saving ctf params')
-				pickle.dump(ctf_param, handle)
-
-		# save ctf data
-		print('saving ctf data')
+		if f_name is not None:
+			if self.ctf_param:
+				with open(self.folder_tracker(['ctf',self.to_decode], 
+						fname=f'{ctf_name}_param.pickle'),'wb') as handle:
+					print('saving ctf params')
+					pickle.dump(ctf_param, handle)
 		ctfs = {}
 		for cnd in ctf.keys():
 			ctfs[cnd] = {}
@@ -936,20 +946,24 @@ class CTF(BDM):
 
 		ctfs.update({'info':{'times':times_oi, 'freqs':freqs}})
 
-		# generate report
+		# Generate report (always, regardless of whether data is saved)
 		if self.report:
-			self.generate_ctf_report(ctfs,ctf_param,freqs,info = epochs.info,
-									report_name = ctf_name)
+			self.generate_ctf_report(ctfs, ctf_param, freqs, info=epochs.info,
+									report_name=ctf_name)
 
-		with open(self.folder_tracker(['ctf',self.to_decode], 
-				fname = f'{ctf_name}_ctf.pickle'),'wb') as handle:
-			print('saving ctfs')
-			pickle.dump(ctfs, handle)
+		# Save outputs if f_name is provided
+		if f_name is not None:
+			with open(self.folder_tracker(['ctf',self.to_decode], 
+					fname = f'{ctf_name}_ctf.pickle'),'wb') as handle:
+				print('saving ctfs')
+				pickle.dump(ctfs, handle)
 
-		# TODO: add saving of weights and permutations and add to report
-		with open(self.folder_tracker(['ctf',self.to_decode], 
-				fname = f'{ctf_name}_info.pickle'),'wb') as handle:
-			pickle.dump(info, handle)
+			# TODO: add saving of weights and permutations and add to report
+			with open(self.folder_tracker(['ctf',self.to_decode], 
+					fname = f'{ctf_name}_info.pickle'),'wb') as handle:
+				pickle.dump(info, handle)
+		
+		return ctfs, ctf_param, info
 		
 	def select_ctf_data(self,epochs:mne.Epochs,df:pd.DataFrame,
 						elec_oi:Union[list, str]= 'all',headers:list = [],
@@ -1917,7 +1931,7 @@ class CTF(BDM):
 							window_oi_tr:tuple=None,window_oi_te:tuple=None,
 							excl_factor_tr:dict=None,excl_factor_te:dict=None,
 							downsample:int = 1,nr_perm:int=0,GAT:bool=False,
-							name:str='loc_ctf'):
+							f_name:str=None):
 
 		# set train and test data
 		epochs_tr, df_tr = self.select_ctf_data(self.epochs[0], self.df[0],
@@ -1933,7 +1947,11 @@ class CTF(BDM):
 			window_oi_te = window_oi_tr
 
 		nr_itr = 1
-		ctf_name = f'sub_{self.sj}_{name}'
+		# Always create ctf_name for reporting; use f_name if provided
+		if f_name is not None:
+			ctf_name = f'sub_{self.sj}_{f_name}'
+		else:
+			ctf_name = f'sub_{self.sj}_loc_ctf'
 		nr_perm += 1
 		nr_elec = len(epochs_tr.ch_names)
 		tois_tr = get_time_slice(epochs_tr.times,
@@ -2075,25 +2093,33 @@ class CTF(BDM):
 				ctf[cnd]['W_envelope'] = ctf[cnd].pop('W_E')
 				ctf[cnd]['C2_voltage'] = ctf[cnd].pop('C2_T')
 				ctf[cnd]['W_voltage'] = ctf[cnd].pop('W_T')		# save output
-				
-		with open(self.folder_tracker(['ctf',self.to_decode], 
-				fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
-			print('saving ctfs')
-			pickle.dump(ctf, handle)
-
-		with open(self.folder_tracker(['ctf',self.to_decode], 
-				fname = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
-			pickle.dump(info, handle)	
-
+		
+		# Always compute ctf_param if needed (independent of saving)
 		if self.ctf_param:
 			print('get ctf tuning params')
-			ctf_param = self.get_ctf_tuning_params(ctf,self.ctf_param,
-					  							GAT=GAT,avg_ch=self.avg_ch)
-			
+			ctf_param = self.get_ctf_tuning_params(ctf, self.ctf_param,
+					  							GAT=GAT, avg_ch=self.avg_ch)
+		else:
+			ctf_param = None
+		
+		# Save outputs if f_name is provided
+		if f_name is not None:
 			with open(self.folder_tracker(['ctf',self.to_decode], 
-					fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
-				print('saving ctf params')
-				pickle.dump(ctf_param, handle)
+					fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
+				print('saving ctfs')
+				pickle.dump(ctf, handle)
+
+			with open(self.folder_tracker(['ctf',self.to_decode], 
+					fname = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
+				pickle.dump(info, handle)	
+
+			if ctf_param is not None:
+				with open(self.folder_tracker(['ctf',self.to_decode], 
+						fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
+					print('saving ctf params')
+					pickle.dump(ctf_param, handle)
+				
+		return ctf, ctf_param, info
 
 	def extract_slopes(self,X:np.array)->float:
 		"""
