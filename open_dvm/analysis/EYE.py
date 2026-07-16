@@ -80,8 +80,11 @@ from open_dvm.support.preprocessing_utils import (
     format_subject_id,
 )
 from open_dvm.support.FolderStructure import *
-from open_dvm.pygazeanalyser.edfreader import *
-from open_dvm.pygazeanalyser.eyetribereader import *
+from open_dvm.support.eye_readers import (
+    read_edf,
+    read_edf_time_overlap,
+    read_eyetribe,
+)
 
 class EYE(FolderStructure):
     """
@@ -262,8 +265,8 @@ class EYE(FolderStructure):
         Returns
         -------
         eye : np.ndarray
-            Array of trial dictionaries from pygazeanalyser, containing
-            keys: 'x', 'y', 'trackertime', 'events', etc.
+            Array of trial dictionaries from support.eye_readers,
+            containing keys: 'x', 'y', 'trackertime', 'events', etc.
         df : pd.DataFrame
             Behavioral data with practice trials removed, aligned to
             eye tracker trials.
@@ -430,7 +433,7 @@ class EYE(FolderStructure):
         Parameters
         ----------
         trial : dict
-            Single trial dictionary from pygazeanalyser containing keys:
+            Single trial dictionary from support.eye_readers containing keys:
             - 'x': X gaze coordinates in pixels
             - 'y': Y gaze coordinates in pixels
             - 'trackertime': Sample timestamps in ms

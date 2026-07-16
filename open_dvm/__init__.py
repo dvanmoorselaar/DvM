@@ -19,11 +19,8 @@ stats : Statistical analysis utilities
     Bootstrap statistics, significance testing
 
 support : Helper utilities for data management
-    FolderStructure for file organization, preprocessing utilities, 
-    eye-tracking helpers
-
-pygazeanalyser : Eye-tracking data analysis
-    Third-party eye tracker format readers and analysis
+    FolderStructure for file organization, preprocessing utilities,
+    eye-tracking helpers (including eye tracker file readers)
 
 See Also
 --------

@@ -47,7 +47,7 @@ Repository = "https://github.com/yourusername/open-dvm"
 Issues = "https://github.com/yourusername/open-dvm/issues"
 
 [tool.setuptools]
-packages = ["open_dvm", "open_dvm.analysis", "open_dvm.support", "open_dvm.stats", "open_dvm.visualization", "open_dvm.pygazeanalyser"]
+packages = ["open_dvm", "open_dvm.analysis", "open_dvm.support", "open_dvm.stats", "open_dvm.visualization"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
