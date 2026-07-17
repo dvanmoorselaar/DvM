@@ -1509,14 +1509,14 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
 
 def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
                         show_SE:bool=False,smooth:bool=False,timecourse:str='1d',
-                        output:str='raw_slopes',band_oi: str=None,
-                        stats:Union[str,bool]='perm',p_thresh:float=0.05,
+                        output:str=None,band_oi: str=None,
+                        stats:Union[str,bool]=None,p_thresh:float=0.05,
                         p_cluster:Optional[float]=None,
                         threshold:Optional[float]=None,
                         chance_level:float=0,
                         mask_nonsig:bool=False,diverging_cmap:bool=False,
                         onset_times:Union[list,bool]=[0],offset_axes:int=10,
-                        show_legend:bool=True,avg_bins:bool=False,**kwargs):
+                        show_legend:bool=True,plot_bins:bool=True,**kwargs):
     """Plot spatial channel tuning function (CTF) timecourse with 
     multiple visualization modes.
 
@@ -1560,18 +1560,19 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
         - '2d_tfr': Time-frequency representation matrix
         - '2d_ctf': 2D channel tuning function (spatial x time)
         For 2D modes, only first condition is plotted.
-    output : str or list, default='raw_slopes'
-        Output types to plot (e.g., 'raw_slopes', 'param_slopes').
+    output : str or list, required
+        Output types to plot (e.g., 'voltage_slopes', 'param_slopes').
         Can be single string or list for multiple overlaid outputs.
+        Must be explicitly specified. No default.
     band_oi : str, optional
         Frequency band of interest to plot. If None and multiple bands
         exist, averages across all bands. Default: None.
-    stats : str or bool, default='perm'
+    stats : str or bool, default=None
         Statistical test type for significance overlay:
         - 'perm': Cluster-based permutation test
         - 'ttest': Independent samples t-test
         - 'fdr': False discovery rate correction
-        - False: No significance testing
+        - False or None: No significance testing
     p_thresh : float, default=0.05
         P-value threshold for significance marking.
     p_cluster : float, optional
@@ -1602,9 +1603,11 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
     show_legend : bool, default=True
         If True, display legend with condition/output names (1D plots).
         Default: True.
-    avg_bins : bool, default=False
-        If True and data contains spatial bins, average across bins
-        (removes zero-value bins). Used for 1D plotting. Default: False.
+    plot_bins : bool, default=True
+        If True and data contains spatial bins, plot all individual bins
+        as separate lines with distinct colors (1D plots only; ignored for 2D modes).
+        If False, average across spatial bins into a single line.
+        Default: True.
     **kwargs
         Additional arguments passed to plot_2d(), plot_significance(),
         and plotting functions.
@@ -1677,6 +1680,20 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
     
     if isinstance(ctfs, dict):
         ctfs = [ctfs]
+    
+    # Validate output parameter
+    if output is None:
+        available = [k for k in ctfs[0].keys() if k != 'info']
+        raise ValueError(
+            f"output parameter is required and must be explicitly specified.\n"
+            f"Available outputs in this CTF: {', '.join(available)}\n"
+            f"Examples: 'voltage_slopes' (broadband), 'E_slopes'/'T_slopes' (frequency-specific)")
+    
+    # Validate required info structure
+    if 'info' not in ctfs[0] or 'times' not in ctfs[0]['info']:
+        raise ValueError("CTF object missing required 'info' structure with 'times' key. "
+                       "Ensure CTF was computed with proper initialization.")
+    
     times = ctfs[0]['info']['times']
 
     # Convert times from seconds to milliseconds if needed
@@ -1701,6 +1718,9 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
         colors = list(mcolors.TABLEAU_COLORS.values())
 
     if band_oi is not None:
+        if 'bands' not in ctfs[0]['info']:
+            raise ValueError(f"band_oi='{band_oi}' specified but 'bands' key not found in CTF info. "
+                           "Ensure CTF was computed with frequency bands.")
         band_idx = ctfs[0]['info']['bands'].index(band_oi)
 
     ylabel = f'CTF slope (au) - {band_oi}' if band_oi is not None \
@@ -1728,15 +1748,24 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
                     y = np.squeeze(y,axis=1)
 
             if timecourse == '1d':
-                if y.ndim > 2 and avg_bins:
+                if y.ndim > 2 and not plot_bins:
+                    # Average across bins when plot_bins=False
+                    n_bins_orig = y.shape[-1]
                     y = y[:,:,~np.all(y == 0, axis=(0,1))].mean(axis=-1)
-                if y.ndim > 2:
+                    n_bins_kept = y.shape[-1] if y.ndim > 2 else 1
+                    print(f"Averaging across {n_bins_orig} spatial bins into single line "
+                          f"({n_bins_kept} non-zero bins averaged)")
+                if y.ndim > 2 and plot_bins:
+                    # Plot individual bins as separate lines
                     # colors is sized for len(cnds), which can be fewer
                     # than the number of spatial bins -- fall back to a
                     # bin-sized palette rather than indexing out of range
                     n_bins = y.shape[-1]
-                    bin_colors = colors if len(colors) >= n_bins \
-                        else list(mcolors.TABLEAU_COLORS.values())
+                    if len(colors) >= n_bins:
+                        bin_colors = colors
+                    else:
+                        # Use seaborn palette for smooth color cycling with any n_bins
+                        bin_colors = sns.color_palette("husl", n_bins)
                     for b in range(n_bins):
                         y_ = y[:,:,b]
                         if not np.all(y_ == 0):
@@ -1749,13 +1778,20 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
                                     label=label,color=color,ls=['-','--'][o])
 
                 if stats:
-                    #TODO: make also work for individual bins	
-                    plot_significance(times,y,chance_level,
-                                    color=color,stats=stats,
-                                    smooth=smooth,p_cluster=p_cluster,
-                                    threshold=threshold,**kwargs)
+                    if y.ndim > 2 and plot_bins:
+                        warnings.warn('Statistical testing with individual bins (plot_bins=True) '
+                                    'is not yet supported. Statistics will be skipped for binned data. '
+                                    'Set plot_bins=False to enable significance testing.')
+                    else:
+                        plot_significance(times,y,chance_level,
+                                        color=color,stats=stats,
+                                        smooth=smooth,p_cluster=p_cluster,
+                                        threshold=threshold,**kwargs)
             elif timecourse == '2d_tfr' or timecourse == '2d_gat':
                 if timecourse == '2d_tfr':
+                    if 'freqs' not in ctfs[0]['info']:
+                        raise ValueError("timecourse='2d_tfr' specified but 'freqs' key not found in CTF info. "
+                                       "Ensure CTF was computed with frequency information.")
                     freqs = ctfs[0]['info']['freqs']	
                     y_range = [np.mean(band) for band in freqs]
                     ylabel = 'Frequency (Hz)'
@@ -1798,6 +1834,8 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
                     'channel. Individual channels will be averaged.')
                     y = y.mean(axis=-2)
                 if y.shape[-1]%2 == 0:
+                    # Duplicate bin 0 at the end to complete circular representation
+                    # for even-numbered bin counts, ensuring visual continuity
                     y = np.concatenate([y, y[:, :, 0:1] ], axis=2)
                 y = np.swapaxes(y,1,2)
                 y_range = np.linspace(-180,180,y.shape[1])
