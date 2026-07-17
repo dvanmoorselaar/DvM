@@ -512,7 +512,7 @@ class ERP(FolderStructure):
         time_oi: Optional[tuple] = None, 
         excl_factor: Optional[dict] = None, 
         RT_split: bool = False, 
-        name: str = 'main'
+        f_name: str = None
     ):
         """
         Generate condition-specific ERPs with flexible trial selection 
@@ -590,11 +590,10 @@ class ERP(FolderStructure):
             division. Requires 'RT' column in behavioral dataframe. 
             Generates separate evoked objects for speed-based 
             comparisons.
-        name : str, default='main'
-            Base identifier for output files and analysis labeling. 
-            Used in evoked object filenames as 
-            'sub_{subject}_{condition}_{name}-ave.fif'. Helps 
-            organize multiple analyses of the same dataset.
+        f_name : str, optional, default=None
+            Filename suffix for saving results. If None (default), results 
+            are returned but not saved to disk. If provided, evoked 
+            objects are saved as '.fif' files with this name as suffix.
 
         Returns
         -------
@@ -624,9 +623,9 @@ class ERP(FolderStructure):
         stimuli were contralateral.
 
         File Organization:
-        - ERP: 'erp/evoked/sub_{sj}_{condition}_{name}-ave.fif'
-        - RT split: 'erp/evoked/sub_{sj}_{condition}_{name}_fast-ave.fif'
-        - HTML reports: 'erp/report/sub_{sj}_{name}.html'
+        - ERP: 'erp/evoked/sub_{sj}_{condition}_{f_name}-ave.fif' (saved if f_name provided)
+        - RT split: 'erp/evoked/sub_{sj}_{condition}_{f_name}_fast-ave.fif' (saved if f_name provided)
+        - HTML reports: 'erp/report/sub_{sj}_{f_name}.html' (generated if self.report=True)
 
         The method handles missing conditions by printing warnings and
         continuing analysis for available conditions.
@@ -693,9 +692,18 @@ class ERP(FolderStructure):
         # create evoked dictionary based on conditions
         evokeds = {key: [] for key in cnds} 
 
+        # Always create analysis name for reporting; use f_name if provided
+        if f_name is not None:
+            analysis_name = f_name
+        else:
+            analysis_name = 'erp'
+        
+        # Determine whether to save based on f_name parameter
+        save = f_name is not None
+
         for cnd in cnds:
             # set erp name
-            erp_name = f'sub_{self.sj}_{cnd}_{name}'	
+            erp_name = f'sub_{self.sj}_{cnd}_{analysis_name}'	
 
             # slice condition trials
             if cnd == 'all_data':
@@ -709,10 +717,10 @@ class ERP(FolderStructure):
                 continue
 
             evokeds[cnd] = self.create_erps(epochs, df, idx_c, time_oi, 
-                                            erp_name, RT_split)
+                                            erp_name, RT_split, save=save)
 
         if self.report:
-            self.generate_erp_report(evokeds,f'sub_{self.sj}_{name}')
+            self.generate_erp_report(evokeds,f'sub_{self.sj}_{analysis_name}')
 
     @staticmethod
     def flip_topography(
@@ -2260,7 +2268,7 @@ class ERP(FolderStructure):
     def residual_eye(self, left_info: dict = None, right_info: dict = None,
                     ch_oi: list = ['HEOG'], cnds: dict = None,
                     spatial_restriction: dict = None, window_oi: tuple = None,
-                    excl_factor: dict = None, name: str = 'resid_eye',
+                    excl_factor: dict = None, f_name: str = None,
                     heog_right_positive: bool = True):
         """
         Calculate residual eye movement activity for lateralized designs.
@@ -2295,8 +2303,10 @@ class ERP(FolderStructure):
         excl_factor : dict, optional
             Dictionary specifying trial exclusion criteria.
             Default is None.
-        name : str, optional
-            Base name for output file. Default is 'resid_eye'.
+        f_name : str, optional, default=None
+            Filename suffix for saving results. If None (default), results 
+            are returned but not saved to disk. If provided, residual eye 
+            data is saved as a pickle file with this name as suffix.
         heog_right_positive : bool, optional
             Whether a rightward eye movement produces a positive
             deflection on the ch_oi channel(s) in your recording setup.
@@ -2338,9 +2348,12 @@ class ERP(FolderStructure):
         ... )
         """
 
-        # set file name
-        erp_name= f'sub_{self.sj}_{name}.p'
-        f_name = self.folder_tracker(['erp', 'eog'],erp_name)
+        # Always create analysis name for reporting; use f_name if provided
+        if f_name is not None:
+            analysis_name = f_name
+        else:
+            analysis_name = 'eye'
+        
         # get data
         beh, epochs = self.select_erp_data(excl_factor)
 
@@ -2392,9 +2405,15 @@ class ERP(FolderStructure):
             eye_wave = np.mean((left_wave, right_wave*-1), axis = 0)
             eye_dict[cnd] = eye_wave[time_idx]
 
-        # save data
-        with open(f_name, 'wb') as f:
-            pickle.dump(eye_dict, f)
+        # Save data if f_name is provided
+        if f_name is not None:
+            erp_name = f'sub_{self.sj}_{analysis_name}.p'
+            file_path = self.folder_tracker(['erp', 'eog'],erp_name)
+            with open(file_path, 'wb') as f:
+                print('saving residual eye data')
+                pickle.dump(eye_dict, f)
+        
+        return eye_dict
 
 
 

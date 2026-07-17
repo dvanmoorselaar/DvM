@@ -870,7 +870,7 @@ class TFR(FolderStructure):
 		topo_flip: dict = None, 
 		window_oi: tuple = None, 
 		excl_factor: dict = None, 
-		name: str = 'main'
+		f_name: str = None
 	):
 		"""
 		Compute condition-specific time-frequency representations with 
@@ -940,11 +940,11 @@ class TFR(FolderStructure):
 			{'response_accuracy': ['incorrect'], 'artifact': [True]}. 
 			Trials matching any exclusion criteria are removed before 
 			TFR analysis. Default is None.
-		name : str, default='main'
-			Analysis name for output file identification. Used in 
-			filename generation for saved TFR objects. Should be 
-			descriptive of the analysis (e.g., 'alpha_lateralization', 
-			'gamma_encoding').
+		f_name : str, optional, default=None
+			Filename suffix for saving results. If None (default), results 
+			are returned as MNE AverageTFR objects but not saved to disk. 
+			If provided, results are saved as .h5 files with this name 
+			as suffix.
 
 		Returns
 		-------
@@ -957,7 +957,8 @@ class TFR(FolderStructure):
 			- info: MNE Info object with channel information
 			- nave: Number of averaged epochs per condition
 			
-			Results are also saved to disk in MNE-compatible format.
+			If f_name is not None, also saves each condition as:
+			- '{tfr_name}_{condition}-tfr.h5': MNE AverageTFR format
 
 		Notes
 		-----
@@ -1073,11 +1074,15 @@ class TFR(FolderStructure):
 		else:
 			(cnd_header, cnds), = cnds.items()
 
+		# Always create tfr_name for reporting; use f_name if provided
+		if f_name is not None:
+			tfr_name = f'sub_{self.sj}_{f_name}'
+		else:
+			tfr_name = f'sub_{self.sj}_tfr'
+
 		for c, cnd in enumerate(cnds):
 			counter = c + 1 
 			print(f'Decomposing condition {counter}: {cnd} \n')
-			# set tfr name
-			tfr_name = f'sub_{self.sj}_{name}'
 
 			# slice condition trials
 			if cnd == 'all_data':
@@ -1124,12 +1129,11 @@ class TFR(FolderStructure):
 
 		if self.report:
 			self.generate_tfr_report(tfr,
-							epochs.info,f'sj_{self.sj}_{name}')
+						epochs.info,f'sj_{self.sj}_{tfr_name}')
 
-		# save output and return as MNE AverageTFR objects
-		tfr_output = self.save_to_mne_format(tfr,epochs,tfr_name)
-		
-		# return computed TFR data as dictionary of MNE AverageTFR objects
+		# Convert to MNE AverageTFR format and optionally save
+		save = f_name is not None
+		tfr_output = self.save_to_mne_format(tfr,epochs,tfr_name,save)
 		return tfr_output
 
 	def tfr_loop(self, epochs: mne.Epochs) -> np.array:
@@ -1221,7 +1225,7 @@ class TFR(FolderStructure):
 		return raw_conv
 	
 	def save_to_mne_format(self,tfr:dict,epochs:mne.Epochs,
-						tfr_name:str):
+						tfr_name:str,save:bool=False):
 		"""
 		Save TFR results to MNE-Python compatible format.
 
@@ -1240,8 +1244,11 @@ class TFR(FolderStructure):
 			Original EEG epochs object containing channel information 
 			and metadata for constructing MNE objects.
 		tfr_name : str
-			Base filename for saved TFR files. Each condition will be 
-			saved as '{tfr_name}_{condition}-tfr.h5'.
+			Base filename for output. Each condition will be converted 
+			to MNE AverageTFR format.
+		save : bool, default=False
+			Whether to save TFR objects to disk. When True, each 
+			condition will be saved as '{tfr_name}_{condition}-tfr.h5'.
 
 		Returns
 		-------
@@ -1250,13 +1257,16 @@ class TFR(FolderStructure):
 			mne.time_frequency.AverageTFR objects. Each object contains 
 			the condition-specific time-frequency power data in MNE 
 			format, ready for visualization and analysis.
+			
+			When save=True, files are also written to disk in the 
+			project's TFR directory structure.
 
 		Notes
 		-----
-		Files are saved in the project's TFR directory structure 
-		using the folder_tracker system. Each condition generates 
-		a separate MNE AverageTFR file for independent loading and 
-		analysis.
+		When f_name is not None, files are saved in the project's 
+		TFR directory structure using the folder_tracker system. 
+		Each condition generates a separate MNE AverageTFR file for 
+		independent loading and analysis.
 
 		The method handles axis reordering to match MNE's expected 
 		format: (..., n_channels, n_frequencies, n_times).
@@ -1284,10 +1294,12 @@ class TFR(FolderStructure):
 			}
 			tfr_ = mne.time_frequency.AverageTFR(inst=tfr_dict)
 			
-			# save TFR object with condition in filename
-			f_name = self.folder_tracker(['tfr',self.method],
-								f'{tfr_name}_{cnd}-tfr.h5')								
-			tfr_.save(f_name, overwrite = True)
+			# Save TFR object if save flag is True
+			if save:
+				save_path = self.folder_tracker(['tfr',self.method],
+						f'{tfr_name}_{cnd}-tfr.h5')
+				print(f'saving tfr for condition: {cnd}')
+				tfr_.save(save_path, overwrite = True)
 			
 			# store in output dictionary
 			tfr_output[cnd] = tfr_

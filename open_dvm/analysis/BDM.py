@@ -500,7 +500,7 @@ class BDM(FolderStructure):
 				GAT:Union[bool,Tuple[Tuple[float,float],
 						 Tuple[float,float]]]=False, 
 				downscale:bool=False,split_fact:dict=None,
-				save:bool=True,bdm_name:str='main')->dict:
+				f_name:str=None)->dict:
 		"""
 		Perform multivariate decoding across time on specified classes.
 
@@ -563,11 +563,10 @@ class BDM(FolderStructure):
 		split_fact : dict, optional
 			Additional factor to split analysis by. Decoding performed
 			separately for each level and results averaged.
-		save : bool, default=True
-			Whether to save results to disk using standard file 
-			organization.
-		bdm_name : str, default='main'
-			Name identifier for saving analysis results.
+		f_name : str, optional, default=None
+			Filename suffix for saving results. If None (default), results are
+			returned as dictionaries but not saved to disk. If provided,
+			results are saved as pickle files with this name as suffix.
 
 		Returns
 		-------
@@ -613,6 +612,13 @@ class BDM(FolderStructure):
 		"""
 
 		# avoid mutating the caller's dict across repeated calls
+		# Always create bdm_name for reporting; use f_name if provided
+		if f_name is not None:
+			bdm_name = f'sub_{self.sj}_{f_name}'
+		else:
+			bdm_name = f'sub_{self.sj}_bdm'
+
+		# avoid mutating the caller's dict across repeated calls
 		excl_factor = copy.deepcopy(excl_factor) if excl_factor is not None else None
 
 		# select condition specific data
@@ -649,9 +655,6 @@ class BDM(FolderStructure):
 		if collapse:
 			df['collapsed'] = 'no'
 			cnds += ['collapsed']
-
-		# set bdm_name
-		bdm_name = f'sub_{self.sj}_{bdm_name}'				
 		
 		# set up dict to save decoding scores
 		bdm_params = {}
@@ -687,15 +690,17 @@ class BDM(FolderStructure):
 		if self.report:
 			self.report_bdm(bdm_scores, bdm_params, cnds, bdm_name)
 
-		# store classification dict	
-		if save: 
+		# Save outputs if f_name is provided
+		if f_name is not None:
 			ext = self.set_folder_path()
 			with open(self.folder_tracker(ext, fname = 
-					f'{bdm_name}.pickle') ,'wb') as handle:
+					f'{bdm_name}_bdm.pickle') ,'wb') as handle:
+				print('saving bdm scores')
 				pickle.dump(bdm_scores, handle)
 			if self.output_params:
 				with open(self.folder_tracker(ext, fname = 
 						f'{bdm_name}_param.pickle') ,'wb') as handle:
+					print('saving bdm params')
 					pickle.dump(bdm_params, handle)				
 
 		return bdm_scores, bdm_params	
@@ -1063,10 +1068,13 @@ class BDM(FolderStructure):
 						tr_labels_oi:Union[str,list]='all',
 						te_labels_oi:Union[str,list]='all',te_header:str=None,
 						avg_window:bool=False,GAT:bool=False,nr_perm:int=0,
-						save:bool=True, bdm_name:str='loc_dec'):
+						f_name:str=None):
 		
-		# set bdm name
-		bdm_name = f'sub_{self.sj}_{bdm_name}'
+		# Always create bdm_name for reporting; use f_name if provided
+		if f_name is not None:
+			bdm_name = f'sub_{self.sj}_{f_name}'
+		else:
+			bdm_name = f'sub_{self.sj}_loc_bdm'
 
 		# set parameters
 		self.cross = True
@@ -1122,16 +1130,18 @@ class BDM(FolderStructure):
 												cnd_header,cnds,cnd_idx_tr,
 												beh_te,max_tr,GAT,nr_perm)
 
-		# store classification dict	
-		if save: 
+		# Save outputs if f_name is provided
+		if f_name is not None:
 			ext = self.set_folder_path()
 			with open(self.folder_tracker(ext, fname = 
-					f'{bdm_name}.pickle') ,'wb') as handle:
+					f'{bdm_name}_bdm.pickle') ,'wb') as handle:
+				print('saving bdm scores')
 				pickle.dump(bdm_scores, handle)
 
 			if self.output_params:
 				with open(self.folder_tracker(ext, fname = 
 						f'{bdm_name}_param.pickle') ,'wb') as handle:
+					print('saving bdm params')
 					pickle.dump(bdm_params, handle)	
 
 		return bdm_scores	
