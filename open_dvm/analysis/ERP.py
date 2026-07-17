@@ -2385,9 +2385,6 @@ class ERP(FolderStructure):
         polarity_sign = 1 if heog_right_positive else -1
 
         for cnd in cnds:
-            # set erp name
-            erp_name = f'sub_{self.sj}_{cnd}_{name}'
-
             # slice condition trials
             if cnd == 'all_data':
                 idx_c_l = idx_l

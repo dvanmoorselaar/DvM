@@ -722,7 +722,7 @@ class TestClassifyIntegration:
 
         output, _ = bdm.classify(
             cnds=dict(block_type=['main']), window_oi=(-0.1, 0.4),
-            labels_oi='all', bdm_name='main', GAT=False, save=False,
+            labels_oi='all', GAT=False,
         )
         scores = output['main']['dec_scores']
 
@@ -741,7 +741,7 @@ class TestClassifyIntegration:
         excl = {'extra_cnd': ['y']}
         bdm.classify(
             cnds=dict(block_type=['main']), window_oi=(-0.1, 0.4),
-            labels_oi='all', bdm_name='main', GAT=False, save=False,
+            labels_oi='all', GAT=False,
             excl_factor=excl,
         )
 
@@ -761,7 +761,7 @@ class TestClassifyIntegration:
 
         output, _ = bdm.classify(
             cnds=dict(block_type=['main']), window_oi=(-0.1, 0.4),
-            labels_oi='all', bdm_name='main', GAT=False, save=False,
+            labels_oi='all', GAT=False,
             nr_perm=5,
         )
 
@@ -784,7 +784,7 @@ class TestClassifyIntegration:
 
         output, params = bdm.classify(
             cnds=dict(block_type=['main']), window_oi=(-0.1, 0.1),
-            labels_oi='all', bdm_name='main', GAT=False, save=False,
+            labels_oi='all', GAT=False,
         )
 
         assert output['main']['dec_scores'].mean() > 0.9
@@ -813,7 +813,7 @@ class TestLocalizerClassifyIntegration:
 
         scores = bdm.localizer_classify(
             tr_window_oi=(-0.1, 0.4), te_window_oi=(-0.1, 0.4),
-            tr_labels_oi='all', te_labels_oi='all', GAT=False, save=False,
+            tr_labels_oi='all', te_labels_oi='all', GAT=False,
         )
 
         assert scores['all_data']['dec_scores'].mean() > 0.95
@@ -829,7 +829,7 @@ class TestLocalizerClassifyIntegration:
 
         scores = bdm.localizer_classify(
             tr_window_oi=(-0.1, 0.4), te_window_oi=(-0.1, 0.4),
-            tr_labels_oi='all', te_labels_oi='all', GAT=True, save=False,
+            tr_labels_oi='all', te_labels_oi='all', GAT=True,
         )
 
         gat = scores['all_data']['dec_scores']
@@ -854,7 +854,7 @@ class TestIterClassify:
 
         output, _ = bdm.classify(
             cnds=dict(block_type=['main']), window_oi=(-0.1, 0.1),
-            labels_oi='all', bdm_name='main', GAT=False, save=False,
+            labels_oi='all', GAT=False,
             split_fact={'session': ['s1', 's2']},
         )
 
@@ -877,7 +877,7 @@ class TestIterClassify:
 
         output, params = bdm.classify(
             cnds=dict(block_type=['a', 'b']), window_oi=(-0.1, 0.1),
-            labels_oi='all', bdm_name='main', GAT=False, save=False,
+            labels_oi='all', GAT=False,
             split_fact={'session': ['s1', 's2']},
         )
 

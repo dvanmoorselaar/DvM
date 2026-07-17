@@ -795,11 +795,11 @@ class TestConditionTfrs:
 
         tfr_full = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20,
                         num_frex=3, downsample=1)
-        result_full = tfr_full.condition_tfrs(pos_labels=None, name='full')
+        result_full = tfr_full.condition_tfrs(pos_labels=None, f_name='full')
 
         tfr_down = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20,
                         num_frex=3, downsample=2)
-        result_down = tfr_down.condition_tfrs(pos_labels=None, name='down')
+        result_down = tfr_down.condition_tfrs(pos_labels=None, f_name='down')
 
         assert len(result_down['all_data'].times) < len(result_full['all_data'].times)
 
@@ -810,7 +810,7 @@ class TestConditionTfrs:
         df = make_behavioral_df(4, x=1)
         tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20, num_frex=3)
 
-        tfr.condition_tfrs(pos_labels=None, name='mytest')
+        tfr.condition_tfrs(pos_labels=None, f_name='mytest')
 
         expected = tmp_path / 'tfr' / 'wavelet' / 'sub_01_mytest_all_data-tfr.h5'
         assert expected.exists()
@@ -844,7 +844,7 @@ class TestConditionTfrs:
         tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20, num_frex=3,
                   baseline=(-0.2, 0), base_method='trial_spec')
 
-        result = tfr.condition_tfrs(pos_labels=None, name='trial')
+        result = tfr.condition_tfrs(pos_labels=None, f_name='trial')
 
         assert result['all_data'].data.shape[1:] == (3, 40)
 
@@ -856,7 +856,7 @@ class TestConditionTfrs:
         tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20, num_frex=3,
                   baseline=(-0.2, 0), base_method='cnd_avg')
 
-        result = tfr.condition_tfrs(pos_labels=None, cnds={'cond': [1, 2]}, name='cndavg')
+        result = tfr.condition_tfrs(pos_labels=None, cnds={'cond': [1, 2]}, f_name='cndavg')
 
         assert set(result.keys()) == {1, 2}
 
@@ -868,7 +868,7 @@ class TestConditionTfrs:
         tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20, num_frex=3,
                   power='induced')
 
-        result = tfr.condition_tfrs(pos_labels=None, name='induced')
+        result = tfr.condition_tfrs(pos_labels=None, f_name='induced')
 
         assert result['all_data'].nave == 6
 
@@ -880,7 +880,7 @@ class TestConditionTfrs:
         tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20, num_frex=3,
                   power='evoked')
 
-        result = tfr.condition_tfrs(pos_labels=None, name='evoked')
+        result = tfr.condition_tfrs(pos_labels=None, f_name='evoked')
 
         # a single averaged evoked response is treated as nave=1 for TF decomposition
         assert result['all_data'].nave == 1
@@ -900,9 +900,9 @@ class TestConditionTfrs:
         tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20, num_frex=5,
                   report=True)
 
-        tfr.condition_tfrs(pos_labels=None, name='reporttest')
+        tfr.condition_tfrs(pos_labels=None, f_name='reporttest')
 
-        expected = tmp_path / 'tfr' / 'report' / 'sj_01_reporttest.html'
+        expected = tmp_path / 'tfr' / 'report' / 'sub_01_reporttest.html'
         assert expected.exists()
 
     @pytest.mark.unit
@@ -919,9 +919,9 @@ class TestConditionTfrs:
         tfr = TFR(sj=1, epochs=epochs, df=df, min_freq=4, max_freq=20, num_frex=2,
                   report=True)
 
-        tfr.condition_tfrs(pos_labels=None, name='reporttest2')
+        tfr.condition_tfrs(pos_labels=None, f_name='reporttest2')
 
-        expected = tmp_path / 'tfr' / 'report' / 'sj_01_reporttest2.html'
+        expected = tmp_path / 'tfr' / 'report' / 'sub_01_reporttest2.html'
         assert expected.exists()
 
 

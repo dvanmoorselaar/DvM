@@ -374,7 +374,7 @@ class TestConditionErpsIntegration:
         epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.condition_erps(cnds={'cnd': ['a', 'b']}, name='probe')
+        erp.condition_erps(cnds={'cnd': ['a', 'b']}, f_name='probe')
 
         evoked_dir = tmp_path / 'erp' / 'evoked'
         assert (evoked_dir / 'sub_01_a_probe-ave.fif').is_file()
@@ -385,7 +385,7 @@ class TestConditionErpsIntegration:
         epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.condition_erps(cnds={'cnd': ['a', 'b']}, name='probe')
+        erp.condition_erps(cnds={'cnd': ['a', 'b']}, f_name='probe')
 
         ev_a = mne.read_evokeds(
             str(tmp_path / 'erp' / 'evoked' / 'sub_01_a_probe-ave.fif')
@@ -401,7 +401,7 @@ class TestConditionErpsIntegration:
         epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.condition_erps(cnds={'cnd': ['a', 'missing']}, name='probe')
+        erp.condition_erps(cnds={'cnd': ['a', 'missing']}, f_name='probe')
 
         evoked_dir = tmp_path / 'erp' / 'evoked'
         assert (evoked_dir / 'sub_01_a_probe-ave.fif').is_file()
@@ -419,7 +419,7 @@ class TestConditionErpsIntegration:
         df = pd.DataFrame({'target_loc': [1, 2, 1, 2]})
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.05, 0))
 
-        erp.condition_erps(pos_labels={'target_loc': [1]}, name='probe')
+        erp.condition_erps(pos_labels={'target_loc': [1]}, f_name='probe')
 
         ev = mne.read_evokeds(
             str(tmp_path / 'erp' / 'evoked' / 'sub_01_all_data_probe-ave.fif')
@@ -1015,7 +1015,7 @@ class TestResidualEye:
         erp = ERP(sj=1, epochs=epochs, df=trial_info, baseline=(-0.1, 0))
         erp.residual_eye(
             left_info={'target_loc': [1]}, right_info={'target_loc': [2]},
-            ch_oi=['HEOG'], name='probe_resid'
+            ch_oi=['HEOG'], f_name='probe_resid'
         )
 
         path = tmp_path / 'erp' / 'eog' / 'sub_01_probe_resid.p'
@@ -1042,7 +1042,7 @@ class TestResidualEye:
         erp = ERP(sj=1, epochs=epochs, df=trial_info, baseline=(-0.1, 0))
         erp.residual_eye(
             left_info={'target_loc': [1]}, right_info={'target_loc': [2]},
-            ch_oi=['HEOG'], name='probe_resid_flipped',
+            ch_oi=['HEOG'], f_name='probe_resid_flipped',
             heog_right_positive=False
         )
 

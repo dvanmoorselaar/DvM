@@ -1128,8 +1128,7 @@ class TFR(FolderStructure):
 		tfr = self.baseline_tfr(tfr,base,self.base_method)
 
 		if self.report:
-			self.generate_tfr_report(tfr,
-						epochs.info,f'sj_{self.sj}_{tfr_name}')
+			self.generate_tfr_report(tfr, epochs.info, tfr_name)
 
 		# Convert to MNE AverageTFR format and optionally save
 		save = f_name is not None
