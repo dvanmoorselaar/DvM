@@ -114,13 +114,21 @@ class CTF(BDM):
 		encoding model. Determines the resolution of spatial 
 		reconstruction.
 	shift_bins : int, default=0
-		Circular shift applied to align tuning curves around a specific 
-		location. Useful for centering analysis around locations with 
-		specific experimental manipulations (e.g., higher target 
-		probability) that vary across subjects. For example, if the 
-		"special" location is at position 2 in one subject and position 
-		6 in another, shift_bins allows alignment relative to this
-		location for group-level analysis.
+		Circular shift applied to the bin axis of the reconstructed
+		channel responses, so that bin 0 of the output corresponds to a
+		location shift_bins away from its original position. Only has
+		an observable effect when avg_ch=False: with avg_ch=True (the
+		default), reconstructions are already averaged across bins (an
+		order-invariant operation) before shift_bins would matter, so
+		it is silently inert in that case (a warning is raised if
+		shift_bins != 0 and avg_ch=True are combined). To align a test
+		condition's reconstructions to a subject-specific reference
+		location (e.g. a per-subject high-probability distractor
+		location) under avg_ch=True, use spatial_ctf's special_loc
+		argument instead: it assigns every test trial the same
+		reference bin, so that bin's own per-trial centering already
+		yields a correctly-aligned reconstruction directly -- no
+		bin-averaging (and so no dilution or shift_bins) is involved.
 	nr_iter : int, default=10
 		Number of iterations for forward model application and 
 		averaging.
@@ -146,9 +154,9 @@ class CTF(BDM):
 		(False) for spatial channels. Delta functions assume no specific
 		tuning shape.
 	method : str, default='Foster'
-		#TODO: implement cross-validation method
 		Analysis method to use. 'Foster' implements the Foster et al.
-		(2015) approach.
+		(2015) approach. 'k-fold' is planned for a future release and
+		is not yet functional -- using it will raise an error.
 	avg_ch : bool, default=True
 		Whether to average across reconstructed channels for summary
 		statistics.
@@ -253,7 +261,7 @@ class CTF(BDM):
 				min_freq:int=4,max_freq:int=40,num_frex:int=25,
 				freq_scaling:str='log',slide_window:int=0,
 				laplacian:bool=False,pca_cmp:int=0,
-				filter:int=None,VEP:bool=False,report:bool=False,
+				filter:int=None,report:bool=False,
 				baseline:Optional[tuple]=None,seed:Union[int, bool] = 42213):
 		"""
 		Initialize CTF analysis object with experimental parameters.
@@ -523,8 +531,10 @@ class CTF(BDM):
 
 	def spatial_ctf(self, pos_labels: dict = 'all', cnds: dict = None,
 					excl_factor: dict = None, window_oi: tuple = (None, None),
-					freqs: dict = 'main_param', GAT: bool = False, 
-					nr_perm: int = 0, collapse: bool = False, f_name: str = None):
+					freqs: dict = 'main_param', GAT: bool = False,
+					nr_perm: int = 0, collapse: bool = False, 
+					special_loc: Optional[Union[int, str]] = None,
+					f_name: str = None):
 		"""
 		Perform spatial channel tuning function analysis across 
 		conditions.
@@ -551,10 +561,10 @@ class CTF(BDM):
 				``{'condition_column': ['cond1', 'cond2']}``
 			
 			Cross-condition decoding (train on first, test on second):
-				``{'condition_column': [['train_cond'], 'test_cond']}``
-			
+				``{'condition_column': [['train_cond'], ['test_cond']]}``
+
 			Multiple training/testing conditions:
-				``{'condition_column': [['train1', 'train2'], 
+				``{'condition_column': [['train1', 'train2'],
 				                        ['test1', 'test2']]}``
 			
 			If None, decoding performed on all data.
@@ -579,14 +589,35 @@ class CTF(BDM):
 			possible train/test time combinations. 
 			Warning: Computationally intensive.
 		nr_perm : int, default=0
-			Number of permutation tests for statistical validation.
-			Set to 0 to disable permutation testing and speed up
-			analysis.
+			Number of permutation iterations for building a null
+			distribution of CTF slopes. Set to 0 to disable permutation
+			testing and speed up analysis. For each permutation, the
+			mapping between trials' true position bins and the basis
+			function used to model them is shuffled once (fixed across
+			all cross-validation iterations for that permutation, so
+			only cross-validation noise -- not label-shuffle noise --
+			varies within a permutation), while the real, unpermuted
+			labeling is always preserved as permutation index 0.
 		collapse : bool, default=False
 			Whether to collapse across specific conditions or factors.
 			Note: This feature is currently under development.
+		special_loc : int or str, optional, default=None
+			Convenience override for the position bin used to align
+			reconstructions for the *test* condition(s) only (requires
+			cross-condition `cnds`). Useful for e.g. neutral "impulse"/
+			"ping" displays that carry no true stimulus position, where
+			you instead want reconstructions centered on a hypothesized
+			reference location (such as a high-probability distractor
+			location). Training data is never affected.
+			- int: use this same bin index for every test trial.
+			- str: column name in the behavioral dataframe holding a
+			  per-trial bin index to use instead (e.g. to test
+			  inter-trial priming effects via trial history).
+			Equivalent to manually overwriting `to_decode` for the test
+			condition's rows before calling spatial_ctf, without
+			mutating your own dataframe.
 		f_name : str, optional, default=None
-			Filename for saving results. If None (default), results are 
+			Filename for saving results. If None (default), results are
 			returned as dictionaries but not saved to disk. If provided,
 			results are saved as pickle files with this name as suffix.
 
@@ -594,8 +625,9 @@ class CTF(BDM):
 		-------
 		tuple of (ctfs, ctf_param, info)
 			ctfs : dict
-				Reconstructed channel tuning functions. For filtered data: 
-				contains 'C2_E' (evoked power) and 'C2_T' (total power). 
+				Reconstructed channel tuning functions. For filtered 
+				data: contains 'C2_E' (evoked power) and 'C2_T' (total 
+				power). 
 				For broadband: contains 'C2_voltage' (raw ERP) and 
 				'C2_envelope' (phase-locked amplitude via Hilbert 
 				transform).
@@ -687,7 +719,17 @@ class CTF(BDM):
 		
 		# Input validation and setup
 
-		# hypothesized set tuning functions underlying power measured 
+		if self.shift_bins != 0 and self.avg_ch:
+			warnings.warn(
+				"shift_bins has no effect when avg_ch=True: reconstructed "
+				"tuning curves are already centered on each bin's own "
+				"position before being averaged across bins (an "
+				"order-invariant operation), so shifting which bin occupies "
+				"which row beforehand doesn't change the averaged result. "
+				"shift_bins only has an observable effect with avg_ch=False."
+			)
+
+		# hypothesized set tuning functions underlying power measured
 		# across electrodes
 		print('Creating bassiset with sin_power ', self.sin_power )
 		self.basisset = self.calculate_basis_set(self.nr_bins, self.nr_chans,
@@ -711,7 +753,7 @@ class CTF(BDM):
 		actual_sfreq = sfreq / downsample
 		if abs(actual_sfreq - self.downsample) > 1:
 			print(f"Warning: Actual sampling frequency ({actual_sfreq}) "
-		 	"is not equal to desired downsample ({self.downsample}).")	
+		 	f"is not equal to desired downsample ({self.downsample}).")
 
 		nr_itr = self.nr_iter * self.nr_folds
 		# Always create ctf_name for reporting; use f_name if provided
@@ -743,9 +785,11 @@ class CTF(BDM):
 				# check for overlap between train and test conditions
 				overlap = set(train_cnds) & set(test_cnds)
 				if overlap:
-					print(f"Warning: Found overlapping conditions between "
-						  f"train and test: {overlap}. Training will be done "
-						  f"on a subset of the data to match trial counts.")
+					warnings.warn(
+						f"Found overlapping conditions between train and "
+						f"test: {overlap}. Training will be done on a "
+						f"subset of the data to match trial counts."
+					)
 					self.cross = 'cross_cv'
 				else:
 					self.cross = True
@@ -755,9 +799,27 @@ class CTF(BDM):
 		else:
 			train_cnds = ['all_data']
 			test_cnds = None
-			
+
+		if special_loc is not None:
+			if test_cnds is None:
+				raise ValueError(
+					"special_loc requires cross-condition analysis "
+					"(cnds must specify separate train/test conditions)."
+				)
+			test_mask = df[cnd_head].isin(test_cnds)
+			if isinstance(special_loc, str):
+				if special_loc not in df.columns:
+					raise ValueError(
+						f"special_loc column '{special_loc}' not found "
+						"in the behavioral dataframe."
+					)
+				df.loc[test_mask, self.to_decode] = \
+					df.loc[test_mask, special_loc].values
+			else:
+				df.loc[test_mask, self.to_decode] = special_loc
+
 		# based on conditions get position bins
-		(pos_bins, 
+		(pos_bins,
 		cnds, 
 		epochs, 
 		max_tr) = self.select_ctf_labels(epochs, df, pos_labels, cnds)
@@ -841,64 +903,72 @@ class CTF(BDM):
 						else:
 							C1 = self.basisset
 
-					# iteration loop
-					for itr in range(nr_itr):
+					# permutation loop (p=0 is always the true, unpermuted
+					# labeling; for p>0 the bin-to-basis-function mapping
+					# is shuffled once and reused across all iterations
+					# below, to build a null distribution of CTF slopes)
+					for p in range(nr_perm):
+						if p == 0:
+							perm_map = np.arange(self.nr_bins)
+						else:
+							perm_map = np.random.permutation(self.nr_bins)
 
-						# TODO: insert permutation loop
-						p = 0
-						train_idx = info[cnd_inf]['train_idx'][itr]
+						# iteration loop
+						for itr in range(nr_itr):
 
-						# initialize evoked and total power arrays
-						bin_te_E = np.zeros((self.nr_bins, nr_elec, 
-						                                        nr_samples)) 
-						bin_te_T = bin_te_E.copy()
-						if self.method == 'k-fold':
-							pass
-							#TODO: implement 
-						elif self.method == 'Foster':
-							nr_itr_tr = self.nr_bins * (self.nr_folds - 1)
-							bin_tr_E = np.zeros((nr_itr_tr, nr_elec, 
-							                                    nr_samples)) 
-							bin_tr_T = bin_tr_E.copy()
-							
-						# position bin loop
-						bin_cnt = 0
-						for bin in range(self.nr_bins):
-							if bin in test_bins:
-								condition_info = info[cnd_inf]['test_idx']
-								iteration_data = condition_info[itr]
-								bin_indices = iteration_data[bin]
-								test_idx = np.squeeze(bin_indices)
-								bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
-								evoked_mean = np.mean(E[test_idx], axis=0)
-								bin_te_E[bin] = self.extract_power(evoked_mean, 
-																   freqs[fr])
+							train_idx = info[cnd_inf]['train_idx'][itr]
 
-							if self.method == 'Foster':
-								for j in range(self.nr_folds - 1):
-									evoked = self.extract_power(np.mean(\
-												E[train_idx[bin][j]],
-												axis = 0), freqs[fr])
-									bin_tr_E[bin_cnt] = evoked
-									total = np.mean(T[train_idx[bin][j]], 
-						                                            axis = 0)
-									bin_tr_T[bin_cnt] = total
-									C1[bin_cnt] = self.basisset[bin]
-									bin_cnt += 1
-							elif self.method == 'k-fold':
+							# initialize evoked and total power arrays
+							bin_te_E = np.zeros((self.nr_bins, nr_elec,
+							                                        nr_samples))
+							bin_te_T = bin_te_E.copy()
+							if self.method == 'k-fold':
 								pass
 								#TODO: implement
-						
-						(ctf[cnd_inf]['C2_E'][p,fr,itr], 
-						ctf[cnd_inf]['W_E'][p,fr,itr],
-						ctf[cnd_inf]['C2_T'][p,fr,itr],
-						ctf[cnd_inf]['W_T'][p,fr,itr]) = (
-							self.forward_model_loop(
-								bin_tr_E, 
-								bin_te_E,
-								bin_tr_T, 
-								bin_te_T,C1,
-								GAT))
+							elif self.method == 'Foster':
+								nr_itr_tr = self.nr_bins * (self.nr_folds - 1)
+								bin_tr_E = np.zeros((nr_itr_tr, nr_elec,
+								                                    nr_samples))
+								bin_tr_T = bin_tr_E.copy()
+
+							# position bin loop
+							bin_cnt = 0
+							for bin in range(self.nr_bins):
+								if bin in test_bins:
+									condition_info = info[cnd_inf]['test_idx']
+									iteration_data = condition_info[itr]
+									bin_indices = iteration_data[bin]
+									test_idx = np.squeeze(bin_indices)
+									bin_te_T[bin] = np.mean(T[test_idx], axis = 0)
+									evoked_mean = np.mean(E[test_idx], axis=0)
+									bin_te_E[bin] = self.extract_power(evoked_mean,
+																	   freqs[fr])
+
+								if self.method == 'Foster':
+									for j in range(self.nr_folds - 1):
+										evoked = self.extract_power(np.mean(\
+													E[train_idx[bin][j]],
+													axis = 0), freqs[fr])
+										bin_tr_E[bin_cnt] = evoked
+										total = np.mean(T[train_idx[bin][j]],
+							                                            axis = 0)
+										bin_tr_T[bin_cnt] = total
+										C1[bin_cnt] = self.basisset[perm_map[bin]]
+										bin_cnt += 1
+								elif self.method == 'k-fold':
+									pass
+									#TODO: implement
+
+							(ctf[cnd_inf]['C2_E'][p,fr,itr],
+							ctf[cnd_inf]['W_E'][p,fr,itr],
+							ctf[cnd_inf]['C2_T'][p,fr,itr],
+							ctf[cnd_inf]['W_T'][p,fr,itr]) = (
+								self.forward_model_loop(
+									bin_tr_E,
+									bin_te_E,
+									bin_tr_T,
+									bin_te_T,C1,
+									GAT))
 		
 		# take the average across model iterations
 		for cnd in np.unique(cnd_combos):
@@ -939,7 +1009,13 @@ class CTF(BDM):
 					data = ctf[cnd][key][0]
 
 					if self.avg_ch:
-						# average across channels
+						# restrict to bins that actually received test
+						# data before averaging -- otherwise unfitted
+						# bins (left at their zero-initialized default)
+						# would silently dilute the average
+						if test_bins.size < self.nr_bins:
+							data = data[..., test_bins.astype(int), :]
+						# average across bins
 						data = data.mean(axis = -2)
 
 					ctfs[cnd][key] = data	
@@ -1099,14 +1175,18 @@ class CTF(BDM):
 		-------
 		train_cnds : list
 			Conditions for model training.
-		test_cnds : list, str, or None
-			Conditions for model testing. None indicates 
+		test_cnds : list or None
+			Conditions for model testing. None indicates
 			within-condition analysis.
 		"""
-		
+
 		(_, cnds_oi), = cnds.items()
 		if type(cnds_oi[0]) == list:
 			train_cnds, test_cnds = cnds_oi
+			if isinstance(test_cnds, str):
+				# be forgiving of a bare string for a single test
+				# condition (e.g. [['train'], 'test']) 
+				test_cnds = [test_cnds]
 		else:
 			train_cnds, test_cnds = cnds_oi, None
 
@@ -1505,12 +1585,10 @@ class CTF(BDM):
 		C2s = np.zeros(C2.shape)
 
 		# shift tunings to common center
-		bins = np.arange(self.nr_bins)
 		nr_2_shift = int(np.ceil(C2.shape[1]/2.0))
 		for i in range(C2.shape[0]):
-			idx_shift = abs(bins - bins[i]).argmin()
-			shift = idx_shift - nr_2_shift
-			if self.nr_bins % 2 == 0:							
+			shift = i - nr_2_shift
+			if self.nr_bins % 2 == 0:
 				C2s[i,:] = np.roll(C2[i,:], - shift)	
 			else:
 				C2s[i,:] = np.roll(C2[i,:], - shift - 1)
@@ -1963,7 +2041,7 @@ class CTF(BDM):
 		GAT = True
 			
 		ctf, info = {}, {}
-		freqs, nr_freqs = self.set_frequencies(freqs)
+		freqs, nr_freqs, _ = self.set_frequencies(freqs)
 		data_type = 'power' if freqs != ['broadband'] else 'broadband'
 
 		if type(te_cnds) == dict:
@@ -2105,17 +2183,17 @@ class CTF(BDM):
 		# Save outputs if f_name is provided
 		if f_name is not None:
 			with open(self.folder_tracker(['ctf',self.to_decode], 
-					fname = f'ctfs_{ctf_name}.pickle'),'wb') as handle:
+					fname = f'{ctf_name}_ctf.pickle'),'wb') as handle:
 				print('saving ctfs')
 				pickle.dump(ctf, handle)
 
 			with open(self.folder_tracker(['ctf',self.to_decode], 
-					fname = f'ctf_info_{ctf_name}.pickle'),'wb') as handle:
+					fname = f'{ctf_name}_info.pickle'),'wb') as handle:
 				pickle.dump(info, handle)	
 
 			if ctf_param is not None:
 				with open(self.folder_tracker(['ctf',self.to_decode], 
-						fname=f'ctf_param_{ctf_name}.pickle'),'wb') as handle:
+						fname=f'{ctf_name}_param.pickle'),'wb') as handle:
 					print('saving ctf params')
 					pickle.dump(ctf_param, handle)
 				
@@ -2508,18 +2586,26 @@ class CTF(BDM):
 			ctf_param[cnd] = self.summarize_ctfs(ctfs[cnd],ctf_param[cnd],
 				     						nr_samples,nr_freqs,test_bins,
 											nr_perm,avg_ch,fitting_method)
-			
-		
-			# get rid of unnecessary dimensions
-			ctf_param[cnd] = {k: np.squeeze(v) 
-										for k, v in ctf_param[cnd].items()}
-		
-			# restore frequency dimension if it was squeezed out
-			if nr_freqs == 1:
-				ctf_param[cnd] = {k: np.expand_dims(v, axis=0) 
-									for k, v in ctf_param[cnd].items()}
 
-		return ctf_param	
+			# split off the true (index 0) result from any permutation
+			# draws, then squeeze safely: frequency is axis 0 for the
+			# true value but axis 1 for perm draws (which keep their
+			# own leading perm-count axis), so protect a different
+			# number of leading axes in each case
+			def _squeeze_keep_leading(x, n_protected):
+				squeeze_axes = tuple(ax for ax in range(n_protected, x.ndim)
+									  if x.shape[ax] == 1)
+				return np.squeeze(x, axis=squeeze_axes) if squeeze_axes else x
+
+			true_param = {k: _squeeze_keep_leading(v[0], n_protected=1)
+							for k, v in ctf_param[cnd].items()}
+			if nr_perm > 1:
+				perm_param = {f'{k}_perm': _squeeze_keep_leading(v[1:], n_protected=2)
+								for k, v in ctf_param[cnd].items()}
+				true_param.update(perm_param)
+			ctf_param[cnd] = true_param
+
+		return ctf_param
 
 	def fit_cos_to_ctf(self, ctf_data: np.array, conc_step: float = 0.1, 
 					   estimate_center: bool = False):
@@ -2728,7 +2814,7 @@ class CTF(BDM):
 
 		x = np.arange(y.size)
 		mu = sum(x * y) / sum(y)
-		sig = np.sqrt(sum(y * mu)**2) / sum(y)
+		sig = np.sqrt(sum(y * (x - mu)**2) / sum(y))
 
 		popt, pcov = curve_fit(self.gaussian, x, y, p0=[max(y), mu, sig] )
 

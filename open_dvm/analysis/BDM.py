@@ -611,7 +611,6 @@ class BDM(FolderStructure):
 		- Progress information printed during execution
 		"""
 
-		# avoid mutating the caller's dict across repeated calls
 		# Always create bdm_name for reporting; use f_name if provided
 		if f_name is not None:
 			bdm_name = f'sub_{self.sj}_{f_name}'
