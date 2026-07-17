@@ -1563,7 +1563,6 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
     output : str or list, required
         Output types to plot (e.g., 'voltage_slopes', 'param_slopes').
         Can be single string or list for multiple overlaid outputs.
-        Must be explicitly specified. No default.
     band_oi : str, optional
         Frequency band of interest to plot. If None and multiple bands
         exist, averages across all bands. Default: None.

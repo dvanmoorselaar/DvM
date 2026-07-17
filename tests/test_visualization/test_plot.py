@@ -910,7 +910,7 @@ class TestPlotCtfTimecourse:
         ctfs = make_ctf_result(np.full((1, 10), 0.3), times=times,
                                 bands=['all'], noise_sd=0)
 
-        plot_ctf_timecourse(ctfs, timecourse='1d', stats=False)
+        plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes', stats=False)
 
         line = plt.gca().get_lines()[0]
         np.testing.assert_allclose(line.get_ydata(), 0.3)
@@ -924,7 +924,8 @@ class TestPlotCtfTimecourse:
                                 noise_sd=0)
 
         with pytest.warns(UserWarning, match='band_oi'):
-            plot_ctf_timecourse(ctfs, timecourse='1d', band_oi=None, stats=False)
+            plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes',
+                                 band_oi=None, stats=False)
 
         line = plt.gca().get_lines()[0]
         np.testing.assert_allclose(line.get_ydata(), 0.4)  # mean(0.2, 0.6)
@@ -936,7 +937,8 @@ class TestPlotCtfTimecourse:
         ctfs = make_ctf_result(raw, times=times, bands=['theta', 'alpha'],
                                 noise_sd=0)
 
-        plot_ctf_timecourse(ctfs, timecourse='1d', band_oi='alpha', stats=False)
+        plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes',
+                             band_oi='alpha', stats=False)
 
         line = plt.gca().get_lines()[0]
         np.testing.assert_allclose(line.get_ydata(), 0.6)
@@ -949,7 +951,7 @@ class TestPlotCtfTimecourse:
         raw = np.random.default_rng(0).normal(1, 0.1, (1, 10, 6))
         ctfs = make_ctf_result(raw, times=times, bands=['all'], noise_sd=0)
 
-        plot_ctf_timecourse(ctfs, timecourse='1d', stats=False)
+        plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes', stats=False)
 
         bin_lines = [l for l in plt.gca().get_lines() if 'bin_' in l.get_label()]
         assert len(bin_lines) == 6
@@ -960,7 +962,7 @@ class TestPlotCtfTimecourse:
         raw = np.zeros((1, 10, 6))  # even bin count -> should wrap
         ctfs = make_ctf_result(raw, times=times, bands=['all'], noise_sd=0)
 
-        plot_ctf_timecourse(ctfs, timecourse='2d_ctf')
+        plot_ctf_timecourse(ctfs, timecourse='2d_ctf', output='raw_slopes')
 
         img = plt.gca().get_images()[0]
         # wrapped to 7 rows (6 + 1 duplicated first bin)
@@ -972,7 +974,7 @@ class TestPlotCtfTimecourse:
         raw = np.zeros((1, 10, 7))  # odd bin count -> no wrap needed
         ctfs = make_ctf_result(raw, times=times, bands=['all'], noise_sd=0)
 
-        plot_ctf_timecourse(ctfs, timecourse='2d_ctf')
+        plot_ctf_timecourse(ctfs, timecourse='2d_ctf', output='raw_slopes')
 
         img = plt.gca().get_images()[0]
         assert img.get_array().shape[0] == 7
@@ -985,7 +987,7 @@ class TestPlotCtfTimecourse:
         ctfs = make_ctf_result(raw, times=times, bands=['theta', 'alpha'], noise_sd=0)
 
         with pytest.warns(UserWarning, match='single output'):
-            plot_ctf_timecourse(ctfs, timecourse='2d_ctf')
+            plot_ctf_timecourse(ctfs, timecourse='2d_ctf', output='raw_slopes')
 
     @pytest.mark.unit
     def test_empty_colors_list_falls_back_in_2d_mode(self):
@@ -994,7 +996,8 @@ class TestPlotCtfTimecourse:
         ctfs = make_ctf_result(np.full((1, 10), 0.3), times=times,
                                 bands=['all'], noise_sd=0)
 
-        plot_ctf_timecourse(ctfs, timecourse='2d_gat', colors=[], stats=False)
+        plot_ctf_timecourse(ctfs, timecourse='2d_gat', output='raw_slopes',
+                             colors=[], stats=False)
 
         assert len(plt.gca().get_images()) == 1
 
@@ -1007,7 +1010,8 @@ class TestPlotCtfTimecourse:
         ctfs = make_ctf_result(raw, times=times, bands=['all'],
                                 n_subjects=12, noise_sd=0.2, seed=1)
 
-        plot_ctf_timecourse(ctfs, timecourse='2d_gat', stats='ttest')
+        plot_ctf_timecourse(ctfs, timecourse='2d_gat', output='raw_slopes',
+                             stats='ttest')
 
         assert len(plt.gca().get_images()) == 1
 
@@ -1017,7 +1021,7 @@ class TestPlotCtfTimecourse:
         ctf = {'A': {'raw_slopes': np.full((1, 10), 0.3)},
                'info': {'times': times, 'bands': ['all']}}
 
-        plot_ctf_timecourse(ctf, timecourse='1d', stats=False)
+        plot_ctf_timecourse(ctf, timecourse='1d', output='raw_slopes', stats=False)
 
         line = plt.gca().get_lines()[0]
         np.testing.assert_allclose(line.get_ydata(), 0.3)
@@ -1030,7 +1034,8 @@ class TestPlotCtfTimecourse:
         for c in ctfs:
             c['B'] = {'raw_slopes': np.full((1, 10), 0.9)}
 
-        plot_ctf_timecourse(ctfs, timecourse='2d_gat', cnds=['A', 'B'], stats=False)
+        plot_ctf_timecourse(ctfs, timecourse='2d_gat', output='raw_slopes',
+                             cnds=['A', 'B'], stats=False)
 
         assert len(plt.gca().get_images()) == 1
 
@@ -1060,7 +1065,9 @@ class TestPlotCtfTimecourse:
         raw[0, :, 0] = 1.0  # only bin 0 is non-zero across all subjects
         ctfs = make_ctf_result(raw, times=times, bands=['all'], noise_sd=0)
 
-        plot_ctf_timecourse(ctfs, timecourse='1d', avg_bins=True, stats=False)
+        # plot_bins=False -> average across (non-zero) bins into one line
+        plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes',
+                             plot_bins=False, stats=False)
 
         line = plt.gca().get_lines()[0]
         np.testing.assert_allclose(line.get_ydata(), 1.0)
@@ -1072,7 +1079,8 @@ class TestPlotCtfTimecourse:
         ctfs = make_ctf_result(raw, times=times, bands=['all'],
                                 n_subjects=15, noise_sd=0.2, seed=2)
 
-        plot_ctf_timecourse(ctfs, timecourse='1d', stats='ttest')
+        plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes',
+                             stats='ttest')
 
         assert len(plt.gca().get_lines()) >= 2
 
@@ -1085,7 +1093,8 @@ class TestPlotCtfTimecourse:
         for c in ctfs:
             c['info']['freqs'] = freq_bands
 
-        plot_ctf_timecourse(ctfs, timecourse='2d_tfr', stats=False)
+        plot_ctf_timecourse(ctfs, timecourse='2d_tfr', output='raw_slopes',
+                             stats=False)
 
         assert plt.gca().get_ylabel() == 'Frequency (Hz)'
 
@@ -1098,9 +1107,68 @@ class TestPlotCtfTimecourse:
         ctfs = make_ctf_result(raw, times=times, bands=['all'], noise_sd=0)
 
         with pytest.warns(UserWarning, match='channel'):
-            plot_ctf_timecourse(ctfs, timecourse='2d_ctf')
+            plot_ctf_timecourse(ctfs, timecourse='2d_ctf', output='raw_slopes')
 
         assert len(plt.gca().get_images()) == 1
+
+    @pytest.mark.unit
+    def test_output_is_required(self):
+        times = np.linspace(-0.1, 0.5, 10)
+        ctfs = make_ctf_result(np.full((1, 10), 0.3), times=times,
+                                bands=['all'], noise_sd=0)
+
+        with pytest.raises(ValueError, match='output parameter is required'):
+            plot_ctf_timecourse(ctfs, timecourse='1d', stats=False)
+
+    @pytest.mark.unit
+    def test_missing_info_times_raises(self):
+        ctf = {'A': {'raw_slopes': np.full((1, 10), 0.3)}}
+
+        with pytest.raises(ValueError, match="missing required 'info'"):
+            plot_ctf_timecourse(ctf, output='raw_slopes')
+
+    @pytest.mark.unit
+    def test_band_oi_without_bands_key_raises(self):
+        times = np.linspace(-0.1, 0.5, 10)
+        ctf = {'A': {'raw_slopes': np.full((1, 10), 0.3)},
+               'info': {'times': times}}
+
+        with pytest.raises(ValueError, match="'bands' key not found"):
+            plot_ctf_timecourse(ctf, output='raw_slopes', band_oi='alpha',
+                                 stats=False)
+
+    @pytest.mark.unit
+    def test_2d_tfr_without_freqs_key_raises(self):
+        times = np.linspace(-0.1, 0.5, 10)
+        ctf = {'A': {'raw_slopes': np.full((1, 10), 0.3)},
+               'info': {'times': times, 'bands': ['all']}}
+
+        with pytest.raises(ValueError, match="'freqs' key not found"):
+            plot_ctf_timecourse(ctf, timecourse='2d_tfr', output='raw_slopes',
+                                 stats=False)
+
+    @pytest.mark.unit
+    def test_more_bins_than_default_colors_uses_seaborn_palette(self):
+        times = np.linspace(-0.1, 0.5, 10)
+        # 12 bins > the 10 default tableau colors
+        raw = np.random.default_rng(0).normal(1, 0.1, (1, 10, 12))
+        ctfs = make_ctf_result(raw, times=times, bands=['all'], noise_sd=0)
+
+        plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes', stats=False)
+
+        bin_lines = [l for l in plt.gca().get_lines() if 'bin_' in l.get_label()]
+        assert len(bin_lines) == 12
+
+    @pytest.mark.unit
+    def test_stats_with_individual_bins_warns_and_skips(self):
+        times = np.linspace(-0.1, 0.5, 10)
+        raw = np.random.default_rng(1).normal(1, 0.1, (1, 10, 3))
+        ctfs = make_ctf_result(raw, times=times, bands=['all'], n_subjects=5,
+                                noise_sd=0.1, seed=1)
+
+        with pytest.warns(UserWarning, match='not yet supported'):
+            plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes',
+                                 stats='ttest')
 
 
 # ============================================================================
@@ -1240,7 +1308,8 @@ class TestRegressions:
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
-            plot_ctf_timecourse(ctfs, timecourse='1d', band_oi=None, stats=False)
+            plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes',
+                                 band_oi=None, stats=False)
 
         assert any('band_oi' in str(w.message) for w in caught)
 
