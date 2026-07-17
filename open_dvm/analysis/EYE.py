@@ -133,7 +133,7 @@ class EYE(FolderStructure):
         Calculate angles and bin trials by maximum deviation.
     calculate_angle(x, y, xc, yc)
         Calculate visual angle deviation from center point.
-    degrees_to_pixels(h, d, r)
+    degrees_per_pixel(h, d, r)
         Static method to calculate degrees per pixel.
 
     See Also
@@ -312,15 +312,15 @@ class EYE(FolderStructure):
         # read in behavior and eyetracking data
         if eye_files == 'all':
             eye_files = glob.glob(
-                self.FolderTracker(
-                    extension=['eye', 'raw'],
-                    filename='sub_{}_ses_*.asc'.format(sj)
+                self.folder_tracker(
+                    ext=['eye', 'raw'],
+                    fname='sub_{}_ses_*.asc'.format(sj)
                 )
-            )	
+            )
             beh_files = glob.glob(
-                self.FolderTracker(
-                    extension=['behavioral', 'raw'],
-                    filename='sub_{}_ses_*.csv'.format(sj)
+                self.folder_tracker(
+                    ext=['behavioral', 'raw'],
+                    fname='sub_{}_ses_*.csv'.format(sj)
                 )
             )
             # if eye file does not exit remove beh file 
@@ -336,14 +336,16 @@ class EYE(FolderStructure):
                                   os.path.basename(f)).group(1))
                     for f in beh_files
                 ]
-                for i, ses in enumerate(beh_sessions):
-                    if ses not in eye_sessions:
-                        beh_files.pop(i)
+                beh_files = [
+                    f for f, ses in zip(beh_files, beh_sessions)
+                    if ses in eye_sessions
+                ]
 
-        if eye_files[0][-3:] == 'tsv':			
-            eye = [read_eyetribe(file, start = start, missing = 0) 
+        if eye_files[0][-3:] == 'tsv':
+            eye = [read_eyetribe(file, start = start, missing = 0)
                                                         for file in eye_files]
-        elif eye_files[0][-3:] == 'asc':	
+            trial_info = [np.full(len(e), np.nan) for e in eye]
+        elif eye_files[0][-3:] == 'asc':
             if stop is None:
                 eye = [
                     read_edf(
@@ -366,9 +368,9 @@ class EYE(FolderStructure):
             eye = [e[0] for e in eye]
         eye = np.array(eye[0]) if len(eye_files) == 1 else np.hstack(eye)
         if len(eye_files) == 1:
-            trial_info = np.array(trial_info[0])  
-        else: 
-            np.hstack(trial_info)
+            trial_info = np.array(trial_info[0])
+        else:
+            trial_info = np.hstack(trial_info)
         # filthy hack to deal with missing events
         if np.all(np.isnan(trial_info)):
             trial_info = np.arange(eye.shape[0])
@@ -478,14 +480,14 @@ class EYE(FolderStructure):
         x = np.array(trial['x'])
         y = np.array(trial['y'])
 
-        if np.isnan(x).any():
-            return x, y
+        if np.isnan(x).all():
+            return np.zeros(x.size), np.zeros(y.size)
 
         #pad 75ms before and after blink
         pad = int(75/(1000/self.sfreq))
         for blink in blinks:
             idx = get_time_slice(trial['trackertime'], blink[0], blink[1])
-            idx = slice(idx.start - pad, idx.stop + pad)
+            idx = slice(max(0, idx.start - pad), min(x.size, idx.stop + pad))
             x[idx] = None
             y[idx] = None
 
@@ -536,9 +538,13 @@ class EYE(FolderStructure):
             Event marker string to align trials to 
             (e.g., 'stimulus_onset').
         interpolate_blinks : bool, default=True
-            Whether to interpolate blinks using interp_trial(). 
-            If False, returns raw data with blink periods as NaN or 
-            zeros.
+            Whether to interpolate blinks using interp_trial().
+            If False, returns raw data with blink periods as NaN or
+            zeros. Interpolation is only applied to trials whose
+            recording starts at or before `start` (i.e. the tracker
+            already covers the full epoch from its beginning); trials
+            with a later recording onset lack the data to interpolate
+            reliably and are returned raw regardless of this flag.
             
         Returns
         -------
@@ -593,7 +599,7 @@ class EYE(FolderStructure):
                         # Align to start_event
                         tr_times = trial['trackertime'] - event[0]
 
-                        if interpolate_blinks and tr_times[0] >= start:
+                        if interpolate_blinks and tr_times[0] <= start:
                             x_, y_  = self.interp_trial(trial)
                         else:
                             x_ = np.array(trial['x'])
@@ -609,8 +615,12 @@ class EYE(FolderStructure):
             
                         # Only copy data where times overlap
                         if len(target_idx) > 0:
-                            x[i,target_idx] = x_[idx][:len(target_idx)]
-                            y[i,target_idx] = y_[idx][:len(target_idx)]
+                            x[i,target_idx] = np.interp(
+                                times[target_idx], trial_times, x_[idx]
+                            )
+                            y[i,target_idx] = np.interp(
+                                times[target_idx], trial_times, y_[idx]
+                            )
 
         return x, y, times
 
@@ -759,13 +769,13 @@ class EYE(FolderStructure):
         -----
         Processing pipeline:
         1. Optionally apply drift correction via set_xy()
-        2. Call createAngleBins() with fixed parameters:
+        2. Call create_angle_bins() with fixed parameters:
            - start=0, stop=3, step=0.25 (bin range 0-3°)
            - min_segment=40ms
         3. Return only the angles (discard bins)
-        
+
         The method hardcodes binning parameters suitable for fixation
-        analysis. Modify createAngleBins() call if different parameters
+        analysis. Modify create_angle_bins() call if different parameters
         are needed.
         
         Examples
@@ -991,7 +1001,8 @@ class EYE(FolderStructure):
         # read in eye data (linked to behavior)
         print('reading in eye tracker data')
         eye, beh, trial_info = self.get_eye_data(
-            '', eye_file, beh_file, start_trial, trigger_msg, stop_trial
+            sj='', eye_files=eye_file, beh_files=beh_file,
+            start=start_trial, stop=stop_trial
         )
         # collect x, y data 
         x, y, times = self.get_xy(eye, window_oi[0], 
@@ -1061,7 +1072,7 @@ class EYE(FolderStructure):
         --------
         create_angle_bins : Uses this method to compute trial-wise 
                             angles
-        degrees_to_pixels : Static method for inverse conversion
+        degrees_per_pixel : Static method for inverse conversion
         """
         
         # Use screen center if not specified
@@ -1084,7 +1095,7 @@ class EYE(FolderStructure):
         return visual_angle	
 
     @staticmethod
-    def degrees_to_pixels(
+    def degrees_per_pixel(
         h: float = 30,
         d: float = 60,
         r: int = 1080
@@ -1126,12 +1137,12 @@ class EYE(FolderStructure):
         Examples
         --------
         >>> # Standard 1080p monitor at 60cm
-        >>> deg_per_px = EYE.degrees_to_pixels(h=30, d=60, r=1080)
+        >>> deg_per_px = EYE.degrees_per_pixel(h=30, d=60, r=1080)
         >>> print(f'{deg_per_px:.4f} degrees per pixel')
         0.0286 degrees per pixel
-        >>> 
+        >>>
         >>> # 4K monitor at 90cm
-        >>> deg_per_px = EYE.degrees_to_pixels(h=35, d=90, r=2160)
+        >>> deg_per_px = EYE.degrees_per_pixel(h=35, d=90, r=2160)
         >>> print(f'{deg_per_px:.4f} degrees per pixel')
         
         See Also
@@ -1303,8 +1314,11 @@ class SaccadeDetector(object):
                 sacc[i] = np.nan	
 
         if output == 'mask':
-            sacc = np.array(sacc, dtype = bool)
-                
+            sacc = np.array(
+                [np.nan if isinstance(v, float) and np.isnan(v) else bool(v)
+                 for v in sacc]
+            )
+
         return sacc
 
     def calc_velocity(
