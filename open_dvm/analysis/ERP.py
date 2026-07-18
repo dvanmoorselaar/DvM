@@ -131,9 +131,9 @@ class ERP(FolderStructure):
                 RT_split=False, save=True)
         Create averaged ERP objects from epochs with optional 
         RT splitting.
-    condition_erps(pos_labels=None, cnds=None, spatial_restriction=None, 
-                   topo_flip=None, time_oi=None, excl_factor=None, 
-                   RT_split=False, name='main')
+    condition_erps(pos_labels=None, cnds=None, spatial_restriction=None,
+                   topo_flip=None, time_oi=None, excl_factor=None,
+                   RT_split=False, f_name=None)
         Generate condition-specific ERPs with flexible trial selection.
     generate_erp_report(evokeds, report_name)
         Generate HTML reports for ERP visualization.
