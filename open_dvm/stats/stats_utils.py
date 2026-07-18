@@ -296,32 +296,47 @@ def connected_adjacency(
 		)
 
 def perform_stats(
-		y: np.ndarray, 
-		chance: float = 0, 
+		y: np.ndarray,
+		chance: float = 0,
 		stat_test: str = 'perm',
 		p_thresh: float = 0.05,
 		statfun: Optional[callable] = None,
 		p_cluster: Optional[float] = None,
-		threshold: Optional[float] = None
+		threshold: Optional[float] = None,
+		y2: Optional[np.ndarray] = None
 	) -> Tuple[np.ndarray, Union[list, np.ndarray], np.ndarray]:
 	"""Perform statistical testing on group-level neural data.
 
-	Conducts one-sample statistical tests comparing data against a 
-	chance level. Supports multiple testing approaches 
-	(permutation clustering, t-test, FDR correction) suitable for 
+	Conducts one-sample statistical tests comparing data against a
+	chance level. Supports multiple testing approaches
+	(permutation clustering, t-test, FDR correction) suitable for
 	time-series and 2D (frequency X time) neural data.
+
+	Also supports a paired two-condition test (e.g. condition A vs
+	condition B, same subjects) via `y2`: a paired test is mathematically
+	identical to a one-sample test on the per-subject difference, so
+	passing `y2` simply computes `y - y2` and forces `chance=0` before
+	running the exact same test machinery below.
 
 	Parameters
 	----------
 	y : np.ndarray
 		Data array for statistical testing. Shape should be:
 		- 2D array: (n_subjects, n_timepoints) for 1D data (timecourse)
-		- 3D array: (n_subjects, n_frequencies, n_timepoints) for 
+		- 3D array: (n_subjects, n_frequencies, n_timepoints) for
 		  2D data (time-frequency)
 	chance : float, default=0
-		Chance level to test against. Data is centered on this value 
-		before testing (y - chance). Typically 0 for deviation from 
-		baseline, or 0.5 for classification accuracy.
+		Chance level to test against. Data is centered on this value
+		before testing (y - chance). Typically 0 for deviation from
+		baseline, or 0.5 for classification accuracy. Ignored if `y2`
+		is provided (forced to 0, since the difference is tested
+		against zero).
+	y2 : np.ndarray, optional
+		Second condition's per-subject data, same shape as `y`. If
+		provided, the test is run on the paired difference `y - y2`
+		(chance forced to 0) instead of on `y` alone -- i.e. "is
+		condition A different from condition B?" rather than "is
+		condition A different from chance?".
 	stat_test : {'perm', 'ttest', 'fdr'}, default='perm'
 		Statistical test method:
 		- 'perm': Permutation cluster test with sign-flipping to 
@@ -411,23 +426,40 @@ def perform_stats(
 	Raises
 	------
 	ValueError
-		If stat_test is not one of 'perm', 'ttest', or 'fdr'.
+		If stat_test is not one of 'perm', 'ttest', or 'fdr'. Also
+		raised if `y2` is provided with a shape that doesn't match `y`.
 	TypeError
 		If statfun is not callable.
 
 	Examples
 	--------
 	>>> y = np.random.randn(30, 300)  # 30 subjects, 300 timepoints
-	>>> t_vals, sig_mask, p_vals = perform_stats(y, chance=0, 
+	>>> t_vals, sig_mask, p_vals = perform_stats(y, chance=0,
 	...stat_test='ttest')
 	>>> significant_points = np.sum(sig_mask)
-	
+
 	>>> # Using custom statfun with permutation test
 	>>> custom_stat = lambda x: np.mean(x, axis=0)
-	>>> t_vals, sig_mask, p_vals = perform_stats(y, stat_test='perm', 
+	>>> t_vals, sig_mask, p_vals = perform_stats(y, stat_test='perm',
 	...                                            statfun=custom_stat)
+
+	>>> # Paired two-condition test (condition A vs condition B)
+	>>> y_a = np.random.randn(20, 300)
+	>>> y_b = np.random.randn(20, 300)
+	>>> t_vals, sig_mask, p_vals = perform_stats(y_a, y2=y_b,
+	...                                            stat_test='perm')
 	"""
 	#TODO: add option to return a mask with significant points only
+
+	if y2 is not None:
+		if y2.shape != y.shape:
+			raise ValueError(
+				f"y2 shape {y2.shape} does not match y shape {y.shape}; "
+				"a paired difference test requires matching per-subject "
+				"arrays."
+			)
+		y = y - y2
+		chance = 0
 
 	# Determine input data dimensionality
 	is_2d = y.ndim == 3

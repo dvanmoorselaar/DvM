@@ -458,6 +458,106 @@ class TestPlotSignificance:
         assert len(plt.gca().get_lines()) >= 2
 
 
+class TestPlotSignificanceConditionDiff:
+    """y2 (paired difference test) / bar_y (marker-row style) /
+    point_colors (per-timepoint marker coloring)."""
+
+    @pytest.mark.unit
+    def test_y2_tests_paired_difference_not_y_alone(self):
+        # y alone has no effect anywhere; the paired difference y - y2
+        # does, in a known window -- only y2's presence should surface it
+        rng = np.random.default_rng(0)
+        y = rng.normal(0, 1, size=(20, 40))
+        y2 = rng.normal(0, 1, size=(20, 40))
+        y2[:, 15:25] -= 3.0
+
+        plt.plot(np.arange(40), y.mean(axis=0), color='blue')
+        plot_significance(np.arange(40), y, y2=y2, stats='ttest',
+                           color='blue', bar_y=-5.0)
+
+        collections = plt.gca().collections
+        assert len(collections) == 1
+        xdata = collections[0].get_offsets()[:, 0]
+        assert xdata.min() >= 14
+        assert xdata.max() <= 26
+
+    @pytest.mark.unit
+    def test_bar_y_draws_markers_at_fixed_height_not_on_waveform(self):
+        x = np.linspace(0, 1, 20)
+        y = np.random.default_rng(0).normal(0, 1, size=(10, 20))
+        sig_mask = np.zeros(20, dtype=bool)
+        sig_mask[3:7] = True
+
+        plt.plot(x, y.mean(axis=0) + 100, color='blue')  # well away from bar_y
+        plot_significance(x, y, stats='ttest', sig_mask=sig_mask,
+                           color='grey', bar_y=-2.5)
+
+        collections = plt.gca().collections
+        assert len(collections) == 1
+        offsets = collections[0].get_offsets()
+        np.testing.assert_allclose(offsets[:, 1], -2.5)
+        np.testing.assert_allclose(offsets[:, 0], x[3:7])
+
+    @pytest.mark.unit
+    def test_bar_y_uses_scatter_not_line(self):
+        x = np.linspace(0, 1, 20)
+        y = np.random.default_rng(0).normal(0, 1, size=(10, 20))
+        sig_mask = [np.arange(5, 10)]
+
+        n_lines_before = len(plt.gca().get_lines())
+        plot_significance(x, y, stats='perm', sig_mask=sig_mask,
+                           color='grey', bar_y=-1.0)
+
+        # no new Line2D added -- markers go through plt.scatter instead
+        assert len(plt.gca().get_lines()) == n_lines_before
+        assert len(plt.gca().collections) == 1
+
+    @pytest.mark.unit
+    def test_point_colors_overrides_flat_color_per_timepoint(self):
+        x = np.linspace(0, 1, 20)
+        y = np.random.default_rng(0).normal(0, 1, size=(10, 20))
+        sig_mask = np.zeros(20, dtype=bool)
+        sig_mask[2:8] = True
+        point_colors = np.array(['red' if i < 5 else 'green'
+                                  for i in range(20)])
+
+        plot_significance(x, y, stats='ttest', sig_mask=sig_mask,
+                           color='grey', bar_y=0.0, point_colors=point_colors)
+
+        facecolors = plt.gca().collections[0].get_facecolor()
+        expected = np.array([mcolors.to_rgba(c) for c in point_colors[2:8]])
+        np.testing.assert_allclose(facecolors, expected)
+
+    @pytest.mark.unit
+    def test_point_colors_none_falls_back_to_flat_color(self):
+        x = np.linspace(0, 1, 20)
+        y = np.random.default_rng(0).normal(0, 1, size=(10, 20))
+        sig_mask = np.zeros(20, dtype=bool)
+        sig_mask[2:8] = True
+
+        plot_significance(x, y, stats='ttest', sig_mask=sig_mask,
+                           color='red', bar_y=0.0)
+
+        # a flat (non-array) color isn't broadcast per-point by
+        # plt.scatter -- get_facecolor() reflects it as a single row
+        facecolors = plt.gca().collections[0].get_facecolor()
+        assert facecolors.shape[0] == 1
+        np.testing.assert_allclose(facecolors[0], mcolors.to_rgba('red'))
+
+    @pytest.mark.unit
+    def test_marker_size_controls_scatter_s(self):
+        x = np.linspace(0, 1, 20)
+        y = np.random.default_rng(0).normal(0, 1, size=(10, 20))
+        sig_mask = np.zeros(20, dtype=bool)
+        sig_mask[2:4] = True
+
+        plot_significance(x, y, stats='ttest', sig_mask=sig_mask,
+                           color='grey', bar_y=0.0, marker_size=77)
+
+        sizes = plt.gca().collections[0].get_sizes()
+        np.testing.assert_allclose(sizes, 77)
+
+
 # ============================================================================
 # plot_erp_timecourse
 # ============================================================================
@@ -618,6 +718,68 @@ class TestPlotErpTimecourse:
         labels = [l.get_label() for l in plt.gca().get_lines()
                   if not l.get_label().startswith('_')]
         assert labels == ['A']
+
+    @pytest.mark.unit
+    def test_cnd_diff_marks_significant_window_and_auto_colors(self):
+        rng = np.random.default_rng(0)
+        ch_names = ['C3']
+        n_sub, n_t = 20, 60
+        sfreq, tmin = 100., -0.1
+        info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+
+        def make(offset, seed):
+            r = np.random.default_rng(seed)
+            out = []
+            for _ in range(n_sub):
+                data = r.normal(0, 1e-6, size=(1, n_t))
+                data[:, 20:35] += offset
+                out.append(mne.EvokedArray(data, info, tmin=tmin))
+            return out
+
+        erps = {'easy': make(6e-6, 1), 'hard': make(0.2e-6, 2)}
+        times = erps['easy'][0].times
+
+        # 'perm' (cluster-based) rather than 'ttest': avoids spurious
+        # isolated hits from uncorrected per-timepoint testing, giving a
+        # single coherent cluster for a clean ground-truth check
+        plot_erp_timecourse(erps, times, elec_oi=['C3'], cnds=['easy', 'hard'],
+                             colors=['red', 'green'], stats='perm',
+                             cnd_diff=('easy', 'hard'))
+
+        collections = plt.gca().collections
+        assert len(collections) == 1
+        offsets = collections[0].get_offsets()
+        # window is samples 20-35 in ms relative to tmin/sfreq (times
+        # were converted seconds -> ms by the function)
+        window_times = times[20:35] * 1000
+        assert offsets[:, 0].min() >= window_times.min() - 1
+        assert offsets[:, 0].max() <= window_times.max() + 1
+        # easy > hard throughout the injected window -> all markers red
+        facecolors = collections[0].get_facecolor()
+        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        np.testing.assert_allclose(facecolors, expected)
+
+    @pytest.mark.unit
+    def test_cnd_diff_missing_condition_raises(self):
+        erps = {'A': make_condition_evokeds({'C3': 1.0}, ch_names=['C3'],
+                                             n_subjects=5, noise_sd=0.1)}
+        times = erps['A'][0].times
+
+        with pytest.raises(ValueError, match='not found'):
+            plot_erp_timecourse(erps, times, elec_oi=['C3'], cnds=['A'],
+                                 stats='ttest', cnd_diff=('A', 'nonexistent'))
+
+    @pytest.mark.unit
+    def test_cnd_diff_requires_stats(self):
+        erps = {
+            'A': make_condition_evokeds({'C3': 1.0}, ch_names=['C3'], n_subjects=5, noise_sd=0.1),
+            'B': make_condition_evokeds({'C3': 2.0}, ch_names=['C3'], n_subjects=5, noise_sd=0.1, seed=1),
+        }
+        times = erps['A'][0].times
+
+        with pytest.raises(ValueError, match='stats'):
+            plot_erp_timecourse(erps, times, elec_oi=['C3'], cnds=['A', 'B'],
+                                 stats=False, cnd_diff=('A', 'B'))
 
 
 # ============================================================================
@@ -784,6 +946,89 @@ class TestPlotTfrTimecourse:
 
         assert len(plt.gca().get_lines()) >= 2
 
+    @staticmethod
+    def _make_tfr_condition(offset, seed, n_sub=15, n_freq=5, n_t=50):
+        rng = np.random.default_rng(seed)
+        ch_names = ['C3']
+        freqs = np.linspace(4, 20, n_freq)
+        sfreq, tmin = 100., -0.1
+        info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+        times = tmin + np.arange(n_t) / sfreq
+        out = []
+        for _ in range(n_sub):
+            data = rng.normal(0, 1, size=(1, n_freq, n_t))
+            data[:, :, 20:30] += offset
+            out.append(mne.time_frequency.AverageTFRArray(
+                info=info, data=data, times=times, freqs=freqs, nave=1))
+        return out
+
+    @pytest.mark.unit
+    def test_cnd_diff_1d_marks_significant_window_and_auto_colors(self):
+        tfr_dict = {
+            'easy': self._make_tfr_condition(3.0, 1),
+            'hard': self._make_tfr_condition(0.1, 2),
+        }
+
+        plot_tfr_timecourse(tfr_dict, elec_oi=['C3'], timecourse='1d',
+                             cnds=['easy', 'hard'], colors=['red', 'green'],
+                             stats='perm', cnd_diff=('easy', 'hard'))
+
+        collections = plt.gca().collections
+        assert len(collections) == 1
+        facecolors = collections[0].get_facecolor()
+        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        np.testing.assert_allclose(facecolors, expected)
+
+    @pytest.mark.unit
+    def test_cnd_diff_2d_draws_extra_contour(self):
+        tfr_dict = {
+            'easy': self._make_tfr_condition(3.0, 1),
+            'hard': self._make_tfr_condition(0.1, 2),
+        }
+
+        plot_tfr_timecourse(tfr_dict, elec_oi=['C3'], timecourse='2d',
+                             cnds=['easy'], stats='perm',
+                             cnd_diff=('easy', 'hard'))
+
+        # heatmap + at least the cnd_diff contour overlay
+        assert len(plt.gca().collections) > 0
+
+    @pytest.mark.unit
+    def test_cnd_diff_references_condition_outside_cnds(self):
+        # cnd_diff should be able to reference 'hard' even though only
+        # 'easy' is plotted as its own condition/line
+        tfr_dict = {
+            'easy': self._make_tfr_condition(3.0, 1),
+            'hard': self._make_tfr_condition(0.1, 2),
+        }
+
+        plot_tfr_timecourse(tfr_dict, elec_oi=['C3'], timecourse='1d',
+                             cnds=['easy'], stats='perm',
+                             cnd_diff=('easy', 'hard'))
+
+        assert len(plt.gca().collections) == 1
+
+    @pytest.mark.unit
+    def test_cnd_diff_missing_condition_raises(self):
+        tfr_dict = {'easy': self._make_tfr_condition(3.0, 1)}
+
+        with pytest.raises(ValueError, match='not found'):
+            plot_tfr_timecourse(tfr_dict, elec_oi=['C3'], timecourse='1d',
+                                 cnds=['easy'], stats='perm',
+                                 cnd_diff=('easy', 'nonexistent'))
+
+    @pytest.mark.unit
+    def test_cnd_diff_requires_stats(self):
+        tfr_dict = {
+            'easy': self._make_tfr_condition(3.0, 1),
+            'hard': self._make_tfr_condition(0.1, 2),
+        }
+
+        with pytest.raises(ValueError, match='stats'):
+            plot_tfr_timecourse(tfr_dict, elec_oi=['C3'], timecourse='1d',
+                                 cnds=['easy', 'hard'], stats=False,
+                                 cnd_diff=('easy', 'hard'))
+
 
 # ============================================================================
 # plot_bdm_timecourse
@@ -897,6 +1142,89 @@ class TestPlotBdmTimecourse:
 
         # greyscale background image + significant-overlay image
         assert len(plt.gca().get_images()) == 2
+
+    @staticmethod
+    def _make_two_cnd_bdms(n_sub=15, n_t=40, seed_easy=1, seed_hard=2,
+                            easy_val=0.9, hard_val=0.55):
+        times = np.linspace(-0.1, 0.5, n_t)
+        easy_scores = np.full(n_t, 0.5)
+        easy_scores[15:25] = easy_val
+        hard_scores = np.full(n_t, 0.5)
+        hard_scores[15:25] = hard_val
+
+        bdms = make_bdm_result(easy_scores, times=times, cnd='easy',
+                                n_subjects=n_sub, noise_sd=0.05, seed=seed_easy)
+        hard_bdms = make_bdm_result(hard_scores, times=times, cnd='hard',
+                                     n_subjects=n_sub, noise_sd=0.05, seed=seed_hard)
+        for b, hb in zip(bdms, hard_bdms):
+            b['hard'] = hb['hard']
+        return bdms
+
+    @pytest.mark.unit
+    def test_cnd_diff_marks_significant_window_and_auto_colors(self):
+        bdms = self._make_two_cnd_bdms()
+
+        plot_bdm_timecourse(bdms, cnds=['easy', 'hard'], colors=['red', 'green'],
+                             stats='perm', cnd_diff=('easy', 'hard'))
+
+        collections = plt.gca().collections
+        assert len(collections) == 1
+        facecolors = collections[0].get_facecolor()
+        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        np.testing.assert_allclose(facecolors, expected)
+
+    @pytest.mark.unit
+    def test_cnd_diff_multi_contrast_stacks_into_separate_rows(self):
+        bdms = self._make_two_cnd_bdms()
+        # add a third condition so we have two independent contrasts
+        medium_scores = np.full(40, 0.5)
+        medium_scores[15:25] = 0.75
+        times = np.linspace(-0.1, 0.5, 40)
+        medium_bdms = make_bdm_result(medium_scores, times=times, cnd='medium',
+                                       n_subjects=15, noise_sd=0.05, seed=3)
+        for b, mb in zip(bdms, medium_bdms):
+            b['medium'] = mb['medium']
+
+        plot_bdm_timecourse(bdms, cnds=['easy', 'hard', 'medium'],
+                             colors=['red', 'green', 'blue'], stats='perm',
+                             cnd_diff=[('easy', 'hard'), ('medium', 'hard')])
+
+        collections = plt.gca().collections
+        assert len(collections) == 2
+        y_rows = {c.get_offsets()[0, 1] for c in collections}
+        assert len(y_rows) == 2  # each contrast drawn at its own row
+
+    @pytest.mark.unit
+    def test_cnd_diff_2d_gat_draws_extra_contour_no_crash(self):
+        bdms = self._make_two_cnd_bdms()
+        for b in bdms:
+            b['easy']['dec_scores'] = np.outer(b['easy']['dec_scores'],
+                                                 b['easy']['dec_scores'])
+            b['hard']['dec_scores'] = np.outer(b['hard']['dec_scores'],
+                                                 b['hard']['dec_scores'])
+            b['info']['test_times'] = b['info']['times']
+
+        plot_bdm_timecourse(bdms, timecourse='2d_GAT', cnds=['easy'],
+                             stats='perm', cnd_diff=('easy', 'hard'))
+
+        assert len(plt.gca().get_images()) == 1
+        assert len(plt.gca().collections) > 0
+
+    @pytest.mark.unit
+    def test_cnd_diff_missing_condition_raises(self):
+        bdms = self._make_two_cnd_bdms()
+
+        with pytest.raises(ValueError, match='not found'):
+            plot_bdm_timecourse(bdms, cnds=['easy', 'hard'], stats='perm',
+                                 cnd_diff=('easy', 'nonexistent'))
+
+    @pytest.mark.unit
+    def test_cnd_diff_requires_stats(self):
+        bdms = self._make_two_cnd_bdms()
+
+        with pytest.raises(ValueError, match='stats'):
+            plot_bdm_timecourse(bdms, cnds=['easy', 'hard'], stats=False,
+                                 cnd_diff=('easy', 'hard'))
 
 
 # ============================================================================
@@ -1169,6 +1497,97 @@ class TestPlotCtfTimecourse:
         with pytest.warns(UserWarning, match='not yet supported'):
             plot_ctf_timecourse(ctfs, timecourse='1d', output='raw_slopes',
                                  stats='ttest')
+
+    @staticmethod
+    def _make_two_cnd_ctfs(n_sub=15, n_t=40):
+        times = np.linspace(-0.1, 0.5, n_t)
+        easy = np.zeros((1, n_t))
+        easy[:, 15:25] = 3.0
+        hard = np.zeros((1, n_t))
+        hard[:, 15:25] = 0.1
+
+        ctfs = make_ctf_result(easy, times=times, bands=['all'], cnd='easy',
+                                n_subjects=n_sub, noise_sd=0.3, seed=1)
+        hard_ctfs = make_ctf_result(hard, times=times, bands=['all'], cnd='hard',
+                                     n_subjects=n_sub, noise_sd=0.3, seed=2)
+        for c, hc in zip(ctfs, hard_ctfs):
+            c['hard'] = hc['hard']
+        return ctfs
+
+    @pytest.mark.unit
+    def test_cnd_diff_marks_significant_window_and_auto_colors(self):
+        ctfs = self._make_two_cnd_ctfs()
+
+        plot_ctf_timecourse(ctfs, cnds=['easy', 'hard'], colors=['red', 'green'],
+                             output='raw_slopes', stats='perm',
+                             cnd_diff=('easy', 'hard'))
+
+        collections = plt.gca().collections
+        assert len(collections) == 1
+        facecolors = collections[0].get_facecolor()
+        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        np.testing.assert_allclose(facecolors, expected)
+
+    @pytest.mark.unit
+    def test_cnd_diff_2d_gat_draws_extra_contour_no_crash(self):
+        # 2d_gat needs a genuine (train_time x test_time) matrix per
+        # subject, not the 1d raw_slopes shape _make_two_cnd_ctfs builds
+        times = np.linspace(-0.1, 0.5, 20)
+        easy_1d = np.zeros(20)
+        easy_1d[8:14] = 3.0
+        hard_1d = np.zeros(20)
+        hard_1d[8:14] = 0.1
+        easy_gat = np.outer(easy_1d, easy_1d)[np.newaxis]  # (1, 20, 20)
+        hard_gat = np.outer(hard_1d, hard_1d)[np.newaxis]
+
+        ctfs = make_ctf_result(easy_gat, times=times, bands=['all'], cnd='easy',
+                                n_subjects=15, noise_sd=0.3, seed=1)
+        hard_ctfs = make_ctf_result(hard_gat, times=times, bands=['all'],
+                                     cnd='hard', n_subjects=15, noise_sd=0.3, seed=2)
+        for c, hc in zip(ctfs, hard_ctfs):
+            c['hard'] = hc['hard']
+
+        plot_ctf_timecourse(ctfs, cnds=['easy'], timecourse='2d_gat',
+                             output='raw_slopes', stats='perm',
+                             cnd_diff=('easy', 'hard'))
+
+        assert len(plt.gca().get_images()) == 1
+        assert len(plt.gca().collections) > 0
+
+    @pytest.mark.unit
+    def test_cnd_diff_with_individual_bins_warns_and_skips(self):
+        times = np.linspace(-0.1, 0.5, 10)
+        raw_easy = np.random.default_rng(1).normal(1, 0.1, (1, 10, 3))
+        raw_hard = np.random.default_rng(2).normal(1, 0.1, (1, 10, 3))
+        ctfs = make_ctf_result(raw_easy, times=times, bands=['all'], cnd='easy',
+                                n_subjects=5, noise_sd=0.1, seed=1)
+        hard_ctfs = make_ctf_result(raw_hard, times=times, bands=['all'],
+                                     cnd='hard', n_subjects=5, noise_sd=0.1, seed=2)
+        for c, hc in zip(ctfs, hard_ctfs):
+            c['hard'] = hc['hard']
+
+        with pytest.warns(UserWarning, match='not yet supported'):
+            plot_ctf_timecourse(ctfs, cnds=['easy', 'hard'], output='raw_slopes',
+                                 stats='perm', cnd_diff=('easy', 'hard'))
+
+        # skipped, not drawn -- no cnd_diff marker collection produced
+        assert len(plt.gca().collections) == 0
+
+    @pytest.mark.unit
+    def test_cnd_diff_missing_condition_raises(self):
+        ctfs = self._make_two_cnd_ctfs()
+
+        with pytest.raises(ValueError, match='not found'):
+            plot_ctf_timecourse(ctfs, cnds=['easy', 'hard'], output='raw_slopes',
+                                 stats='perm', cnd_diff=('easy', 'nonexistent'))
+
+    @pytest.mark.unit
+    def test_cnd_diff_requires_stats(self):
+        ctfs = self._make_two_cnd_ctfs()
+
+        with pytest.raises(ValueError, match='stats'):
+            plot_ctf_timecourse(ctfs, cnds=['easy', 'hard'], output='raw_slopes',
+                                 stats=False, cnd_diff=('easy', 'hard'))
 
 
 # ============================================================================

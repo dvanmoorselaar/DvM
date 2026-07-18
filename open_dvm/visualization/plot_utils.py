@@ -9,7 +9,10 @@ Copyright (c) 2016 DvM. All rights reserved.
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.colors import Normalize
+
+from typing import List, Optional, Tuple, Union
 
 def shifted_color_map(cmap, min_val, max_val, name):
     '''Function to offset the "center" of a colormap. 
@@ -54,3 +57,69 @@ def shifted_color_map(cmap, min_val, max_val, name):
         cdict['alpha'].append((si, a, a))
     newcmap = matplotlib.colors.LinearSegmentedColormap(name, cdict)
     return newcmap
+
+def resolve_cnd_diff_list(
+        cnd_diff: Union[Tuple[str, str], List[Tuple[str, str]]]
+    ) -> List[Tuple[str, str]]:
+    """Normalize `cnd_diff` to a list of (cnd_a, cnd_b) contrast tuples.
+
+    Accepts either a single pair (e.g. ('easy', 'hard')) or a list of
+    pairs (e.g. [('easy', 'hard'), ('medium', 'hard')]) so callers can
+    request one or several condition-difference tests in a single
+    plotting call.
+    """
+    if cnd_diff is None:
+        return []
+    if isinstance(cnd_diff[0], str):
+        return [cnd_diff]
+    return list(cnd_diff)
+
+def resolve_cnd_diff_colors(
+        cnd_diff_color: Optional[Union[str, List[str]]],
+        n_contrasts: int, default: str = 'grey'
+    ) -> List[str]:
+    """Resolve `cnd_diff_color` to one flat color per contrast.
+
+    - None: a single contrast falls back to `default` ('grey', matching
+      the toolbox's established manual convention); multiple contrasts
+      auto-cycle through a default palette so they stay distinguishable.
+    - str: applied to every contrast (the user's explicit choice, even
+      if that makes multiple contrasts indistinguishable).
+    - list of str: one color per contrast, must match `n_contrasts`.
+    """
+    if cnd_diff_color is None:
+        if n_contrasts == 1:
+            return [default]
+        palette = list(mcolors.TABLEAU_COLORS.values())
+        return [palette[i % len(palette)] for i in range(n_contrasts)]
+    if isinstance(cnd_diff_color, str):
+        return [cnd_diff_color] * n_contrasts
+    if len(cnd_diff_color) != n_contrasts:
+        raise ValueError(
+            f"cnd_diff_color list length ({len(cnd_diff_color)}) must "
+            f"match the number of cnd_diff contrasts ({n_contrasts})."
+        )
+    return list(cnd_diff_color)
+
+def cnd_diff_point_colors(
+        cnd_a: str, cnd_b: str, y1: np.ndarray, y2: np.ndarray,
+        cnds: Optional[list], colors: Optional[list]
+    ) -> Optional[np.ndarray]:
+    """Auto-derive per-timepoint marker colors for a condition-difference
+    contrast, using each condition's own assigned plot color.
+
+    Returns an array (one color per timepoint, `cnd_a`'s color where its
+    mean is higher, else `cnd_b`'s) if both conditions were assigned a
+    color in `cnds`/`colors`, else None (caller falls back to a flat
+    color -- no colors are available to alternate between).
+    """
+    if cnds is None or colors is None:
+        return None
+    cnds = list(cnds)
+    if cnd_a not in cnds or cnd_b not in cnds:
+        return None
+    idx_a, idx_b = cnds.index(cnd_a), cnds.index(cnd_b)
+    if idx_a >= len(colors) or idx_b >= len(colors):
+        return None
+    return np.where(y1.mean(axis=0) >= y2.mean(axis=0),
+                     colors[idx_a], colors[idx_b])

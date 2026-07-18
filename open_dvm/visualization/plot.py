@@ -26,7 +26,12 @@ from open_dvm.support.preprocessing_utils import (
     get_time_slice,
     get_diff_pairs,
 )
-from open_dvm.visualization.plot_utils import shifted_color_map
+from open_dvm.visualization.plot_utils import (
+    shifted_color_map,
+    resolve_cnd_diff_list,
+    resolve_cnd_diff_colors,
+    cnd_diff_point_colors,
+)
 
 # set general plotting parameters
 # inspired by http://nipunbatra.github.io/2014/08/latexify/
@@ -418,13 +423,17 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
                     sig_mask:Union[np.ndarray,list]=None,
                     p_cluster:Optional[float]=None,
                     threshold:Optional[float]=None,
+                    y2:Optional[np.ndarray]=None,
+                    bar_y:Optional[float]=None,
+                    point_colors:Optional[np.ndarray]=None,
+                    marker_size:float=20,
                     **kwargs):
-    """Overlay statistical significance markers on 1D or 2D neural data 
+    """Overlay statistical significance markers on 1D or 2D neural data
     plots.
 
-    Automatically detects plot dimensionality and visualizes significant 
-    regions using either horizontal lines (1D timecourse) or contours 
-    (2D matrices). Can use pre-computed significance masks or compute 
+    Automatically detects plot dimensionality and visualizes significant
+    regions using either horizontal lines (1D timecourse) or contours
+    (2D matrices). Can use pre-computed significance masks or compute
     significance on-the-fly.
 
     Parameters
@@ -432,20 +441,21 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
     x : ndarray
         X-axis values (e.g., timepoints in ms). Shape: (n_timepoints,).
     y : ndarray
-        Data array. For significance computation (if sig_mask not 
+        Data array. For significance computation (if sig_mask not
         provided):
         - 1D: Shape (n_timepoints,)
         - 2D: Shape (n_channels, n_timepoints)
-        - 3D: Shape (n_subjects, n_channels, n_timepoints) for group 
+        - 3D: Shape (n_subjects, n_channels, n_timepoints) for group
         analysis. Only used if sig_mask is None.
     chance : float, default=0
-        Chance/baseline level for statistical testing. Typically 0 for 
-        amplitude, 0.5 for accuracy/AUC.
+        Chance/baseline level for statistical testing. Typically 0 for
+        amplitude, 0.5 for accuracy/AUC. Ignored if `y2` is provided
+        (forced to 0 by `perform_stats`).
     p_thresh : float, default=0.05
-        P-value threshold. Regions with p-value <= p_thresh marked as 
+        P-value threshold. Regions with p-value <= p_thresh marked as
         significant.
     color : str, optional
-        Color for significance markers. If None, auto-selected based on 
+        Color for significance markers. If None, auto-selected based on
         data. Default: None.
     stats : str, default='perm'
         Statistical test type if computing significance on-the-fly:
@@ -456,25 +466,50 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
         If True, smooth data before significance computation using
         Gaussian filter.
     line_width : float, default=4
-        Width of horizontal lines marking significance in 1D plots.
+        Width of horizontal lines marking significance in 1D plots
+        (only used when `bar_y` is None -- the default overlay style).
     y_val : ndarray, optional
-        Y-axis values for 2D plots (e.g., train times, frequencies). 
+        Y-axis values for 2D plots (e.g., train times, frequencies).
         Required for 2D significance visualization. Default: None.
     sig_mask : ndarray or list, optional
-        Pre-computed significance mask. If provided, skips significance 
+        Pre-computed significance mask. If provided, skips significance
         computation:
         - ndarray: Boolean array (True = significant)
         - list: Cluster indices (each non-zero value = cluster)
-        If None, significance computed from y using stats method. 
+        If None, significance computed from y using stats method.
         Default: None.
     p_cluster : float, optional
-        P-value threshold for cluster-based permutation test. If None, 
+        P-value threshold for cluster-based permutation test. If None,
         uses p_thresh. Default: None.
     threshold : float, optional
-        Threshold for initial thresholding in permutation test 
+        Threshold for initial thresholding in permutation test
         (e.g., t-statistic threshold). Default: None.
+    y2 : ndarray, optional
+        Second condition's data, same shape as `y`. If provided (and
+        `sig_mask` is None), tests the paired difference `y - y2`
+        against zero instead of `y` against `chance` -- i.e. "is
+        condition A different from condition B?". See
+        `perform_stats`. Default: None.
+    bar_y : float, optional
+        1D plots only. If provided, draws significance as marker
+        points at this fixed y-position (a row below/above the data)
+        instead of the default style of overlaying a thickened line on
+        top of the current condition's own waveform. Intended for
+        condition-difference markers, where overlaying on a specific
+        condition's line doesn't make sense. Default: None (existing
+        overlay-on-line behavior).
+    point_colors : ndarray, optional
+        1D plots only, only used when `bar_y` is not None. Array of
+        per-timepoint colors (same length as `x`); each marker is
+        colored from this array at its corresponding index rather than
+        the flat `color`. Useful for coloring markers by which of two
+        conditions is higher at that timepoint. Default: None (all
+        markers use `color`).
+    marker_size : float, default=20
+        Marker size (`plt.scatter`'s `s`) for the `bar_y` marker style.
+        Unused otherwise.
     **kwargs
-        Additional arguments passed to plt.axhline() (1D) or 
+        Additional arguments passed to plt.axhline() (1D) or
         plt.contour() (2D).
 
     Returns
@@ -529,7 +564,7 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
     if sig_mask is None:
         _, sig_mask, _ = perform_stats(y, chance, stats, p_thresh,
                                         p_cluster=p_cluster,
-                                        threshold=threshold)
+                                        threshold=threshold, y2=y2)
 
     if plot_type == '2d':
         if y_val is None:
@@ -578,6 +613,21 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
                 plt.contourf(sig_mask.astype(float), levels=[0.5, 1.0],
                             colors=[color], alpha=0.3, extent=extent, **kwargs)
 
+    elif bar_y is not None:
+        # condition-difference marker style: fixed-height points below/
+        # above the data, not tied to any single condition's own line
+        if color is None:
+            color = 'grey'
+
+        idx_groups = sig_mask if stats == 'perm' else \
+            _get_continuous_segments(sig_mask)
+        # plt.scatter doesn't accept an axhline/axvline-style p_vals kwarg
+        scatter_kwargs = {k: v for k, v in kwargs.items() if k != 'p_vals'}
+        for idx in idx_groups:
+            c = point_colors[idx] if point_colors is not None else color
+            plt.scatter(x[idx], np.full_like(x[idx], bar_y, dtype=float),
+                        c=c, marker='o', s=marker_size, **scatter_kwargs)
+
     else:
         if color is None:
             current_line = plt.gca().get_lines()[-1]
@@ -591,12 +641,96 @@ def plot_significance(x:np.array,y:np.array,chance:float=0,p_thresh:float=0.05,
 
         if stats == 'perm':
             for cl in sig_mask:
-                plt.plot(x[cl], y_data[cl], linewidth=line_width, 
+                plt.plot(x[cl], y_data[cl], linewidth=line_width,
                     color=color, **kwargs)
         else:
             for segment in _get_continuous_segments(sig_mask):
                 plt.plot(x[segment], y_data[segment], linewidth=line_width,
                         color=color, **kwargs)
+
+def _plot_cnd_diff_1d(
+        x: np.ndarray, extract: callable,
+        cnd_diff: Union[Tuple[str, str], List[Tuple[str, str]]],
+        cnds: Optional[list] = None, colors: Optional[list] = None,
+        stats: Union[str, bool] = 'perm', p_thresh: float = 0.05,
+        p_cluster: Optional[float] = None, threshold: Optional[float] = None,
+        smooth: bool = False,
+        cnd_diff_color: Optional[Union[str, List[str]]] = None,
+        cnd_diff_y: Optional[float] = None, **kwargs):
+    """Shared condition-difference marker logic for 1D timecourse plots.
+
+    Used internally by all four plot_*_timecourse wrappers so the
+    paired-difference cluster test and its marker-row visualization are
+    implemented once. `extract` maps a condition name to its per-subject
+    array (n_subjects, n_timepoints), applying whatever electrode/
+    frequency/output selection is already active for the enclosing call;
+    it should raise a clear ValueError for an unrecognized condition
+    name.
+
+    Each contrast in `cnd_diff` is drawn as its own row of marker points
+    below the data (auto-stacked so multiple contrasts don't collide).
+    Per contrast, markers are colored by whichever condition is higher
+    at each timepoint when both conditions have an assigned plot color
+    in `cnds`/`colors`; otherwise they fall back to that contrast's flat
+    color from `cnd_diff_color` (see `resolve_cnd_diff_colors`).
+    """
+    contrasts = resolve_cnd_diff_list(cnd_diff)
+    if not contrasts:
+        return
+    if not stats:
+        raise ValueError(
+            "cnd_diff requires a valid `stats` method ('perm', 'ttest', "
+            "or 'fdr'); got a falsy `stats` value."
+        )
+    flat_colors = resolve_cnd_diff_colors(cnd_diff_color, len(contrasts))
+
+    ylim = plt.gca().get_ylim()
+    row_gap = 0.05 * (ylim[1] - ylim[0])
+    base_y = cnd_diff_y if cnd_diff_y is not None else ylim[0] - row_gap
+
+    for i, (cnd_a, cnd_b) in enumerate(contrasts):
+        y1, y2 = extract(cnd_a), extract(cnd_b)
+        point_colors = cnd_diff_point_colors(cnd_a, cnd_b, y1, y2,
+                                               cnds, colors)
+        plot_significance(x, y1, chance=0, y2=y2, stats=stats,
+                           p_thresh=p_thresh, p_cluster=p_cluster,
+                           threshold=threshold, color=flat_colors[i],
+                           point_colors=point_colors,
+                           bar_y=base_y - i * row_gap, smooth=smooth,
+                           label=f'{cnd_a} vs {cnd_b}', **kwargs)
+
+def _plot_cnd_diff_2d(
+        x: np.ndarray, y_val: np.ndarray, extract: callable,
+        cnd_diff: Union[Tuple[str, str], List[Tuple[str, str]]],
+        stats: Union[str, bool] = 'perm', p_thresh: float = 0.05,
+        p_cluster: Optional[float] = None, threshold: Optional[float] = None,
+        cnd_diff_color: Optional[Union[str, List[str]]] = None, **kwargs):
+    """Shared condition-difference contour-outline logic for 2D plots.
+
+    Draws one dashed contour outline per contrast (reusing
+    plot_significance's existing 2D drawing path unchanged) on top of
+    whichever heatmap the enclosing call already renders. Per-point
+    alternation (as used in 1D) doesn't apply to a single boundary
+    line, so each contrast gets one flat color resolved via
+    `resolve_cnd_diff_colors` (auto-cycled by default when there's more
+    than one contrast, so they stay visually distinguishable).
+    """
+    contrasts = resolve_cnd_diff_list(cnd_diff)
+    if not contrasts:
+        return
+    if not stats:
+        raise ValueError(
+            "cnd_diff requires a valid `stats` method ('perm', 'ttest', "
+            "or 'fdr'); got a falsy `stats` value."
+        )
+    flat_colors = resolve_cnd_diff_colors(cnd_diff_color, len(contrasts))
+
+    for i, (cnd_a, cnd_b) in enumerate(contrasts):
+        y1, y2 = extract(cnd_a), extract(cnd_b)
+        plot_significance(x, y1, chance=0, y2=y2, stats=stats,
+                           y_val=y_val, color=flat_colors[i],
+                           p_thresh=p_thresh, p_cluster=p_cluster,
+                           threshold=threshold, **kwargs)
 
 def plot_erp_timecourse(
     erps: Union[list, dict], 
@@ -611,10 +745,13 @@ def plot_erp_timecourse(
     p_thresh: float = 0.05,
     p_cluster: Optional[float] = None,
     threshold: Optional[float] = None,
-    window_oi: Tuple = None, 
-    offset_axes: int = 10, 
-    onset_times: Union[list, bool] = [0], 
-    show_legend: bool = True, 
+    window_oi: Tuple = None,
+    offset_axes: int = 10,
+    onset_times: Union[list, bool] = [0],
+    show_legend: bool = True,
+    cnd_diff: Union[Tuple[str, str], List[Tuple[str, str]]] = None,
+    cnd_diff_color: Optional[Union[str, List[str]]] = None,
+    cnd_diff_y: Optional[float] = None,
     **kwargs
 ):
     """Visualize event-related potential (ERP) timecourses.
@@ -683,8 +820,29 @@ def plot_erp_timecourse(
         Default: [0].
     show_legend : bool, optional
         If True, displays legend for waveforms. Default: True.
+    cnd_diff : tuple or list of tuple, optional
+        One condition-difference contrast (e.g. ('easy', 'hard')) or a
+        list of contrasts to additionally test and mark. Unlike `stats`
+        (which tests each condition/lateralized-difference against
+        zero), this tests whether the two named conditions differ from
+        each other (paired, per subject) -- using the lateralized
+        contra-ipsi difference per condition when `lateralized=True`.
+        Drawn as marker points in their own row below the data. Requires
+        `stats` to be set to a valid method. Auto-coloring by condition
+        only applies when there's exactly one waveform per condition
+        (i.e. `lateralized=True` or a single electrode group); with
+        multiple electrode groups it falls back to a flat color, since
+        colors are then assigned per condition-electrode-group pair,
+        not per condition alone. Default: None.
+    cnd_diff_color : str or list of str, optional
+        See `plot_bdm_timecourse` for the resolution rules (None =
+        grey for a single contrast / auto-cycled palette for multiple;
+        str = applied to all; list = one color per contrast).
+    cnd_diff_y : float, optional
+        Y-position of the first `cnd_diff` marker row; auto if None.
+        Default: None.
     **kwargs
-        Additional keyword arguments passed to plot_timecourse() and 
+        Additional keyword arguments passed to plot_timecourse() and
         plot_significance() (e.g., linewidth, alpha).
 
     Returns
@@ -808,10 +966,14 @@ def plot_erp_timecourse(
     if isinstance(erps, list):
         erps = {'temp':erps}
 
+    # kept for cnd_diff, which may reference a condition outside cnds
+    # (erps gets filtered to only the plotted cnds a few lines below)
+    original_erps = erps
+
     if cnds is not None:
         erps = {key:value for (key,value) in erps.items() if key in cnds}
 
-    if isinstance(elec_oi[0],str): 
+    if isinstance(elec_oi[0],str):
         elec_oi = [elec_oi]
 
     # total waveforms across all conditions determines how many colors we need
@@ -857,6 +1019,40 @@ def plot_erp_timecourse(
                 plot_significance(times, y_, 0, color=color, stats=stats,
                              p_thresh=p_thresh, p_cluster=p_cluster,
                              threshold=threshold, smooth=smooth, **kwargs)
+
+    if cnd_diff is not None:
+        def _extract_erp(cnd):
+            if cnd not in original_erps:
+                raise ValueError(f"cnd_diff condition '{cnd}' not found "
+                                  "in the provided ERP data.")
+            if lateralized:
+                y_contra, _ = ERP.group_erp(original_erps[cnd],
+                                             elec_oi=elec_oi[0])
+                y_ipsi, _ = ERP.group_erp(original_erps[cnd],
+                                           elec_oi=elec_oi[1])
+                y_ = y_contra - y_ipsi
+            else:
+                y_, _ = ERP.group_erp(original_erps[cnd], elec_oi=elec_oi[0])
+            typical_value = np.abs(y_).mean()
+            if typical_value < 1e-3 and typical_value > 1e-9:
+                y_ = y_ * 1e6
+            return y_
+
+        # colors are assigned per-waveform (condition x electrode-group),
+        # not strictly per-condition, so auto-color derivation from cnds
+        # only lines up cleanly when there's exactly one waveform per
+        # condition (lateralized, or a single electrode group)
+        if n_waveforms_per_condition == 1:
+            diff_cnds, diff_colors = list(erps.keys()), colors
+        else:
+            diff_cnds, diff_colors = None, None
+
+        _plot_cnd_diff_1d(times, _extract_erp, cnd_diff, cnds=diff_cnds,
+                           colors=diff_colors, stats=stats,
+                           p_thresh=p_thresh, p_cluster=p_cluster,
+                           threshold=threshold, smooth=smooth,
+                           cnd_diff_color=cnd_diff_color,
+                           cnd_diff_y=cnd_diff_y)
 
     if window_oi is not None:
         # highlight the window of interest with a dashed rectangle, inset
@@ -911,9 +1107,12 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
     onset_times: Union[list, bool] = [0], 
     show_legend: bool = True, 
     contour: bool = False,
-    ls: str = '-', 
+    ls: str = '-',
+    cnd_diff: Union[Tuple[str,str],List[Tuple[str,str]]] = None,
+    cnd_diff_color: Optional[Union[str,List[str]]] = None,
+    cnd_diff_y: Optional[float] = None,
     **kwargs
-):	
+):
     """Plot time-frequency representation (TFR) timecourse with multiple 
     visualization modes.
 
@@ -1008,10 +1207,26 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
         interpolated pixels. Only applies when timecourse='2d'. 
         Default: False.
     ls : str, default='-'
-        Line style for 1D timecourse ('-', '--', '-.', ':'). 
+        Line style for 1D timecourse ('-', '--', '-.', ':').
         Default: '-'.
+    cnd_diff : tuple or list of tuple, optional
+        One condition-difference contrast (e.g. ('easy', 'hard')) or a
+        list of contrasts to additionally test and mark. Unlike `stats`
+        (which tests each condition against zero), this tests whether
+        the two named conditions differ from each other (paired, per
+        subject). 1D: drawn as marker points in their own row below the
+        data. 2D: drawn as an additional contour outline on top of the
+        existing heatmap. Requires `stats` to be set to a valid method.
+        Default: None.
+    cnd_diff_color : str or list of str, optional
+        See `plot_bdm_timecourse` for the resolution rules (None =
+        grey for a single contrast / auto-cycled palette for multiple;
+        str = applied to all; list = one color per contrast).
+    cnd_diff_y : float, optional
+        1D only. Y-position of the first `cnd_diff` marker row; auto if
+        None. Default: None.
     **kwargs
-        Additional arguments passed to plot_significance() and 
+        Additional arguments passed to plot_significance() and
         plot_2d() functions.
 
     Returns
@@ -1078,7 +1293,11 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
     plot_timecourse : 1D timecourse plotting
     plot_significance : Statistical significance overlay
     """
-    
+
+    # kept for cnd_diff, which may reference a condition outside cnds
+    # (tfr gets filtered to only the plotted cnds a few lines below)
+    original_tfr = tfr
+
     if cnds is not None:
         tfr = {key:value for (key,value) in tfr.items() if key in cnds}
     else:
@@ -1214,6 +1433,50 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
                                     threshold=threshold,
                                     smooth=smooth,**kwargs)
 
+    if cnd_diff is not None:
+        def _extract_tfr(cnd):
+            if cnd not in original_tfr:
+                raise ValueError(f"cnd_diff condition '{cnd}' not found "
+                                  "in the provided TFR data.")
+            tfr_list = original_tfr[cnd] if isinstance(original_tfr[cnd], list) \
+                else [original_tfr[cnd]]
+            freqs_ = tfr_list[0].freqs
+            freq_idx_ = None
+            if freq_oi is not None:
+                if isinstance(freq_oi, tuple):
+                    freq_idx_ = (np.abs(freqs_ - freq_oi[0]).argmin(),
+                                 np.abs(freqs_ - freq_oi[1]).argmin())
+                    freq_idx_ = slice(freq_idx_[0], freq_idx_[1] + 1)
+                else:
+                    freq_idx_ = np.abs(freqs_ - freq_oi).argmin()
+
+            # cnd_diff uses the first electrode group only (elec_oi may
+            # hold multiple groups for e.g. contra/ipsi pairs)
+            elec = elec_oi[0]
+            idx = [tfr_list[0].ch_names.index(e) for e in elec]
+            y_ = np.stack([tfr_.data[idx] for tfr_ in tfr_list]).mean(axis=1)
+            if freq_idx_ is not None:
+                if isinstance(freq_idx_, (int, np.integer)):
+                    y_ = np.expand_dims(y_[:, freq_idx_], axis=1)
+                else:
+                    y_ = y_[:, freq_idx_]
+            if timecourse != '2d':
+                y_ = y_.mean(axis=1)
+            return y_
+
+        if timecourse == '2d':
+            _plot_cnd_diff_2d(times, freqs, _extract_tfr, cnd_diff,
+                               stats=stats, p_thresh=p_thresh,
+                               p_cluster=p_cluster, threshold=threshold,
+                               cnd_diff_color=cnd_diff_color)
+        else:
+            _plot_cnd_diff_1d(times, _extract_tfr, cnd_diff, cnds=cnds,
+                               colors=colors, stats=stats,
+                               p_thresh=p_thresh, p_cluster=p_cluster,
+                               threshold=threshold, smooth=smooth,
+                               cnd_diff_color=cnd_diff_color,
+                               cnd_diff_y=cnd_diff_y)
+
     if show_legend and timecourse == '1d':
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
@@ -1243,8 +1506,11 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
                     threshold:Optional[float]=None,
                     freq_oi: Union[int,Tuple] = None,
                     onset_times:Union[list,bool]=[0],offset_axes:int=10,
-                    show_legend:bool=True,ls = '-',**kwargs):
-    """Plot backward decoding model (BDM) timecourse with multiple 
+                    show_legend:bool=True,ls = '-',
+                    cnd_diff:Union[Tuple[str,str],List[Tuple[str,str]]]=None,
+                    cnd_diff_color:Optional[Union[str,List[str]]]=None,
+                    cnd_diff_y:Optional[float]=None,**kwargs):
+    """Plot backward decoding model (BDM) timecourse with multiple
     visualization modes.
 
     High-level wrapper for visualizing decoding performance across time 
@@ -1325,10 +1591,36 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
         If True, display legend with condition names (1D plots). 
         Default: True.
     ls : str, default='-'
-        Line style for 1D timecourse ('-', '--', '-.', ':'). 
+        Line style for 1D timecourse ('-', '--', '-.', ':').
         Default: '-'.
+    cnd_diff : tuple or list of tuple, optional
+        One condition-difference contrast (e.g. ('easy', 'hard')) or a
+        list of contrasts (e.g. [('easy', 'hard'), ('medium', 'hard')])
+        to additionally test and mark. Unlike `stats` (which tests each
+        condition against `chance_level`), this tests whether the two
+        named conditions differ from each other (paired, per subject).
+        1D: drawn as marker points in their own row below the data,
+        auto-colored by whichever condition is higher at each timepoint
+        when both conditions have an assigned color in `cnds`/`colors`.
+        2D: drawn as an additional contour outline on top of the
+        existing heatmap. Requires `stats` to be set to a valid method.
+        Default: None.
+    cnd_diff_color : str or list of str, optional
+        Fallback marker/outline color(s) for `cnd_diff`, used when
+        per-condition auto-coloring isn't available (1D) or always (2D,
+        since a contour line can't alternate per-point). If None
+        (default): a single contrast falls back to grey; multiple
+        contrasts auto-cycle through a default palette so they stay
+        distinguishable. A single str applies that color to every
+        contrast. A list must have exactly one color per contrast in
+        `cnd_diff`.
+    cnd_diff_y : float, optional
+        1D only. Y-position of the first `cnd_diff` marker row. If
+        None, auto-computed just below the data's y-range. Subsequent
+        contrasts (if `cnd_diff` is a list) stack in further rows below
+        this one. Default: None.
     **kwargs
-        Additional arguments passed to plot_significance() and plotting 
+        Additional arguments passed to plot_significance() and plotting
         functions.
 
     Returns
@@ -1487,6 +1779,31 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
                                 sig_mask=sig_mask,
                                 **kwargs)
 
+    if cnd_diff is not None:
+        def _extract_bdm(cnd, need_diag):
+            if cnd not in bdms[0]:
+                raise ValueError(f"cnd_diff condition '{cnd}' not found "
+                                  "in the provided BDM data.")
+            y_ = np.stack([bdm[cnd]['dec_scores'] for bdm in bdms])
+            if need_diag and y_.ndim > 2:
+                min_dim = min(y_.shape[1], y_.shape[2])
+                y_ = y_[:, np.arange(min_dim), np.arange(min_dim)]
+            return y_
+
+        if timecourse == '1d':
+            _plot_cnd_diff_1d(times, lambda cnd: _extract_bdm(cnd, True),
+                               cnd_diff, cnds=cnds, colors=colors,
+                               stats=stats, p_thresh=p_thresh,
+                               p_cluster=p_cluster, threshold=threshold,
+                               smooth=smooth, cnd_diff_color=cnd_diff_color,
+                               cnd_diff_y=cnd_diff_y)
+        else:
+            _plot_cnd_diff_2d(x_vals, y_range,
+                               lambda cnd: _extract_bdm(cnd, False),
+                               cnd_diff, stats=stats, p_thresh=p_thresh,
+                               p_cluster=p_cluster, threshold=threshold,
+                               cnd_diff_color=cnd_diff_color)
+
     if show_legend:
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
@@ -1496,7 +1813,7 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
     if onset_times and timecourse == '1d':
         for t in onset_times:
             plt.axvline(t,color = 'black',ls='--',lw=1)
-    
+
     if timecourse == '2d_GAT':
         plt.xlabel('Test time (ms)')
     else:
@@ -1516,7 +1833,10 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
                         chance_level:float=0,
                         mask_nonsig:bool=False,diverging_cmap:bool=False,
                         onset_times:Union[list,bool]=[0],offset_axes:int=10,
-                        show_legend:bool=True,plot_bins:bool=True,**kwargs):
+                        show_legend:bool=True,plot_bins:bool=True,
+                        cnd_diff:Union[Tuple[str,str],List[Tuple[str,str]]]=None,
+                        cnd_diff_color:Optional[Union[str,List[str]]]=None,
+                        cnd_diff_y:Optional[float]=None,**kwargs):
     """Plot spatial channel tuning function (CTF) timecourse with 
     multiple visualization modes.
 
@@ -1607,6 +1927,25 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
         as separate lines with distinct colors (1D plots only; ignored for 2D modes).
         If False, average across spatial bins into a single line.
         Default: True.
+    cnd_diff : tuple or list of tuple, optional
+        One condition-difference contrast (e.g. ('easy', 'hard')) or a
+        list of contrasts to additionally test and mark, using the
+        first entry of `output` (and `band_oi`, if given). Unlike
+        `stats` (which tests each condition against `chance_level`),
+        this tests whether the two named conditions differ from each
+        other (paired, per subject). 1D: drawn as marker points in
+        their own row below the data. 2D: drawn as an additional
+        contour outline on top of the existing heatmap. Skipped (with a
+        warning) when `plot_bins=True` produces per-bin data, matching
+        the existing per-condition stats limitation. Requires `stats`
+        to be set to a valid method. Default: None.
+    cnd_diff_color : str or list of str, optional
+        See `plot_bdm_timecourse` for the resolution rules (None =
+        grey for a single contrast / auto-cycled palette for multiple;
+        str = applied to all; list = one color per contrast).
+    cnd_diff_y : float, optional
+        1D only. Y-position of the first `cnd_diff` marker row; auto if
+        None. Default: None.
     **kwargs
         Additional arguments passed to plot_2d(), plot_significance(),
         and plotting functions.
@@ -1842,6 +2181,45 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
                 plot_2d(y,x_val=times,y_val=y_range,colorbar=True,
                            set_y_ticks=False,
                            cbar_label='Channel response',**kwargs)
+
+    if cnd_diff is not None:
+        def _extract_ctf(cnd):
+            if cnd not in ctfs[0]:
+                raise ValueError(f"cnd_diff condition '{cnd}' not found "
+                                  "in the provided CTF data.")
+            out = output[0]
+            y_ = np.stack([ctf[cnd][out] for ctf in ctfs])
+            if timecourse in ['1d', '2d_gat']:
+                if y_.shape[1] > 1:
+                    if band_oi is not None:
+                        y_ = y_[:, band_idx, :]
+                    else:
+                        y_ = y_.mean(axis=1)
+                else:
+                    y_ = np.squeeze(y_, axis=1)
+            return y_
+
+        if timecourse == '1d':
+            contrasts_preview = resolve_cnd_diff_list(cnd_diff)
+            sample_y = _extract_ctf(contrasts_preview[0][0]) \
+                if contrasts_preview else None
+            if sample_y is not None and sample_y.ndim > 2 and plot_bins:
+                warnings.warn('cnd_diff with individual bins '
+                            '(plot_bins=True) is not yet supported. '
+                            'cnd_diff will be skipped for binned data. '
+                            'Set plot_bins=False to enable cnd_diff testing.')
+            else:
+                _plot_cnd_diff_1d(times, _extract_ctf, cnd_diff, cnds=cnds,
+                                   colors=colors, stats=stats,
+                                   p_thresh=p_thresh, p_cluster=p_cluster,
+                                   threshold=threshold, smooth=smooth,
+                                   cnd_diff_color=cnd_diff_color,
+                                   cnd_diff_y=cnd_diff_y)
+        elif timecourse in ['2d_tfr', '2d_gat']:
+            _plot_cnd_diff_2d(times, y_range, _extract_ctf, cnd_diff,
+                               stats=stats, p_thresh=p_thresh,
+                               p_cluster=p_cluster, threshold=threshold,
+                               cnd_diff_color=cnd_diff_color)
 
     if show_legend:
         handles, labels = plt.gca().get_legend_handles_labels()

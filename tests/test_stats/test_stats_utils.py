@@ -270,5 +270,97 @@ class TestPerformStats:
         np.testing.assert_allclose(p_vals_a, p_vals_b)
 
 
+class TestPerformStatsPairedDifference:
+    """Ground truth: a paired two-condition test (y2 given) is just a
+    one-sample test on the per-subject difference y - y2. Two arrays
+    identical except for an injected difference in a known window
+    should recover a significant cluster/mask exactly there, whether or
+    not either array alone differs from chance."""
+
+    @pytest.mark.unit
+    def test_perm_recovers_injected_condition_difference(self):
+        rng = np.random.default_rng(0)
+        y1 = rng.normal(0, 1, size=(20, 100))
+        y2 = y1.copy()
+        y2[:, 40:60] -= 3.0  # y1 > y2 in this window, identical elsewhere
+
+        t_vals, clusters, p_vals = perform_stats(y1, y2=y2, stat_test='perm')
+
+        assert len(clusters) == 1
+        assert p_vals[0] < 0.05
+        cluster_idx = clusters[0][0]
+        assert cluster_idx.min() >= 38
+        assert cluster_idx.max() <= 61
+
+    @pytest.mark.unit
+    def test_perm_no_difference_finds_no_significant_clusters(self):
+        rng = np.random.default_rng(1)
+        y1 = rng.normal(0, 1, size=(20, 60))
+        y2 = rng.normal(0, 1, size=(20, 60))  # independent noise, no shared effect
+
+        _, clusters, _ = perform_stats(y1, y2=y2, stat_test='perm')
+
+        assert len(clusters) == 0
+
+    @pytest.mark.unit
+    def test_ttest_and_fdr_recover_injected_condition_difference(self):
+        rng = np.random.default_rng(0)
+        y1 = rng.normal(0, 1, size=(20, 100))
+        # independent noise on y2 (rather than an exact shifted copy of
+        # y1) so the paired difference has genuine per-subject variance
+        # -- a zero-variance difference degenerates ttest_1samp
+        y2 = rng.normal(0, 1, size=(20, 100))
+        y2[:, 40:60] -= 3.0
+
+        _, sig_mask_t, _ = perform_stats(y1, y2=y2, stat_test='ttest')
+        _, sig_mask_fdr, _ = perform_stats(y1, y2=y2, stat_test='fdr')
+
+        assert sig_mask_t[40:60].mean() > 0.8
+        assert sig_mask_fdr[40:60].mean() > 0.8
+
+    @pytest.mark.unit
+    def test_y2_equivalent_to_manual_difference_against_zero(self):
+        """y2= should be exactly equivalent to precomputing the
+        difference and testing it against chance=0 directly (the
+        toolbox's own pre-existing manual workflow)."""
+        rng = np.random.default_rng(2)
+        y1 = rng.normal(0, 1, size=(15, 50))
+        y2 = rng.normal(0, 1, size=(15, 50))
+
+        t_a, clusters_a, p_a = perform_stats(y1, y2=y2, stat_test='perm')
+        t_b, clusters_b, p_b = perform_stats(y1 - y2, chance=0, stat_test='perm')
+
+        np.testing.assert_allclose(t_a, t_b)
+        assert len(clusters_a) == len(clusters_b)
+        np.testing.assert_allclose(p_a, p_b)
+
+    @pytest.mark.unit
+    def test_y2_shape_mismatch_raises(self):
+        rng = np.random.default_rng(0)
+        y1 = rng.normal(0, 1, size=(20, 100))
+        y2 = rng.normal(0, 1, size=(18, 100))  # different n_subjects
+
+        with pytest.raises(ValueError, match='shape'):
+            perform_stats(y1, y2=y2, stat_test='perm')
+
+    @pytest.mark.unit
+    def test_y2_ignores_chance_argument(self):
+        """chance should be forced to 0 (the difference is tested
+        against zero) even if a nonzero chance is also passed."""
+        rng = np.random.default_rng(0)
+        y1 = rng.normal(0, 1, size=(20, 100))
+        y2 = y1.copy()
+        y2[:, 40:60] -= 3.0
+
+        _, clusters_with_chance, _ = perform_stats(
+            y1, y2=y2, chance=0.5, stat_test='perm'
+        )
+        _, clusters_without_chance, _ = perform_stats(
+            y1, y2=y2, chance=0, stat_test='perm'
+        )
+
+        assert len(clusters_with_chance) == len(clusters_without_chance) == 1
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
