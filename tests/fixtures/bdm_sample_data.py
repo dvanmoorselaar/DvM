@@ -80,3 +80,54 @@ def make_localizer_epoch_pair(
         cnd_value='loc',
     )
     return epochs_tr, df_tr, epochs_te, df_te
+
+
+def make_cross_condition_priming_epochs(
+    n_trials_tr: int = 60,
+    n_trials_te: int = 200,
+    n_ch: int = 4,
+    n_samples: int = 50,
+    sfreq: float = 100,
+    separable_from_sample: int = 25,
+    seed: int = 0,
+    label_column: str = 'label',
+    priming_column: str = 'prev_label',
+    cnd_column: str = 'block_type',
+    train_cnd: str = 'localizer',
+    test_cnd: str = 'main',
+):
+    """
+    Build a single combined (epochs, df) pair for classify()'s
+    single-object cross-condition cnds format, for testing special_col.
+
+    Train-condition trials: `label_column` genuinely drives the
+    injected channel-0 signal (as in make_separable_epochs).
+
+    Test-condition trials: `label_column` is an uncorrelated
+    placeholder (decoding on it alone should sit at chance), while
+    `priming_column` is what actually drives the injected signal --
+    mimicking e.g. a previous-trial location that a decoder trained on
+    the current-trial location might still pick up on.
+    """
+    rng = np.random.default_rng(seed)
+    ch_names = [f'Ch{i+1}' for i in range(n_ch)]
+    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+
+    label_tr = rng.integers(0, 2, size=n_trials_tr)
+    data_tr = rng.normal(0, 1, size=(n_trials_tr, n_ch, n_samples))
+    data_tr[label_tr == 1, 0, separable_from_sample:] += 5.0
+
+    label_te = rng.integers(0, 2, size=n_trials_te)
+    priming_te = rng.integers(0, 2, size=n_trials_te)
+    data_te = rng.normal(0, 1, size=(n_trials_te, n_ch, n_samples))
+    data_te[priming_te == 1, 0, separable_from_sample:] += 5.0
+
+    data = np.concatenate([data_tr, data_te], axis=0)
+    epochs = mne.EpochsArray(data, info, tmin=-0.1)
+
+    df = pd.DataFrame({
+        label_column: np.concatenate([label_tr, label_te]),
+        priming_column: np.concatenate([label_tr, priming_te]),
+        cnd_column: [train_cnd] * n_trials_tr + [test_cnd] * n_trials_te,
+    })
+    return epochs, df

@@ -498,8 +498,9 @@ class BDM(FolderStructure):
 				labels_oi:Union[str,list]='all',collapse:bool=False,
 				excl_factor:dict=None,nr_perm:int=0,
 				GAT:Union[bool,Tuple[Tuple[float,float],
-						 Tuple[float,float]]]=False, 
+						 Tuple[float,float]]]=False,
 				downscale:bool=False,split_fact:dict=None,
+				special_col:Optional[str]=None,
 				f_name:str=None)->dict:
 		"""
 		Perform multivariate decoding across time on specified classes.
@@ -563,6 +564,22 @@ class BDM(FolderStructure):
 		split_fact : dict, optional
 			Additional factor to split analysis by. Decoding performed
 			separately for each level and results averaged.
+		special_col : str, optional, default=None
+			Convenience override for the label (`to_decode` value) used
+			for the *test* condition(s) only (requires cross-condition
+			`cnds`). Useful for e.g. testing whether a decoder trained
+			on one variable (such as current image location) carries
+			information about a different variable during test trials
+			(such as the previous trial's image location, to probe
+			inter-trial priming effects). Training data is never
+			affected. Must be a column name in the behavioral dataframe
+			holding a per-trial label to substitute in -- unlike CTF's
+			`special_loc`, a fixed constant is not supported here: AUC
+			scoring requires both classes to be represented in the test
+			set, which a single constant label can never satisfy.
+			Equivalent to manually overwriting `to_decode` for the test
+			condition's rows before calling classify, without mutating
+			your own dataframe.
 		f_name : str, optional, default=None
 			Filename suffix for saving results. If None (default), results are
 			returned as dictionaries but not saved to disk. If provided,
@@ -589,10 +606,18 @@ class BDM(FolderStructure):
 		>>> results, params = bdm.classify(window_oi=(0.1, 0.5))
 		
 		Cross-condition decoding:
-		
+
 		>>> cnds = {'block_type': [['practice'], 'test']}
 		>>> results, params = bdm.classify(cnds=cnds)
-		
+
+		Cross-condition decoding with a test-label override (e.g.
+		decode the *previous* trial's image location during the test
+		condition, using a decoder trained on the current location):
+
+		>>> cnds = {'block_type': [['localizer'], ['main']]}
+		>>> results, params = bdm.classify(cnds=cnds,
+		...                                special_col='prev_img_loc')
+
 		Generalization across time:
 		
 		>>> results, params = bdm.classify(GAT=True)
@@ -626,6 +651,27 @@ class BDM(FolderStructure):
 		else:
 			(cnd_head,cnds), = cnds.items()
 
+		# avoid mutating the caller's dataframe across repeated calls
+		df = self.df.copy()
+
+		if special_col is not None:
+			if not (isinstance(cnds, list) and isinstance(cnds[0], list)):
+				raise ValueError(
+					"special_col requires cross-condition analysis "
+					"(cnds must specify separate train/test conditions)."
+				)
+			if special_col not in df.columns:
+				raise ValueError(
+					f"special_col column '{special_col}' not found "
+					"in the behavioral dataframe."
+				)
+			test_cnds = cnds[1]
+			if isinstance(test_cnds, str):
+				test_cnds = [test_cnds]
+			test_mask = df[cnd_head].isin(test_cnds)
+			df.loc[test_mask, self.to_decode] = \
+				df.loc[test_mask, special_col].values
+
 		# select the data of interest
 		if labels_oi != 'all':
 			all_labels = np.unique(self.df[self.to_decode])
@@ -642,8 +688,8 @@ class BDM(FolderStructure):
 
 		(X,
 		y,
-		df, 
-		times) = self.select_bdm_data(self.epochs.copy(), self.df.copy(),
+		df,
+		times) = self.select_bdm_data(self.epochs.copy(), df,
 									window_oi, excl_factor,headers,cnds)
 
 		(nr_labels,

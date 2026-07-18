@@ -31,6 +31,7 @@ from open_dvm.analysis.BDM import BDM
 from tests.fixtures.bdm_sample_data import (
     make_separable_epochs,
     make_localizer_epoch_pair,
+    make_cross_condition_priming_epochs,
 )
 
 mne.set_log_level('ERROR')
@@ -789,6 +790,76 @@ class TestClassifyIntegration:
 
         assert output['main']['dec_scores'].mean() > 0.9
         assert params['main']['W'].shape[-1] == 4  # nr_elec
+
+
+# ============================================================================
+# classify(): special_col test-label override
+# ============================================================================
+
+class TestSpecialCol:
+    @pytest.mark.unit
+    def test_special_col_overrides_test_labels_only(self):
+        """Ground truth: test-condition trials carry no genuine signal
+        for `label` (decoding should sit at chance), but `prev_label`
+        drives the same injected signal that trained the classifier on
+        the training condition's `label`. special_col='prev_label'
+        should recover near-perfect decoding after signal onset."""
+        epochs, df = make_cross_condition_priming_epochs(seed=0)
+        bdm = make_bdm(epochs, df, nr_folds=5)
+        cnds = dict(block_type=[['localizer'], ['main']])
+
+        out_plain, _ = bdm.classify(
+            cnds=cnds, window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
+        )
+        out_override, _ = bdm.classify(
+            cnds=cnds, window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
+            special_col='prev_label',
+        )
+
+        plain_scores = out_plain['localizer_main']['dec_scores']
+        override_scores = out_override['localizer_main']['dec_scores']
+
+        assert plain_scores[30:].mean() == pytest.approx(0.5, abs=0.15)
+        assert override_scores[:20].mean() == pytest.approx(0.5, abs=0.1)
+        assert override_scores[30:].mean() > 0.95
+
+    @pytest.mark.unit
+    def test_special_col_does_not_mutate_original_dataframe(self):
+        epochs, df = make_cross_condition_priming_epochs(seed=1)
+        bdm = make_bdm(epochs, df, nr_folds=5)
+        df_before = bdm.df.copy()
+
+        bdm.classify(
+            cnds=dict(block_type=[['localizer'], ['main']]),
+            window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
+            special_col='prev_label',
+        )
+
+        pd.testing.assert_frame_equal(bdm.df, df_before)
+
+    @pytest.mark.unit
+    def test_special_col_without_cross_condition_raises(self):
+        epochs, df = make_cross_condition_priming_epochs(seed=2)
+        bdm = make_bdm(epochs, df, nr_folds=5)
+
+        with pytest.raises(ValueError, match='cross-condition'):
+            bdm.classify(
+                cnds=dict(block_type=['localizer', 'main']),
+                window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
+                special_col='prev_label',
+            )
+
+    @pytest.mark.unit
+    def test_special_col_bad_column_name_raises(self):
+        epochs, df = make_cross_condition_priming_epochs(seed=3)
+        bdm = make_bdm(epochs, df, nr_folds=5)
+
+        with pytest.raises(ValueError, match='not found'):
+            bdm.classify(
+                cnds=dict(block_type=[['localizer'], ['main']]),
+                window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
+                special_col='nonexistent',
+            )
 
 
 # ============================================================================
