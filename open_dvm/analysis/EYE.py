@@ -407,7 +407,7 @@ class EYE(FolderStructure):
                 df.drop(df.index[nr_miss:], inplace=True) 
             else:
                 if 'nr_trials' in df.columns:
-                    eye_mask = np.in1d(df['nr_trials'].values, eye_trials)
+                    eye_mask = np.isin(df['nr_trials'].values, eye_trials)
                     df = df[np.array(eye_mask)]		
         elif nr_miss > 0:
             print(f'Trials in beh and eye do not match. Final {nr_miss}')

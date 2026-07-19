@@ -290,7 +290,7 @@ def plot_2d(Z:np.array,x_val:np.array=None,
         data_min_shifted = data_min - center
         data_max_shifted = data_max - center
 
-        cmap_obj = plt.cm.get_cmap(cmap)
+        cmap_obj = matplotlib.colormaps[cmap]
         shifted_cmap = shifted_color_map(cmap_obj, data_min_shifted,
                                  data_max_shifted, name='shifted_colormap')
         kwargs.setdefault('cmap', shifted_cmap)
