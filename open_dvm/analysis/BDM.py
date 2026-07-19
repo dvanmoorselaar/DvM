@@ -738,8 +738,8 @@ class BDM(FolderStructure):
 		# Save outputs if f_name is provided
 		if f_name is not None:
 			ext = self.set_folder_path()
-			with open(self.folder_tracker(ext, fname = 
-					f'{bdm_name}_bdm.pickle') ,'wb') as handle:
+			with open(self.folder_tracker(ext, fname =
+					f'{bdm_name}.pickle') ,'wb') as handle:
 				print('saving bdm scores')
 				pickle.dump(bdm_scores, handle)
 			if self.output_params:
@@ -1178,8 +1178,8 @@ class BDM(FolderStructure):
 		# Save outputs if f_name is provided
 		if f_name is not None:
 			ext = self.set_folder_path()
-			with open(self.folder_tracker(ext, fname = 
-					f'{bdm_name}_bdm.pickle') ,'wb') as handle:
+			with open(self.folder_tracker(ext, fname =
+					f'{bdm_name}.pickle') ,'wb') as handle:
 				print('saving bdm scores')
 				pickle.dump(bdm_scores, handle)
 
