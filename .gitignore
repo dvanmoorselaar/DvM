@@ -3,6 +3,7 @@
 ._*
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
