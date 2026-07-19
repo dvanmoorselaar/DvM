@@ -754,9 +754,12 @@ class TestPlotErpTimecourse:
         window_times = times[20:35] * 1000
         assert offsets[:, 0].min() >= window_times.min() - 1
         assert offsets[:, 0].max() <= window_times.max() + 1
-        # easy > hard throughout the injected window -> all markers red
+        # markers alternate red/green by position (independent of which
+        # condition is actually higher -- a readability device)
         facecolors = collections[0].get_facecolor()
-        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        red, green = mcolors.to_rgba('red'), mcolors.to_rgba('green')
+        expected = np.array([red if i % 2 == 0 else green
+                              for i in range(facecolors.shape[0])])
         np.testing.assert_allclose(facecolors, expected)
 
     @pytest.mark.unit
@@ -975,8 +978,12 @@ class TestPlotTfrTimecourse:
 
         collections = plt.gca().collections
         assert len(collections) == 1
+        # markers alternate red/green by position (independent of which
+        # condition is actually higher -- a readability device)
         facecolors = collections[0].get_facecolor()
-        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        red, green = mcolors.to_rgba('red'), mcolors.to_rgba('green')
+        expected = np.array([red if i % 2 == 0 else green
+                              for i in range(facecolors.shape[0])])
         np.testing.assert_allclose(facecolors, expected)
 
     @pytest.mark.unit
@@ -1169,8 +1176,12 @@ class TestPlotBdmTimecourse:
 
         collections = plt.gca().collections
         assert len(collections) == 1
+        # markers alternate red/green by position (independent of which
+        # condition is actually higher -- a readability device)
         facecolors = collections[0].get_facecolor()
-        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        red, green = mcolors.to_rgba('red'), mcolors.to_rgba('green')
+        expected = np.array([red if i % 2 == 0 else green
+                              for i in range(facecolors.shape[0])])
         np.testing.assert_allclose(facecolors, expected)
 
     @pytest.mark.unit
@@ -1524,8 +1535,12 @@ class TestPlotCtfTimecourse:
 
         collections = plt.gca().collections
         assert len(collections) == 1
+        # markers alternate red/green by position (independent of which
+        # condition is actually higher -- a readability device)
         facecolors = collections[0].get_facecolor()
-        expected = np.tile(mcolors.to_rgba('red'), (facecolors.shape[0], 1))
+        red, green = mcolors.to_rgba('red'), mcolors.to_rgba('green')
+        expected = np.array([red if i % 2 == 0 else green
+                              for i in range(facecolors.shape[0])])
         np.testing.assert_allclose(facecolors, expected)
 
     @pytest.mark.unit

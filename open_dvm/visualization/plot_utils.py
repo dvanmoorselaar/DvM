@@ -102,16 +102,41 @@ def resolve_cnd_diff_colors(
     return list(cnd_diff_color)
 
 def cnd_diff_point_colors(
-        cnd_a: str, cnd_b: str, y1: np.ndarray, y2: np.ndarray,
+        cnd_a: str, cnd_b: str, sig_mask: Union[np.ndarray, list],
+        stats: str, n_timepoints: int,
         cnds: Optional[list], colors: Optional[list]
     ) -> Optional[np.ndarray]:
     """Auto-derive per-timepoint marker colors for a condition-difference
     contrast, using each condition's own assigned plot color.
 
-    Returns an array (one color per timepoint, `cnd_a`'s color where its
-    mean is higher, else `cnd_b`'s) if both conditions were assigned a
-    color in `cnds`/`colors`, else None (caller falls back to a flat
-    color -- no colors are available to alternate between).
+    Colors alternate strictly by position among the significant
+    timepoints, in temporal order (first significant point gets `cnd_a`'s
+    color, the next `cnd_b`'s, and so on) -- independent of which
+    condition's mean is actually higher at each point. This is a purely
+    visual device to keep the marker row readable, not a claim about
+    which condition "wins" at each timepoint (2D contours, and the
+    underlying significance test itself, are unaffected).
+
+    Parameters
+    ----------
+    sig_mask : ndarray or list
+        Pre-computed significance result (same format `perform_stats`
+        returns): a list of cluster index tuples for `stats == 'perm'`,
+        or a boolean array otherwise.
+    stats : str
+        Which significance format `sig_mask` is in ('perm' vs.
+        'ttest'/'fdr').
+    n_timepoints : int
+        Length of the full time axis (`point_colors` is built at this
+        length so it can be indexed the same way as `x`).
+
+    Returns
+    -------
+    np.ndarray or None
+        Array of length `n_timepoints` (only the significant entries are
+        ever read by the caller) if both conditions were assigned a
+        color in `cnds`/`colors`, else None (caller falls back to a flat
+        color -- no colors are available to alternate between).
     """
     if cnds is None or colors is None:
         return None
@@ -121,5 +146,15 @@ def cnd_diff_point_colors(
     idx_a, idx_b = cnds.index(cnd_a), cnds.index(cnd_b)
     if idx_a >= len(colors) or idx_b >= len(colors):
         return None
-    return np.where(y1.mean(axis=0) >= y2.mean(axis=0),
-                     colors[idx_a], colors[idx_b])
+
+    if stats == 'perm':
+        sig_idx = np.unique(np.concatenate([cl[0] for cl in sig_mask])) \
+            if len(sig_mask) else np.array([], dtype=int)
+    else:
+        sig_idx = np.where(sig_mask)[0]
+
+    palette = [colors[idx_a], colors[idx_b]]
+    point_colors = np.full(n_timepoints, palette[0], dtype=object)
+    for rank, t in enumerate(sig_idx):
+        point_colors[t] = palette[rank % 2]
+    return point_colors

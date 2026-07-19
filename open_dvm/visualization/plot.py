@@ -669,10 +669,13 @@ def _plot_cnd_diff_1d(
 
     Each contrast in `cnd_diff` is drawn as its own row of marker points
     below the data (auto-stacked so multiple contrasts don't collide).
-    Per contrast, markers are colored by whichever condition is higher
-    at each timepoint when both conditions have an assigned plot color
-    in `cnds`/`colors`; otherwise they fall back to that contrast's flat
-    color from `cnd_diff_color` (see `resolve_cnd_diff_colors`).
+    Per contrast, significant markers alternate between the two
+    conditions' own assigned plot colors, in temporal order (independent
+    of which condition is actually higher at each point -- a readability
+    device, not a claim about direction), when both conditions have an
+    assigned color in `cnds`/`colors`; otherwise they fall back to that
+    contrast's flat color from `cnd_diff_color` (see
+    `resolve_cnd_diff_colors`).
     """
     contrasts = resolve_cnd_diff_list(cnd_diff)
     if not contrasts:
@@ -690,12 +693,20 @@ def _plot_cnd_diff_1d(
 
     for i, (cnd_a, cnd_b) in enumerate(contrasts):
         y1, y2 = extract(cnd_a), extract(cnd_b)
-        point_colors = cnd_diff_point_colors(cnd_a, cnd_b, y1, y2,
-                                               cnds, colors)
+        # computed once, up front, so the color assignment and the
+        # actual drawn markers always agree on the same significant
+        # samples (perform_stats' 'perm' path uses unseeded permutation
+        # shuffling, so calling it twice could otherwise disagree)
+        _, sig_mask, _ = perform_stats(y1, chance=0, stat_test=stats,
+                                        p_thresh=p_thresh,
+                                        p_cluster=p_cluster,
+                                        threshold=threshold, y2=y2)
+        point_colors = cnd_diff_point_colors(cnd_a, cnd_b, sig_mask, stats,
+                                              len(x), cnds, colors)
         plot_significance(x, y1, chance=0, y2=y2, stats=stats,
                            p_thresh=p_thresh, p_cluster=p_cluster,
                            threshold=threshold, color=flat_colors[i],
-                           point_colors=point_colors,
+                           point_colors=point_colors, sig_mask=sig_mask,
                            bar_y=base_y - i * row_gap, smooth=smooth,
                            label=f'{cnd_a} vs {cnd_b}', **kwargs)
 
@@ -827,7 +838,10 @@ def plot_erp_timecourse(
         zero), this tests whether the two named conditions differ from
         each other (paired, per subject) -- using the lateralized
         contra-ipsi difference per condition when `lateralized=True`.
-        Drawn as marker points in their own row below the data. Requires
+        Drawn as marker points in their own row below the data;
+        significant markers alternate between the two conditions' own
+        assigned colors, in temporal order (a readability device, not a
+        claim about which condition is higher at each point). Requires
         `stats` to be set to a valid method. Auto-coloring by condition
         only applies when there's exactly one waveform per condition
         (i.e. `lateralized=True` or a single electrode group); with
@@ -1215,8 +1229,11 @@ def plot_tfr_timecourse(tfr:Union[dict,mne.time_frequency.AverageTFR],
         (which tests each condition against zero), this tests whether
         the two named conditions differ from each other (paired, per
         subject). 1D: drawn as marker points in their own row below the
-        data. 2D: drawn as an additional contour outline on top of the
-        existing heatmap. Requires `stats` to be set to a valid method.
+        data; significant markers alternate between the two conditions'
+        own assigned colors, in temporal order (a readability device,
+        not a claim about which condition is higher at each point). 2D:
+        drawn as an additional contour outline on top of the existing
+        heatmap. Requires `stats` to be set to a valid method.
         Default: None.
     cnd_diff_color : str or list of str, optional
         See `plot_bdm_timecourse` for the resolution rules (None =
@@ -1599,12 +1616,14 @@ def plot_bdm_timecourse(bdms:Union[list,dict],cnds:list=None,timecourse:str='1d'
         to additionally test and mark. Unlike `stats` (which tests each
         condition against `chance_level`), this tests whether the two
         named conditions differ from each other (paired, per subject).
-        1D: drawn as marker points in their own row below the data,
-        auto-colored by whichever condition is higher at each timepoint
-        when both conditions have an assigned color in `cnds`/`colors`.
-        2D: drawn as an additional contour outline on top of the
-        existing heatmap. Requires `stats` to be set to a valid method.
-        Default: None.
+        1D: drawn as marker points in their own row below the data;
+        significant markers alternate between the two conditions' own
+        assigned colors, in temporal order, when both have an assigned
+        color in `cnds`/`colors` (a readability device -- the alternation
+        is by position, not by which condition is actually higher at
+        each point). 2D: drawn as an additional contour outline on top
+        of the existing heatmap. Requires `stats` to be set to a valid
+        method. Default: None.
     cnd_diff_color : str or list of str, optional
         Fallback marker/outline color(s) for `cnd_diff`, used when
         per-condition auto-coloring isn't available (1D) or always (2D,
@@ -1934,8 +1953,11 @@ def plot_ctf_timecourse(ctfs:Union[list,dict],cnds:list=None,colors:list=None,
         `stats` (which tests each condition against `chance_level`),
         this tests whether the two named conditions differ from each
         other (paired, per subject). 1D: drawn as marker points in
-        their own row below the data. 2D: drawn as an additional
-        contour outline on top of the existing heatmap. Skipped (with a
+        their own row below the data; significant markers alternate
+        between the two conditions' own assigned colors, in temporal
+        order (a readability device, not a claim about which condition
+        is higher at each point). 2D: drawn as an additional contour
+        outline on top of the existing heatmap. Skipped (with a
         warning) when `plot_bins=True` produces per-bin data, matching
         the existing per-condition stats limitation. Requires `stats`
         to be set to a valid method. Default: None.

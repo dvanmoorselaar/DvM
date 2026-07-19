@@ -61,44 +61,73 @@ class TestResolveCndDiffColors:
 
 
 class TestCndDiffPointColors:
-    @pytest.mark.unit
-    def test_colors_by_which_condition_is_higher_per_timepoint(self):
-        y1 = np.array([[1.0, 1.0], [1.0, 1.0]])  # mean = [1, 1]
-        y2 = np.array([[2.0, 0.0], [2.0, 0.0]])  # mean = [2, 0]
+    """Colors alternate strictly by position among the significant
+    timepoints (independent of the underlying data direction) -- this is
+    a readability device, not a claim about which condition is higher."""
 
-        colors = cnd_diff_point_colors('a', 'b', y1, y2,
+    @pytest.mark.unit
+    def test_perm_alternates_by_position_across_one_cluster(self):
+        sig_mask = [(np.array([2, 3, 4, 5]),)]  # one cluster, mne format
+
+        colors = cnd_diff_point_colors('a', 'b', sig_mask, 'perm',
+                                        n_timepoints=8,
                                         cnds=['a', 'b'], colors=['red', 'green'])
 
-        # timepoint 0: y2 > y1 -> 'b' color; timepoint 1: y1 > y2 -> 'a' color
-        np.testing.assert_array_equal(colors, ['green', 'red'])
+        np.testing.assert_array_equal(
+            colors[2:6], ['red', 'green', 'red', 'green'])
+
+    @pytest.mark.unit
+    def test_perm_alternation_continues_across_multiple_clusters(self):
+        # two separate clusters -- alternation continues in temporal
+        # order across both, not reset at each cluster boundary
+        sig_mask = [(np.array([1, 2]),), (np.array([6, 7]),)]
+
+        colors = cnd_diff_point_colors('a', 'b', sig_mask, 'perm',
+                                        n_timepoints=9,
+                                        cnds=['a', 'b'], colors=['red', 'green'])
+
+        np.testing.assert_array_equal(colors[1:3], ['red', 'green'])
+        np.testing.assert_array_equal(colors[6:8], ['red', 'green'])
+
+    @pytest.mark.unit
+    def test_ttest_boolean_mask_alternates_by_position(self):
+        sig_mask = np.array([False, True, True, True, False])
+
+        colors = cnd_diff_point_colors('a', 'b', sig_mask, 'ttest',
+                                        n_timepoints=5,
+                                        cnds=['a', 'b'], colors=['red', 'green'])
+
+        np.testing.assert_array_equal(colors[1:4], ['red', 'green', 'red'])
+
+    @pytest.mark.unit
+    def test_no_significant_points_returns_all_first_color(self):
+        sig_mask = []  # no significant clusters at all
+
+        colors = cnd_diff_point_colors('a', 'b', sig_mask, 'perm',
+                                        n_timepoints=4,
+                                        cnds=['a', 'b'], colors=['red', 'green'])
+
+        np.testing.assert_array_equal(colors, ['red', 'red', 'red', 'red'])
 
     @pytest.mark.unit
     def test_cnds_none_returns_none(self):
-        y1 = np.zeros((2, 3))
-        y2 = np.zeros((2, 3))
-        assert cnd_diff_point_colors('a', 'b', y1, y2,
+        assert cnd_diff_point_colors('a', 'b', [], 'perm', 4,
                                       cnds=None, colors=['red', 'green']) is None
 
     @pytest.mark.unit
     def test_colors_none_returns_none(self):
-        y1 = np.zeros((2, 3))
-        y2 = np.zeros((2, 3))
-        assert cnd_diff_point_colors('a', 'b', y1, y2,
+        assert cnd_diff_point_colors('a', 'b', [], 'perm', 4,
                                       cnds=['a', 'b'], colors=None) is None
 
     @pytest.mark.unit
     def test_condition_not_in_cnds_returns_none(self):
-        y1 = np.zeros((2, 3))
-        y2 = np.zeros((2, 3))
-        assert cnd_diff_point_colors('a', 'c', y1, y2,
+        assert cnd_diff_point_colors('a', 'c', [], 'perm', 4,
                                       cnds=['a', 'b'], colors=['red', 'green']) is None
 
     @pytest.mark.unit
     def test_color_index_out_of_range_returns_none(self):
         # cnds has 3 entries but colors only covers the first 2
-        y1 = np.zeros((2, 3))
-        y2 = np.zeros((2, 3))
-        assert cnd_diff_point_colors('a', 'c', y1, y2,
+        assert cnd_diff_point_colors('a', 'c', [], 'perm', 4,
                                       cnds=['a', 'b', 'c'],
                                       colors=['red', 'green']) is None
 
