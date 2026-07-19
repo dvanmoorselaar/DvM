@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "open-dvm"
 version = "0.1.0"
-description = "Open Decoding Visual Mind: A comprehensive toolkit for analyzing ERP and eye-tracking data in cognitive neuroscience research"
+description = "OpenDvM: Decoding the Visual Mind -- A comprehensive toolkit for analyzing EEG/MEG, ERP, and eye-tracking data in cognitive neuroscience research"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Dirk van Moorselaar", email = "dirkvanmoorselaar@gmail.com"},
-    {name = "Sebastiaan Mathot", email = "s.mathot@cogsci.nl"}
+    {name = "Sebastiaan Mathôt", email = "s.mathot@cogsci.nl"}
 ]
 requires-python = ">=3.8"
 

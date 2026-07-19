@@ -12,17 +12,20 @@ authors:
   - family-names: van Moorselaar
     given-names: Dirk
     email: dirkvanmoorselaar@gmail.com
-  - family-names: Mathot
+  - family-names: Mathôt
     given-names: Sebastiaan
     email: s.mathot@cogsci.nl
 preferred-citation:
   type: article
-  title: "TODO: add the methods paper's title once available"
-  # TODO: update this author list to match the actual paper's author list
-  # once it is finalized -- currently defaults to the software authors above.
+  title: "OpenDvM: Decoding the Visual Mind — A Unified Toolbox for EEG/MEG Attention Research"
+  # Working title -- update if it changes before submission/publication.
   authors:
     - family-names: van Moorselaar
       given-names: Dirk
+    - family-names: Mathôt
+      given-names: Sebastiaan
+    - family-names: Van der Stigchel
+      given-names: Stefan
   journal: "TODO: add journal/venue once available"
-  year: 2026
+  year: 2026  # TODO: update to the actual publication year once known
   doi: "TODO: add DOI once available"

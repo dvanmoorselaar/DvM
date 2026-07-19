@@ -1,4 +1,4 @@
-# open_dvm
+# OpenDvM
 
 ![tests](https://github.com/dvanmoorselaar/open_dvm/actions/workflows/tests.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
