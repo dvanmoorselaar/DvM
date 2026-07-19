@@ -9,7 +9,8 @@ description = "Open Decoding Visual Mind: A comprehensive toolkit for analyzing 
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "DVM Development Team"}
+    {name = "Dirk van Moorselaar", email = "dirkvanmoorselaar@gmail.com"},
+    {name = "Sebastiaan Mathot", email = "s.mathot@cogsci.nl"}
 ]
 requires-python = ">=3.8"
 
@@ -21,6 +22,22 @@ dependencies = [
     "mne>=0.23.0",
     "matplotlib>=3.0.0",
     "IPython>=7.0.0",
+    "seaborn>=0.11.0",
+    "statsmodels>=0.12.0",
+    "autoreject>=0.3.0",
+    "python-picard>=0.7",
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering",
+    "Operating System :: OS Independent",
 ]
 
 [project.optional-dependencies]
@@ -34,17 +51,10 @@ dev = [
     "mypy>=0.900",
 ]
 
-docs = [
-    "sphinx>=4.0",
-    "sphinx-rtd-theme>=1.0",
-    "sphinx-autodoc-typehints>=1.0",
-]
-
 [project.urls]
-Homepage = "https://github.com/yourusername/open-dvm"
-Documentation = "https://open-dvm.readthedocs.io"
-Repository = "https://github.com/yourusername/open-dvm"
-Issues = "https://github.com/yourusername/open-dvm/issues"
+Homepage = "https://github.com/dvanmoorselaar/open_dvm"
+Repository = "https://github.com/dvanmoorselaar/open_dvm"
+Issues = "https://github.com/dvanmoorselaar/open_dvm/issues"
 
 [tool.setuptools]
 packages = ["open_dvm", "open_dvm.analysis", "open_dvm.support", "open_dvm.stats", "open_dvm.visualization"]

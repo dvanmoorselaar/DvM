@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite the preferred-citation
+  (the accompanying methods paper) below. You may additionally cite
+  the software itself using the metadata in this file.
+title: open_dvm
+version: 0.1.0
+date-released: "2026-07-19"
+repository-code: "https://github.com/dvanmoorselaar/open_dvm"
+license: MIT
+authors:
+  - family-names: van Moorselaar
+    given-names: Dirk
+    email: dirkvanmoorselaar@gmail.com
+  - family-names: Mathot
+    given-names: Sebastiaan
+    email: s.mathot@cogsci.nl
+preferred-citation:
+  type: article
+  title: "TODO: add the methods paper's title once available"
+  # TODO: update this author list to match the actual paper's author list
+  # once it is finalized -- currently defaults to the software authors above.
+  authors:
+    - family-names: van Moorselaar
+      given-names: Dirk
+  journal: "TODO: add journal/venue once available"
+  year: 2026
+  doi: "TODO: add DOI once available"
