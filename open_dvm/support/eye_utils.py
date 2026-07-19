@@ -31,14 +31,14 @@ import pandas as pd
 import mne
 from contextlib import redirect_stdout
 from numpy.lib.npyio import NpzFile
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 from IPython import embed
 from open_dvm.support.preprocessing_utils import get_time_slice
 
 
 def exclude_eye(
     sj: int,
-    session: int,
+    session: Union[int, str],
     df: pd.DataFrame,
     epochs: mne.Epochs,
     eye_dict: dict,
@@ -56,8 +56,9 @@ def exclude_eye(
     ----------
     sj : int
         Subject identifier for logging purposes.
-    session : int
-        Session identifier for logging purposes.
+    session : int or str
+        Session identifier for logging purposes. Pass the literal
+        string `'all'` for a session-combined entry.
     df : pd.DataFrame
         Behavioral data aligned to epochs. Modified in-place by
         removing excluded trials.
@@ -223,8 +224,12 @@ def exclude_eye(
     print('Eye exclusion info saved in preprocessing '
           f'file (session {session})')
     
-    # Create composite key for subject and session (ensure integers)
-    entry_key = f'subject_{int(sj):02d}_session_{int(session):02d}'
+    # Create composite key for subject and session. 'all' (session-
+    # combined entries) is passed through as-is; anything else is
+    # coerced to a zero-padded int.
+    session_token = 'all' if isinstance(session, str) and \
+        session.lower() == 'all' else f'{int(session):02d}'
+    entry_key = f'sub_{int(sj):02d}_ses_{session_token}'
     
     # Load existing data or create new
     try:

@@ -421,16 +421,23 @@ class FolderStructure(object):
                             ext = ['preprocessing','group_info'],
                             fname = f'preproc_param_{preproc_name}.json')
             # Check if the file exists before proceeding
-            # Extract session number from fname (format: 'ses_XX_...')
-            match = re.search(r'ses_(\d+)', fname)
-            session = match.group(1) if match else '1'
-            # Eye files are renamed 
-            # to sub_{sj}_ses_{session}_{preproc_name}.npz during preprocessing
+            # Extract session number from fname (format: 'ses_XX_...'),
+            # or detect the session-combined 'all_...' convention used by
+            # Epochs.save_preprocessed(..., combine_sessions=True)
+            if re.match(r'^all(_|$)', fname):
+                session = 'all'
+                eye_fname = f'sub_{sj}_all_{preproc_name}.npz'
+            else:
+                match = re.search(r'ses_(\d+)', fname)
+                session = match.group(1) if match else '1'
+                # Eye files are renamed
+                # to sub_{sj}_ses_{session}_{preproc_name}.npz during preprocessing
+                eye_fname = f'sub_{sj}_ses_{session}_{preproc_name}.npz'
             eye_file = self.folder_tracker(ext=['eye','processed'],
-                    fname=f'sub_{sj}_ses_{session}_{preproc_name}.npz')
+                    fname=eye_fname)
             if os.path.isfile(eye_file):
                 eye = np.load(eye_file)
-                df, epochs = exclude_eye(sj, int(session), df, epochs, 
+                df, epochs = exclude_eye(sj, session, df, epochs,
                                          eye_dict, eye, file)
             else:
                 print(f"Warning: Preprocessing parameter file not found: "
@@ -438,7 +445,7 @@ class FolderStructure(object):
                 temp = eye_dict['use_tracker']
                 eye_dict['use_tracker'] = False
                 try:
-                    df, epochs = exclude_eye(sj, int(session), df, epochs,
+                    df, epochs = exclude_eye(sj, session, df, epochs,
                                             eye_dict, None, file)
                 finally:
                     eye_dict['use_tracker'] = temp

@@ -799,9 +799,11 @@ def log_preproc(
     -----
     JSON structure uses composite keys for subject and session:
     {
-        "subject_01_session_01": {"key1": value1, "key2": value2},
-        "subject_01_session_02": {"key1": value1}
+        "sub_01_ses_01": {"key1": value1, "key2": value2},
+        "sub_01_ses_02": {"key1": value1}
     }
+    `session` may also be the literal string `'all'` (for a
+    session-combined entry), producing a key like `"sub_01_ses_all"`.
 
     Examples
     --------
@@ -823,9 +825,13 @@ def log_preproc(
     support.FolderStructure.folder_tracker : Generate file paths
     """
     sj, session = idx
-    
-    # Create composite key for subject and session (ensure integers)
-    entry_key = f'subject_{int(sj):02d}_session_{int(session):02d}'
+
+    # Create composite key for subject and session. 'all' (session-
+    # combined entries) is passed through as-is; anything else is
+    # coerced to a zero-padded int.
+    session_token = 'all' if isinstance(session, str) and \
+        session.lower() == 'all' else f'{int(session):02d}'
+    entry_key = f'sub_{int(sj):02d}_ses_{session_token}'
     
     # Load existing data or create new
     if os.path.isfile(file):

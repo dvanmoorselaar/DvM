@@ -410,7 +410,7 @@ class TestLogPreproc:
 
         with open(logfile) as f:
             data = json.load(f)
-        assert data['subject_01_session_01']['high_pass'] == 0.1
+        assert data['sub_01_ses_01']['high_pass'] == 0.1
 
     @pytest.mark.unit
     def test_list_values_converted_to_strings(self, tmp_path):
@@ -420,7 +420,7 @@ class TestLogPreproc:
 
         with open(logfile) as f:
             data = json.load(f)
-        assert data['subject_01_session_01']['bad_chs'] == "['Fp1', 'Fp2']"
+        assert data['sub_01_ses_01']['bad_chs'] == "['Fp1', 'Fp2']"
 
     @pytest.mark.unit
     def test_preserves_existing_entries_for_other_subjects(self, tmp_path):
@@ -431,7 +431,7 @@ class TestLogPreproc:
 
         with open(logfile) as f:
             data = json.load(f)
-        assert set(data.keys()) == {'subject_01_session_01', 'subject_02_session_01'}
+        assert set(data.keys()) == {'sub_01_ses_01', 'sub_02_ses_01'}
 
     @pytest.mark.unit
     def test_recovers_from_corrupted_file(self, tmp_path):
@@ -443,7 +443,17 @@ class TestLogPreproc:
 
         with open(logfile) as f:
             data = json.load(f)
-        assert data == {'subject_03_session_01': {'x': 1}}
+        assert data == {'sub_03_ses_01': {'x': 1}}
+
+    @pytest.mark.unit
+    def test_session_all_produces_all_suffixed_key(self, tmp_path):
+        logfile = str(tmp_path / 'log.json')
+
+        log_preproc((1, 'all'), logfile, to_update={'high_pass': 0.1})
+
+        with open(logfile) as f:
+            data = json.load(f)
+        assert data['sub_01_ses_all']['high_pass'] == 0.1
 
 
 if __name__ == '__main__':

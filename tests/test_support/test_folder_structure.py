@@ -652,6 +652,39 @@ class TestLoadProcessedEpochs:
         assert captured['eye_is_not_none'] is True
         assert captured['use_tracker'] is True  # untouched, tracker file was found
 
+    @pytest.mark.unit
+    def test_eye_dict_finds_combined_session_npz_file(self, tmp_path, monkeypatch):
+        # regression: fname='all_main' (a session-combined epochs file, per
+        # Epochs.save_preprocessed(..., combine_sessions=True)) has no
+        # 'ses_XX' substring, so the session-extraction regex used to fall
+        # back to session '1' and look for the wrong eye .npz file
+        # (sub_01_ses_1_main.npz) instead of the real combined file
+        # (sub_01_all_main.npz).
+        monkeypatch.chdir(tmp_path)
+        write_epochs(tmp_path, '01', 'all_main',
+                     metadata=pd.DataFrame({'cond': ['a'] * 5}))
+        os.makedirs(tmp_path / 'preprocessing' / 'group_info', exist_ok=True)
+        (tmp_path / 'preprocessing' / 'group_info' /
+         'preproc_param_main.json').write_text('{}')
+        os.makedirs(tmp_path / 'eye' / 'processed', exist_ok=True)
+        np.savez(tmp_path / 'eye' / 'processed' / 'sub_01_all_main.npz', x=1)
+
+        eye_dict = {'use_tracker': True, 'eye_ch': 'HEOG'}
+        captured = {}
+
+        def fake_exclude_eye(sj, session, df, epochs, eye_dict_arg, eye, preproc_file):
+            captured['session'] = session
+            captured['eye_is_not_none'] = eye is not None
+            return df, epochs
+
+        with patch.object(fs_module, 'exclude_eye', side_effect=fake_exclude_eye):
+            FolderStructure().load_processed_epochs(
+                sj=1, fname='all_main', preproc_name='main', eye_dict=eye_dict,
+            )
+
+        assert captured['eye_is_not_none'] is True
+        assert captured['session'] == 'all'
+
 
 # ============================================================================
 # blockPrinting
