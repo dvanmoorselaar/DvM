@@ -7,9 +7,9 @@ trial's position bin == i), so that CTF/IEM reconstruction has a real,
 checkable pattern to recover rather than pure noise.
 """
 
+import mne
 import numpy as np
 import pandas as pd
-import mne
 
 
 def make_spatial_epochs(
@@ -21,7 +21,7 @@ def make_spatial_epochs(
     signal_amp=3.0,
     noise_sd=1.0,
     seed=0,
-    label_column='position',
+    label_column="position",
 ):
     """
     Build synthetic epochs + behavioral dataframe with a genuine spatial
@@ -34,8 +34,8 @@ def make_spatial_epochs(
     df : pd.DataFrame with a single `label_column` column
     """
     rng = np.random.default_rng(seed)
-    ch_names = [f'Ch{i+1}' for i in range(n_ch)]
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    ch_names = [f"Ch{i+1}" for i in range(n_ch)]
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
 
     pos = np.repeat(np.arange(nr_bins), n_trials_per_bin)
     rng.shuffle(pos)
@@ -61,8 +61,8 @@ def make_localizer_and_ping(
     noise_sd=1.0,
     ping_special_loc=2,
     seed=0,
-    label_column='position',
-    cnd_column='task',
+    label_column="position",
+    cnd_column="task",
 ):
     """
     Build a combined localizer+ping dataset for cross-condition CTF
@@ -80,8 +80,8 @@ def make_localizer_and_ping(
     df : pd.DataFrame with `label_column` and `cnd_column` columns
     """
     rng = np.random.default_rng(seed)
-    ch_names = [f'Ch{i+1}' for i in range(n_ch)]
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    ch_names = [f"Ch{i+1}" for i in range(n_ch)]
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
 
     pos_loc = np.repeat(np.arange(nr_bins), n_trials_per_bin)
     rng.shuffle(pos_loc)
@@ -96,7 +96,7 @@ def make_localizer_and_ping(
 
     data = np.concatenate([data_loc, data_ping], axis=0)
     pos = np.concatenate([pos_loc, pos_ping])
-    task = np.array(['localizer'] * n_loc + ['ping'] * n_ping)
+    task = np.array(["localizer"] * n_loc + ["ping"] * n_ping)
 
     epochs = mne.EpochsArray(data, info, tmin=-0.1, verbose=False)
     df = pd.DataFrame({label_column: pos, cnd_column: task})

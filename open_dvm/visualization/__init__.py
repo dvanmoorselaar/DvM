@@ -15,25 +15,25 @@ plot_topography : Generic topographic mapping function
 """
 
 from open_dvm.visualization.plot import (
-    plot_timecourse,
     plot_2d,
-    plot_significance,
-    plot_erp_timecourse,
-    plot_tfr_timecourse,
     plot_bdm_timecourse,
     plot_ctf_timecourse,
+    plot_erp_timecourse,
     plot_erp_topography,
+    plot_significance,
+    plot_tfr_timecourse,
+    plot_timecourse,
     plot_topography,
 )
 
 __all__ = [
-    'plot_timecourse',
-    'plot_2d',
-    'plot_significance',
-    'plot_erp_timecourse',
-    'plot_tfr_timecourse',
-    'plot_bdm_timecourse',
-    'plot_ctf_timecourse',
-    'plot_erp_topography',
-    'plot_topography',
+    "plot_timecourse",
+    "plot_2d",
+    "plot_significance",
+    "plot_erp_timecourse",
+    "plot_tfr_timecourse",
+    "plot_bdm_timecourse",
+    "plot_ctf_timecourse",
+    "plot_erp_topography",
+    "plot_topography",
 ]

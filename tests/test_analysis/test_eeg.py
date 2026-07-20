@@ -33,42 +33,44 @@ Organization
 - TestRunBlinkICA: end-to-end with mocked input()/time.sleep()
 """
 
-import tempfile
 import os
 import pickle
+import tempfile
 import time
 
-import pytest
+import matplotlib
+import mne
 import numpy as np
 import pandas as pd
-import mne
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+import pytest
+
+matplotlib.use("Agg")
 from unittest.mock import patch
 
-from open_dvm.analysis.EEG import RAW, Epochs, ArtefactReject
+import matplotlib.pyplot as plt
+
+from open_dvm.analysis.EEG import RAW, ArtefactReject, Epochs
 from tests.fixtures.eeg_sample_data import (
-    make_synthetic_raw,
-    make_synthetic_raw_with_stim,
     make_artefact_epochs,
     make_eog_correlated_raw,
     make_synthetic_epochs,
+    make_synthetic_raw,
+    make_synthetic_raw_with_stim,
     write_behavioral_csv,
 )
-
 
 # ============================================================================
 # RAW.__init__ / from_* classmethods: file-type detection and dispatch
 # ============================================================================
+
 
 class TestRawFileDispatch:
     """Tests for file-type auto-detection and reader dispatch."""
 
     @pytest.mark.unit
     def test_fif_round_trip_preserves_data(self, tmp_path):
-        raw = make_synthetic_raw(['F1', 'F2', 'Cz'], 'eeg', sfreq=250, n_samples=500)
-        path = str(tmp_path / 'test_raw.fif')
+        raw = make_synthetic_raw(["F1", "F2", "Cz"], "eeg", sfreq=250, n_samples=500)
+        path = str(tmp_path / "test_raw.fif")
         mne.io.RawArray(raw.get_data(), raw.info).save(path)
 
         loaded = RAW(path)
@@ -79,8 +81,8 @@ class TestRawFileDispatch:
 
     @pytest.mark.unit
     def test_from_fif_classmethod(self, tmp_path):
-        raw = make_synthetic_raw(['F1', 'F2'], 'eeg', sfreq=250, n_samples=200)
-        path = str(tmp_path / 'test_raw.fif')
+        raw = make_synthetic_raw(["F1", "F2"], "eeg", sfreq=250, n_samples=200)
+        path = str(tmp_path / "test_raw.fif")
         mne.io.RawArray(raw.get_data(), raw.info).save(path)
 
         loaded = RAW.from_fif(path)
@@ -90,43 +92,46 @@ class TestRawFileDispatch:
     @pytest.mark.unit
     def test_unknown_extension_raises_value_error(self):
         with pytest.raises(ValueError, match="Cannot determine file type"):
-            RAW('/tmp/does_not_exist.xyz')
+            RAW("/tmp/does_not_exist.xyz")
 
     @staticmethod
     def _stub_raw():
-        info = mne.create_info(['A1', 'A2'], 250, ch_types='eeg')
+        info = mne.create_info(["A1", "A2"], 250, ch_types="eeg")
         return mne.io.RawArray(np.zeros((2, 100)), info)
 
     @pytest.mark.unit
-    @pytest.mark.parametrize('ext,reader_target', [
-        ('.bdf', 'mne.io.read_raw_bdf'),
-        ('.edf', 'mne.io.read_raw_edf'),
-        ('.vhdr', 'mne.io.read_raw_brainvision'),
-        ('.cnt', 'mne.io.read_raw_cnt'),
-        ('.set', 'mne.io.read_raw_eeglab'),
-    ])
+    @pytest.mark.parametrize(
+        "ext,reader_target",
+        [
+            (".bdf", "mne.io.read_raw_bdf"),
+            (".edf", "mne.io.read_raw_edf"),
+            (".vhdr", "mne.io.read_raw_brainvision"),
+            (".cnt", "mne.io.read_raw_cnt"),
+            (".set", "mne.io.read_raw_eeglab"),
+        ],
+    )
     def test_extension_dispatches_to_correct_reader(self, ext, reader_target):
         """Each supported extension must route to its corresponding MNE
         reader function -- verified via mocking rather than fabricating
         real binary files in each proprietary format."""
         with patch(reader_target) as mock_reader:
             mock_reader.return_value = self._stub_raw()
-            RAW(f'/tmp/fake{ext}')
+            RAW(f"/tmp/fake{ext}")
             assert mock_reader.called
 
     @pytest.mark.unit
     def test_eog_kwarg_forwarded_to_reader(self):
-        with patch('mne.io.read_raw_bdf') as mock_reader:
+        with patch("mne.io.read_raw_bdf") as mock_reader:
             mock_reader.return_value = self._stub_raw()
-            RAW('/tmp/fake.bdf', eog=['EOG1', 'EOG2'])
-            assert mock_reader.call_args.kwargs['eog'] == ['EOG1', 'EOG2']
+            RAW("/tmp/fake.bdf", eog=["EOG1", "EOG2"])
+            assert mock_reader.call_args.kwargs["eog"] == ["EOG1", "EOG2"]
 
     @pytest.mark.unit
     def test_explicit_file_type_overrides_extension(self):
         """file_type can override extension-based auto-detection."""
-        with patch('mne.io.read_raw_fif') as mock_reader:
+        with patch("mne.io.read_raw_fif") as mock_reader:
             mock_reader.return_value = self._stub_raw()
-            RAW('/tmp/fake.bdf', file_type='fif')
+            RAW("/tmp/fake.bdf", file_type="fif")
             assert mock_reader.called
 
 
@@ -134,32 +139,33 @@ class TestRawFileDispatch:
 # replace_channel
 # ============================================================================
 
+
 class TestRawReplaceChannel:
     """Tests for replace_channel electrode substitution."""
 
     @pytest.mark.unit
     def test_replaces_data_and_drops_replacement_channel(self):
-        raw = make_synthetic_raw(['F1', 'EXG7', 'F2'], 'eeg', n_samples=50)
-        exg7_data = raw.get_data(picks='EXG7').copy()
+        raw = make_synthetic_raw(["F1", "EXG7", "F2"], "eeg", n_samples=50)
+        exg7_data = raw.get_data(picks="EXG7").copy()
 
-        result = raw.replace_channel({'F1': 'EXG7'})
+        result = raw.replace_channel({"F1": "EXG7"})
 
-        np.testing.assert_allclose(raw.get_data(picks='F1'), exg7_data)
-        assert 'EXG7' not in raw.ch_names
+        np.testing.assert_allclose(raw.get_data(picks="F1"), exg7_data)
+        assert "EXG7" not in raw.ch_names
         assert result is raw
 
     @pytest.mark.unit
     def test_missing_channel_warns_but_does_not_raise(self, capsys):
-        raw = make_synthetic_raw(['F1', 'F2'], 'eeg', n_samples=50)
+        raw = make_synthetic_raw(["F1", "F2"], "eeg", n_samples=50)
 
-        raw.replace_channel({'F1': 'NONEXISTENT'})
+        raw.replace_channel({"F1": "NONEXISTENT"})
 
-        assert raw.ch_names == ['F1', 'F2']
-        assert 'Warning' in capsys.readouterr().out
+        assert raw.ch_names == ["F1", "F2"]
+        assert "Warning" in capsys.readouterr().out
 
     @pytest.mark.unit
     def test_empty_dict_returns_immediately_unchanged(self):
-        raw = make_synthetic_raw(['F1'], 'eeg', n_samples=50)
+        raw = make_synthetic_raw(["F1"], "eeg", n_samples=50)
         before = raw.get_data().copy()
 
         result = raw.replace_channel({})
@@ -172,6 +178,7 @@ class TestRawReplaceChannel:
 # rereference
 # ============================================================================
 
+
 class TestRawRereference:
     """Tests for rereference voltage scaling and reference-channel removal."""
 
@@ -182,106 +189,98 @@ class TestRawRereference:
         rng = np.random.default_rng(1)
         f1_data = rng.normal(0, 1e-5, size=(1, 100))
         data = np.vstack([f1_data, np.zeros((1, 100))])
-        raw = make_synthetic_raw(['F1', 'RefZero'], ['eeg', 'eeg'], data=data)
+        raw = make_synthetic_raw(["F1", "RefZero"], ["eeg", "eeg"], data=data)
 
-        raw.rereference(ref_channels=['RefZero'], change_voltage=True)
+        raw.rereference(ref_channels=["RefZero"], change_voltage=True)
 
-        np.testing.assert_allclose(
-            raw.get_data(picks=['F1']), f1_data * 1e6, atol=1e-12
-        )
+        np.testing.assert_allclose(raw.get_data(picks=["F1"]), f1_data * 1e6, atol=1e-12)
 
     @pytest.mark.unit
     def test_change_voltage_false_leaves_scale_untouched(self):
         rng = np.random.default_rng(1)
         f1_data = rng.normal(0, 1e-5, size=(1, 100))
         data = np.vstack([f1_data, np.zeros((1, 100))])
-        raw = make_synthetic_raw(['F1', 'RefZero'], ['eeg', 'eeg'], data=data)
+        raw = make_synthetic_raw(["F1", "RefZero"], ["eeg", "eeg"], data=data)
 
-        raw.rereference(ref_channels=['RefZero'], change_voltage=False)
+        raw.rereference(ref_channels=["RefZero"], change_voltage=False)
 
-        np.testing.assert_allclose(raw.get_data(picks=['F1']), f1_data, atol=1e-12)
+        np.testing.assert_allclose(raw.get_data(picks=["F1"]), f1_data, atol=1e-12)
 
     @pytest.mark.unit
     def test_specific_reference_channels_are_removed(self):
-        raw = make_synthetic_raw(['F1', 'F2', 'Ref1', 'Ref2'], 'eeg', n_samples=50)
+        raw = make_synthetic_raw(["F1", "F2", "Ref1", "Ref2"], "eeg", n_samples=50)
 
-        raw.rereference(ref_channels=['Ref1', 'Ref2'], change_voltage=False)
+        raw.rereference(ref_channels=["Ref1", "Ref2"], change_voltage=False)
 
-        assert raw.ch_names == ['F1', 'F2']
+        assert raw.ch_names == ["F1", "F2"]
 
     @pytest.mark.unit
     def test_average_reference_does_not_remove_channels(self):
-        raw = make_synthetic_raw(['F1', 'F2', 'F3'], 'eeg', n_samples=50)
+        raw = make_synthetic_raw(["F1", "F2", "F3"], "eeg", n_samples=50)
 
-        raw.rereference(ref_channels='average', change_voltage=False)
+        raw.rereference(ref_channels="average", change_voltage=False)
 
-        assert raw.ch_names == ['F1', 'F2', 'F3']
+        assert raw.ch_names == ["F1", "F2", "F3"]
 
     @pytest.mark.unit
     def test_to_remove_missing_channel_silently_skipped(self):
-        raw = make_synthetic_raw(['F1', 'F2'], 'eeg', n_samples=50)
+        raw = make_synthetic_raw(["F1", "F2"], "eeg", n_samples=50)
 
-        raw.rereference(
-            ref_channels='average', change_voltage=False,
-            to_remove=['DOES_NOT_EXIST']
-        )
+        raw.rereference(ref_channels="average", change_voltage=False, to_remove=["DOES_NOT_EXIST"])
 
-        assert raw.ch_names == ['F1', 'F2']
+        assert raw.ch_names == ["F1", "F2"]
 
     @pytest.mark.unit
     def test_to_remove_combined_with_ref_channels(self):
-        raw = make_synthetic_raw(
-            ['F1', 'F2', 'Ref1', 'EXG7'], 'eeg', n_samples=50
-        )
+        raw = make_synthetic_raw(["F1", "F2", "Ref1", "EXG7"], "eeg", n_samples=50)
 
-        raw.rereference(
-            ref_channels=['Ref1'], change_voltage=False, to_remove=['EXG7']
-        )
+        raw.rereference(ref_channels=["Ref1"], change_voltage=False, to_remove=["EXG7"])
 
-        assert raw.ch_names == ['F1', 'F2']
+        assert raw.ch_names == ["F1", "F2"]
 
 
 # ============================================================================
 # configure_montage
 # ============================================================================
 
+
 class TestRawConfigureMontage:
     """Tests for configure_montage BioSemi renaming and montage application."""
 
     @pytest.mark.unit
     def test_biosemi_channels_renamed_to_montage_names(self):
-        montage = mne.channels.make_standard_montage('biosemi32')
-        biosemi_names = [f'A{i}' for i in range(1, 17)] + [f'B{i}' for i in range(1, 17)]
-        raw = make_synthetic_raw(biosemi_names, 'eeg', n_samples=50)
+        montage = mne.channels.make_standard_montage("biosemi32")
+        biosemi_names = [f"A{i}" for i in range(1, 17)] + [f"B{i}" for i in range(1, 17)]
+        raw = make_synthetic_raw(biosemi_names, "eeg", n_samples=50)
 
-        raw.configure_montage(montage='biosemi32')
+        raw.configure_montage(montage="biosemi32")
 
         assert raw.ch_names == montage.ch_names
         assert raw.get_montage() is not None
 
     @pytest.mark.unit
     def test_ch_remove_applied_before_montage(self):
-        biosemi_names = [f'A{i}' for i in range(1, 17)] + [f'B{i}' for i in range(1, 17)]
-        raw = make_synthetic_raw(biosemi_names + ['EXG7', 'EXG8'], 'eeg', n_samples=50)
+        biosemi_names = [f"A{i}" for i in range(1, 17)] + [f"B{i}" for i in range(1, 17)]
+        raw = make_synthetic_raw(biosemi_names + ["EXG7", "EXG8"], "eeg", n_samples=50)
 
-        raw.configure_montage(montage='biosemi32', ch_remove=['EXG7', 'EXG8'])
+        raw.configure_montage(montage="biosemi32", ch_remove=["EXG7", "EXG8"])
 
-        assert 'EXG7' not in raw.ch_names
-        assert 'EXG8' not in raw.ch_names
+        assert "EXG7" not in raw.ch_names
+        assert "EXG8" not in raw.ch_names
 
     @pytest.mark.unit
     def test_non_biosemi_names_unchanged(self):
-        raw = make_synthetic_raw(['Fp1', 'Fp2', 'Cz'], 'eeg', n_samples=50)
+        raw = make_synthetic_raw(["Fp1", "Fp2", "Cz"], "eeg", n_samples=50)
 
-        raw.configure_montage(montage='standard_1020')
+        raw.configure_montage(montage="standard_1020")
 
-        assert raw.ch_names == ['Fp1', 'Fp2', 'Cz']
+        assert raw.ch_names == ["Fp1", "Fp2", "Cz"]
         assert raw.get_montage() is not None
 
     @pytest.mark.unit
     def test_accepts_dig_montage_object_directly(self):
-        raw = make_synthetic_raw(['Fp1', 'Fp2', 'Cz'], 'eeg', n_samples=50)
-        montage_obj = mne.channels.make_standard_montage('standard_1020')
+        raw = make_synthetic_raw(["Fp1", "Fp2", "Cz"], "eeg", n_samples=50)
+        montage_obj = mne.channels.make_standard_montage("standard_1020")
 
         raw.configure_montage(montage=montage_obj)
 
@@ -292,6 +291,7 @@ class TestRawConfigureMontage:
 # select_events
 # ============================================================================
 
+
 class TestRawSelectEvents:
     """Tests for select_events trigger detection."""
 
@@ -301,9 +301,7 @@ class TestRawSelectEvents:
 
         events = raw.select_events(event_id=[1, 2])
 
-        np.testing.assert_array_equal(
-            events, [[100, 0, 1], [300, 0, 2], [500, 0, 1]]
-        )
+        np.testing.assert_array_equal(events, [[100, 0, 1], [300, 0, 2], [500, 0, 1]])
 
     @pytest.mark.unit
     def test_event_id_filters_unwanted_triggers(self):
@@ -323,9 +321,7 @@ class TestRawSelectEvents:
         events_dup = raw.select_events(event_id=[1, 2], consecutive=True)
         events_nodup = raw.select_events(event_id=[1, 2], consecutive=False)
 
-        np.testing.assert_array_equal(
-            events_dup, [[100, 0, 1], [120, 0, 1], [300, 0, 2]]
-        )
+        np.testing.assert_array_equal(events_dup, [[100, 0, 1], [120, 0, 1], [300, 0, 2]])
         np.testing.assert_array_equal(events_nodup, [[120, 0, 1], [300, 0, 2]])
 
     @pytest.mark.unit
@@ -340,16 +336,16 @@ class TestRawSelectEvents:
             [(100, binary_offset + 1), (300, binary_offset + 2)],
             baseline_value=binary_offset,
         )
-        stim_before = raw.get_data(picks='STI').copy()
+        stim_before = raw.get_data(picks="STI").copy()
 
         events = raw.select_events(event_id=[1, 2], binary=binary_offset)
 
         np.testing.assert_array_equal(events, [[100, 0, 1], [300, 0, 2]])
-        np.testing.assert_array_equal(raw.get_data(picks='STI'), stim_before)
+        np.testing.assert_array_equal(raw.get_data(picks="STI"), stim_before)
 
     @pytest.mark.unit
     def test_no_stim_channel_raises_value_error(self):
-        raw = make_synthetic_raw(['F1', 'F2'], 'eeg', n_samples=50)
+        raw = make_synthetic_raw(["F1", "F2"], "eeg", n_samples=50)
 
         with pytest.raises(ValueError):
             raw.select_events()
@@ -359,12 +355,13 @@ class TestRawSelectEvents:
         raw = make_synthetic_raw_with_stim([(100, 1)])
 
         with pytest.raises(ValueError, match="not found in data"):
-            raw.select_events(stim_channel='NOPE')
+            raw.select_events(stim_channel="NOPE")
 
 
 # ============================================================================
 # report_raw
 # ============================================================================
+
 
 class TestRawReportRaw:
     """Smoke test for report_raw."""
@@ -373,7 +370,7 @@ class TestRawReportRaw:
     def test_adds_content_and_returns_same_report(self):
         raw = make_synthetic_raw_with_stim([(100, 1), (300, 2)])
         events = np.array([[100, 0, 1], [300, 0, 2]])
-        report = mne.Report(title='test')
+        report = mne.Report(title="test")
         n_before = len(report._content)
 
         out = raw.report_raw(report, events, event_id=[1, 2])
@@ -386,14 +383,13 @@ class TestRawReportRaw:
 # Epochs.__init__: filter-padding math
 # ============================================================================
 
+
 class TestEpochsInit:
     """Tests for filter-padding math and subject/session formatting."""
 
     @pytest.mark.unit
     def test_float_flt_pad_expands_symmetrically(self):
-        epochs = make_synthetic_epochs(
-            [1, 1], event_id=1, tmin=-0.2, tmax=0.5, flt_pad=0.3
-        )
+        epochs = make_synthetic_epochs([1, 1], event_id=1, tmin=-0.2, tmax=0.5, flt_pad=0.3)
 
         assert epochs.tmin == pytest.approx(-0.5)
         assert epochs.tmax == pytest.approx(0.8)
@@ -401,18 +397,14 @@ class TestEpochsInit:
 
     @pytest.mark.unit
     def test_tuple_flt_pad_expands_asymmetrically(self):
-        epochs = make_synthetic_epochs(
-            [1, 1], event_id=1, tmin=-0.2, tmax=0.5, flt_pad=(0.1, 0.4)
-        )
+        epochs = make_synthetic_epochs([1, 1], event_id=1, tmin=-0.2, tmax=0.5, flt_pad=(0.1, 0.4))
 
         assert epochs.tmin == pytest.approx(-0.3)
         assert epochs.tmax == pytest.approx(0.9)
 
     @pytest.mark.unit
     def test_no_flt_pad_leaves_window_unchanged(self):
-        epochs = make_synthetic_epochs(
-            [1, 1], event_id=1, tmin=-0.2, tmax=0.5, flt_pad=None
-        )
+        epochs = make_synthetic_epochs([1, 1], event_id=1, tmin=-0.2, tmax=0.5, flt_pad=None)
 
         assert epochs.tmin == pytest.approx(-0.2)
         assert epochs.tmax == pytest.approx(0.5)
@@ -422,13 +414,14 @@ class TestEpochsInit:
     def test_subject_and_session_are_zero_padded(self):
         epochs = make_synthetic_epochs([1, 1], event_id=1, sj=3, session=7)
 
-        assert epochs.sj == '03'
-        assert epochs.session == '07'
+        assert epochs.sj == "03"
+        assert epochs.session == "07"
 
 
 # ============================================================================
 # align_meta_data
 # ============================================================================
+
 
 class TestEpochsAlignMetaData:
     """Tests for behavioral/EEG trial-count alignment."""
@@ -438,17 +431,24 @@ class TestEpochsAlignMetaData:
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs([1, 2, 1, 2], event_id=[1, 2])
         events = epochs.events
-        write_behavioral_csv(1, 1, pd.DataFrame({
-            'trigger': [1, 2, 1, 2], 'nr_trials': [1, 2, 3, 4],
-        }))
+        write_behavioral_csv(
+            1,
+            1,
+            pd.DataFrame(
+                {
+                    "trigger": [1, 2, 1, 2],
+                    "nr_trials": [1, 2, 3, 4],
+                }
+            ),
+        )
 
         missing, report = epochs.align_meta_data(
-            events, trigger_header='trigger', beh_oi=['trigger', 'nr_trials']
+            events, trigger_header="trigger", beh_oi=["trigger", "nr_trials"]
         )
 
         assert len(missing) == 0
         assert len(epochs) == 4
-        np.testing.assert_array_equal(epochs.metadata['nr_trials'], [1, 2, 3, 4])
+        np.testing.assert_array_equal(epochs.metadata["nr_trials"], [1, 2, 3, 4])
 
     @pytest.mark.unit
     def test_behavior_has_extra_trailing_trials(self, tmp_path, monkeypatch):
@@ -456,17 +456,24 @@ class TestEpochsAlignMetaData:
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs([1, 2, 1], event_id=[1, 2])
         events = epochs.events
-        write_behavioral_csv(1, 1, pd.DataFrame({
-            'trigger': [1, 2, 1, 2], 'nr_trials': [1, 2, 3, 4],
-        }))
+        write_behavioral_csv(
+            1,
+            1,
+            pd.DataFrame(
+                {
+                    "trigger": [1, 2, 1, 2],
+                    "nr_trials": [1, 2, 3, 4],
+                }
+            ),
+        )
 
         missing, report = epochs.align_meta_data(
-            events, trigger_header='trigger', beh_oi=['trigger', 'nr_trials']
+            events, trigger_header="trigger", beh_oi=["trigger", "nr_trials"]
         )
 
         assert list(missing) == [4]
         assert len(epochs) == 3
-        np.testing.assert_array_equal(epochs.metadata['nr_trials'], [1, 2, 3])
+        np.testing.assert_array_equal(epochs.metadata["nr_trials"], [1, 2, 3])
 
     @pytest.mark.unit
     def test_eeg_has_extra_trailing_events(self, tmp_path, monkeypatch):
@@ -474,16 +481,23 @@ class TestEpochsAlignMetaData:
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs([1, 2, 1, 2, 1], event_id=[1, 2])
         events = epochs.events
-        write_behavioral_csv(1, 1, pd.DataFrame({
-            'trigger': [1, 2, 1, 2], 'nr_trials': [1, 2, 3, 4],
-        }))
+        write_behavioral_csv(
+            1,
+            1,
+            pd.DataFrame(
+                {
+                    "trigger": [1, 2, 1, 2],
+                    "nr_trials": [1, 2, 3, 4],
+                }
+            ),
+        )
 
         missing, report = epochs.align_meta_data(
-            events, trigger_header='trigger', beh_oi=['trigger', 'nr_trials']
+            events, trigger_header="trigger", beh_oi=["trigger", "nr_trials"]
         )
 
         assert len(epochs) == 4
-        np.testing.assert_array_equal(epochs.metadata['nr_trials'], [1, 2, 3, 4])
+        np.testing.assert_array_equal(epochs.metadata["nr_trials"], [1, 2, 3, 4])
 
     @pytest.mark.unit
     def test_eeg_has_extra_interleaved_events(self, tmp_path, monkeypatch):
@@ -497,19 +511,24 @@ class TestEpochsAlignMetaData:
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs([1, 2, 1, 2, 1], event_id=[1, 2])
         events = epochs.events
-        write_behavioral_csv(1, 1, pd.DataFrame({
-            'trigger': [1, 1, 2, 1], 'nr_trials': [1, 2, 3, 4],
-        }))
+        write_behavioral_csv(
+            1,
+            1,
+            pd.DataFrame(
+                {
+                    "trigger": [1, 1, 2, 1],
+                    "nr_trials": [1, 2, 3, 4],
+                }
+            ),
+        )
 
         missing, report = epochs.align_meta_data(
-            events, trigger_header='trigger', beh_oi=['trigger', 'nr_trials']
+            events, trigger_header="trigger", beh_oi=["trigger", "nr_trials"]
         )
 
         assert len(epochs) == 4
-        np.testing.assert_array_equal(epochs.metadata['nr_trials'], [1, 2, 3, 4])
-        np.testing.assert_array_equal(
-            epochs.metadata['trigger'].values, [1, 1, 2, 1]
-        )
+        np.testing.assert_array_equal(epochs.metadata["nr_trials"], [1, 2, 3, 4])
+        np.testing.assert_array_equal(epochs.metadata["trigger"].values, [1, 1, 2, 1])
 
     @pytest.mark.unit
     def test_no_behavior_file_found(self, tmp_path, monkeypatch):
@@ -517,34 +536,40 @@ class TestEpochsAlignMetaData:
         epochs = make_synthetic_epochs([1, 1], event_id=1)
         events = epochs.events
 
-        missing, report = epochs.align_meta_data(events, trigger_header='trigger')
+        missing, report = epochs.align_meta_data(events, trigger_header="trigger")
 
         assert missing.size == 0
-        assert report == 'No behavior file found'
+        assert report == "No behavior file found"
 
     @pytest.mark.unit
     def test_missing_trigger_header_raises(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs([1, 1], event_id=1)
         events = epochs.events
-        write_behavioral_csv(1, 1, pd.DataFrame({'nr_trials': [1, 2]}))
+        write_behavioral_csv(1, 1, pd.DataFrame({"nr_trials": [1, 2]}))
 
         with pytest.raises(ValueError, match="not found in behavioral"):
-            epochs.align_meta_data(events, trigger_header='trigger')
+            epochs.align_meta_data(events, trigger_header="trigger")
 
     @pytest.mark.unit
     def test_missing_beh_oi_column_raises(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs([1, 1], event_id=1)
         events = epochs.events
-        write_behavioral_csv(1, 1, pd.DataFrame({
-            'trigger': [1, 1], 'nr_trials': [1, 2],
-        }))
+        write_behavioral_csv(
+            1,
+            1,
+            pd.DataFrame(
+                {
+                    "trigger": [1, 1],
+                    "nr_trials": [1, 2],
+                }
+            ),
+        )
 
         with pytest.raises(ValueError, match="not found in behavioral"):
             epochs.align_meta_data(
-                events, trigger_header='trigger',
-                beh_oi=['trigger', 'nonexistent_column']
+                events, trigger_header="trigger", beh_oi=["trigger", "nonexistent_column"]
             )
 
 
@@ -552,6 +577,7 @@ class TestEpochsAlignMetaData:
 # align_eye_data (EOG-building half only; eye-tracker file parsing is
 # out of scope for this pass)
 # ============================================================================
+
 
 class TestEpochsAlignEyeData:
     """Tests for the EOG bipolar-derivation half of align_eye_data."""
@@ -565,22 +591,26 @@ class TestEpochsAlignEyeData:
         a bipolar VEOG derivation -- a standard real-world technique."""
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs(
-            [1, 1], event_id=1,
-            ch_names=['Fp1', 'VEOG_lower', 'HEOG_L', 'HEOG_R', 'Cz'],
-            ch_types=['eeg', 'eog', 'eog', 'eog', 'eeg'],
+            [1, 1],
+            event_id=1,
+            ch_names=["Fp1", "VEOG_lower", "HEOG_L", "HEOG_R", "Cz"],
+            ch_types=["eeg", "eog", "eog", "eog", "eeg"],
         )
 
         tracker, report = epochs.align_eye_data(
-            eye_info=None, missing=np.array([]), nr_epochs=len(epochs),
-            vEOG=['Fp1', 'VEOG_lower'], hEOG=['HEOG_L', 'HEOG_R'],
+            eye_info=None,
+            missing=np.array([]),
+            nr_epochs=len(epochs),
+            vEOG=["Fp1", "VEOG_lower"],
+            hEOG=["HEOG_L", "HEOG_R"],
         )
 
         assert tracker is False
-        assert 'VEOG' in epochs.ch_names
-        assert 'HEOG' in epochs.ch_names
-        fp1 = epochs.get_data(picks=['Fp1'])
-        veog_lower = epochs.get_data(picks=['VEOG_lower'])
-        veog = epochs.get_data(picks=['VEOG'])
+        assert "VEOG" in epochs.ch_names
+        assert "HEOG" in epochs.ch_names
+        fp1 = epochs.get_data(picks=["Fp1"])
+        veog_lower = epochs.get_data(picks=["VEOG_lower"])
+        veog = epochs.get_data(picks=["VEOG"])
         np.testing.assert_allclose(veog, fp1 - veog_lower, atol=1e-15)
 
     @pytest.mark.unit
@@ -590,18 +620,22 @@ class TestEpochsAlignEyeData:
         both channels are already eog-typed."""
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs(
-            [1, 1], event_id=1,
-            ch_names=['VEOG_u', 'VEOG_l', 'HEOG_L', 'HEOG_R', 'Cz'],
-            ch_types=['eog', 'eog', 'eog', 'eog', 'eeg'],
+            [1, 1],
+            event_id=1,
+            ch_names=["VEOG_u", "VEOG_l", "HEOG_L", "HEOG_R", "Cz"],
+            ch_types=["eog", "eog", "eog", "eog", "eeg"],
         )
 
         tracker, report = epochs.align_eye_data(
-            eye_info=None, missing=np.array([]), nr_epochs=len(epochs),
-            vEOG=['VEOG_u', 'VEOG_l'], hEOG=['HEOG_L', 'HEOG_R'],
+            eye_info=None,
+            missing=np.array([]),
+            nr_epochs=len(epochs),
+            vEOG=["VEOG_u", "VEOG_l"],
+            hEOG=["HEOG_L", "HEOG_R"],
         )
 
-        assert 'VEOG' in epochs.ch_names
-        assert 'HEOG' in epochs.ch_names
+        assert "VEOG" in epochs.ch_names
+        assert "HEOG" in epochs.ch_names
 
     @pytest.mark.unit
     def test_no_vEOG_or_hEOG_requested(self, tmp_path, monkeypatch):
@@ -610,12 +644,15 @@ class TestEpochsAlignEyeData:
         n_ch_before = len(epochs.ch_names)
 
         tracker, report = epochs.align_eye_data(
-            eye_info=None, missing=np.array([]), nr_epochs=len(epochs),
-            vEOG=None, hEOG=None,
+            eye_info=None,
+            missing=np.array([]),
+            nr_epochs=len(epochs),
+            vEOG=None,
+            hEOG=None,
         )
 
         assert tracker is False
-        assert 'No eye tracker data linked' in report
+        assert "No eye tracker data linked" in report
         assert len(epochs.ch_names) == n_ch_before
 
 
@@ -623,38 +660,33 @@ class TestEpochsAlignEyeData:
 # add_channel_data
 # ============================================================================
 
+
 class TestEpochsAddChannelData:
     """Tests for channel append + resample + time-placement."""
 
     @pytest.mark.unit
     def test_places_data_at_correct_time_offset_same_sfreq(self):
-        epochs = make_synthetic_epochs(
-            [1, 1, 1], event_id=1, sfreq=250, tmin=-0.2, tmax=0.2
-        )
+        epochs = make_synthetic_epochs([1, 1, 1], event_id=1, sfreq=250, tmin=-0.2, tmax=0.2)
         n_new_samples = 50  # 0.2s at 250Hz
         new_data = np.zeros((len(epochs), 1, n_new_samples))
         new_data[:, 0, :] = np.arange(n_new_samples)
 
-        epochs.add_channel_data(new_data, ['TESTCH'], 250, 'misc', t_min=-0.1)
+        epochs.add_channel_data(new_data, ["TESTCH"], 250, "misc", t_min=-0.1)
 
-        assert 'TESTCH' in epochs.ch_names
-        placed = epochs.get_data(picks=['TESTCH'])[0, 0]
+        assert "TESTCH" in epochs.ch_names
+        placed = epochs.get_data(picks=["TESTCH"])[0, 0]
         expected_start = np.argmin(np.abs(epochs.times - (-0.1)))
         assert placed[expected_start] == pytest.approx(0.0)
-        assert placed[expected_start + n_new_samples - 1] == pytest.approx(
-            n_new_samples - 1
-        )
+        assert placed[expected_start + n_new_samples - 1] == pytest.approx(n_new_samples - 1)
 
     @pytest.mark.unit
     def test_resamples_to_match_epochs_sfreq(self):
-        epochs = make_synthetic_epochs(
-            [1, 1, 1], event_id=1, sfreq=250, tmin=-0.2, tmax=0.2
-        )
+        epochs = make_synthetic_epochs([1, 1, 1], event_id=1, sfreq=250, tmin=-0.2, tmax=0.2)
         new_data = np.ones((len(epochs), 1, 100))  # 100 samples @ 500Hz = 0.2s
 
-        epochs.add_channel_data(new_data, ['TESTCH2'], 500, 'misc', t_min=-0.1)
+        epochs.add_channel_data(new_data, ["TESTCH2"], 500, "misc", t_min=-0.1)
 
-        placed = epochs.get_data(picks=['TESTCH2'])[0, 0]
+        placed = epochs.get_data(picks=["TESTCH2"])[0, 0]
         # 0.2s at the epochs' own 250Hz sfreq is ~50 samples
         assert np.sum(placed != 0) == pytest.approx(50, abs=1)
 
@@ -663,16 +695,17 @@ class TestEpochsAddChannelData:
 # report_epochs
 # ============================================================================
 
+
 class TestEpochsReportEpochs:
     """Smoke test for report_epochs."""
 
     @pytest.mark.unit
     def test_adds_content_and_returns_same_report(self):
         epochs = make_synthetic_epochs([1, 1], event_id=1)
-        report = mne.Report(title='test')
+        report = mne.Report(title="test")
         n_before = len(report._content)
 
-        out = epochs.report_epochs(report, title='test title')
+        out = epochs.report_epochs(report, title="test title")
 
         assert out is report
         assert len(report._content) > n_before
@@ -680,9 +713,9 @@ class TestEpochsReportEpochs:
     @pytest.mark.unit
     def test_missing_adds_html_block(self):
         epochs = make_synthetic_epochs([1, 1], event_id=1)
-        report = mne.Report(title='test')
+        report = mne.Report(title="test")
 
-        out = epochs.report_epochs(report, title='x', missing=np.array([1, 2]))
+        out = epochs.report_epochs(report, title="x", missing=np.array([1, 2]))
 
         assert out is report
 
@@ -690,6 +723,7 @@ class TestEpochsReportEpochs:
 # ============================================================================
 # save_preprocessed
 # ============================================================================
+
 
 class TestEpochsSavePreprocessed:
     """Tests for save/combine-sessions behavior."""
@@ -699,57 +733,50 @@ class TestEpochsSavePreprocessed:
         monkeypatch.chdir(tmp_path)
         epochs = make_synthetic_epochs([1, 1, 1], event_id=1, sj=1, session=1)
 
-        epochs.save_preprocessed('clean')
+        epochs.save_preprocessed("clean")
 
-        files = set(os.listdir(tmp_path / 'eeg' / 'processed'))
-        assert files == {'sub_01_ses_01_clean-epo.fif'}
+        files = set(os.listdir(tmp_path / "eeg" / "processed"))
+        assert files == {"sub_01_ses_01_clean-epo.fif"}
 
     @pytest.mark.unit
     def test_multi_session_combines_into_all_file(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        epochs1 = make_synthetic_epochs(
-            [1, 1], event_id=1, sj=1, session=1, seed=1
-        )
-        epochs1.save_preprocessed('clean', combine_sessions=False)
-        epochs2 = make_synthetic_epochs(
-            [1, 1, 1], event_id=1, sj=1, session=2, seed=2
-        )
+        epochs1 = make_synthetic_epochs([1, 1], event_id=1, sj=1, session=1, seed=1)
+        epochs1.save_preprocessed("clean", combine_sessions=False)
+        epochs2 = make_synthetic_epochs([1, 1, 1], event_id=1, sj=1, session=2, seed=2)
 
-        epochs2.save_preprocessed('clean')
+        epochs2.save_preprocessed("clean")
 
-        proc_dir = tmp_path / 'eeg' / 'processed'
-        combined = mne.read_epochs(str(proc_dir / 'sub_01_all_clean-epo.fif'))
+        proc_dir = tmp_path / "eeg" / "processed"
+        combined = mne.read_epochs(str(proc_dir / "sub_01_all_clean-epo.fif"))
         assert len(combined) == 2 + 3
 
     @pytest.mark.unit
-    def test_eye_data_combined_only_if_all_sessions_have_it(
-        self, tmp_path, monkeypatch
-    ):
+    def test_eye_data_combined_only_if_all_sessions_have_it(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        epochs1 = make_synthetic_epochs(
-            [1, 1], event_id=1, sj=1, session=1, seed=1
-        )
-        epochs1.save_preprocessed('clean', combine_sessions=False)
-        eye_dir = tmp_path / 'eye' / 'processed'
+        epochs1 = make_synthetic_epochs([1, 1], event_id=1, sj=1, session=1, seed=1)
+        epochs1.save_preprocessed("clean", combine_sessions=False)
+        eye_dir = tmp_path / "eye" / "processed"
         eye_dir.mkdir(parents=True, exist_ok=True)
         np.savez(
-            str(eye_dir / 'sub_01_ses_01_clean.npz'),
-            times=np.arange(10), x=np.zeros((2, 10)), y=np.zeros((2, 10)),
+            str(eye_dir / "sub_01_ses_01_clean.npz"),
+            times=np.arange(10),
+            x=np.zeros((2, 10)),
+            y=np.zeros((2, 10)),
             sfreq=1000,
         )
         # session 2 deliberately has no matching eye file
-        epochs2 = make_synthetic_epochs(
-            [1, 1, 1], event_id=1, sj=1, session=2, seed=2
-        )
+        epochs2 = make_synthetic_epochs([1, 1, 1], event_id=1, sj=1, session=2, seed=2)
 
-        epochs2.save_preprocessed('clean')
+        epochs2.save_preprocessed("clean")
 
-        assert not (eye_dir / 'sub_01_all_clean.npz').exists()
+        assert not (eye_dir / "sub_01_all_clean.npz").exists()
 
 
 # ============================================================================
 # baseline_by_condition
 # ============================================================================
+
 
 class TestEpochsBaselineByCondition:
     """Tests for per-condition baseline correction."""
@@ -765,10 +792,10 @@ class TestEpochsBaselineByCondition:
             for c in range(n_ch):
                 epochs._data[t, c, :] = t * 10 + c
         before = epochs._data.copy()
-        df = pd.DataFrame({'cnd': ['a', 'b', 'a', 'b']})
+        df = pd.DataFrame({"cnd": ["a", "b", "a", "b"]})
 
         epochs.baseline_by_condition(
-            df, cnds=['a'], cnd_header='cnd', base_period=(-0.2, 0), nr_elec=n_ch
+            df, cnds=["a"], cnd_header="cnd", base_period=(-0.2, 0), nr_elec=n_ch
         )
 
         # condition 'a' trials are 0 and 2 (values 0+c, 20+c); baseline
@@ -782,9 +809,9 @@ class TestEpochsBaselineByCondition:
     @pytest.mark.unit
     def test_returns_self_for_chaining(self):
         epochs = make_synthetic_epochs([1, 1], event_id=1, sfreq=100)
-        df = pd.DataFrame({'cnd': ['a', 'a']})
+        df = pd.DataFrame({"cnd": ["a", "a"]})
 
-        result = epochs.baseline_by_condition(df, cnds=['a'], cnd_header='cnd')
+        result = epochs.baseline_by_condition(df, cnds=["a"], cnd_header="cnd")
 
         assert result is epochs
 
@@ -793,44 +820,41 @@ class TestEpochsBaselineByCondition:
 # shift_by_condition
 # ============================================================================
 
+
 class TestEpochsShiftByCondition:
     """Tests for per-condition circular time-shift."""
 
     @pytest.mark.unit
     def test_shifts_only_specified_condition_forward(self):
-        epochs = make_synthetic_epochs(
-            [1, 2], event_id=[1, 2], sfreq=100, tmin=-0.2, tmax=0.2
-        )
+        epochs = make_synthetic_epochs([1, 2], event_id=[1, 2], sfreq=100, tmin=-0.2, tmax=0.2)
         epochs._data[:] = 0
         impulse_idx = 20
         epochs._data[:, 0, impulse_idx] = 1.0
-        df = pd.DataFrame({'cnd': ['shiftme', 'noshift']})
+        df = pd.DataFrame({"cnd": ["shiftme", "noshift"]})
 
-        epochs.shift_by_condition(df, cnd_info={'shiftme': 0.1}, cnd_header='cnd')
+        epochs.shift_by_condition(df, cnd_info={"shiftme": 0.1}, cnd_header="cnd")
 
         assert np.argmax(epochs._data[0, 0, :]) == impulse_idx + 10  # +0.1s @ 100Hz
         assert np.argmax(epochs._data[1, 0, :]) == impulse_idx  # untouched
 
     @pytest.mark.unit
     def test_shifts_backward_for_negative_value(self):
-        epochs = make_synthetic_epochs(
-            [1, 1], event_id=1, sfreq=100, tmin=-0.2, tmax=0.2
-        )
+        epochs = make_synthetic_epochs([1, 1], event_id=1, sfreq=100, tmin=-0.2, tmax=0.2)
         epochs._data[:] = 0
         impulse_idx = 20
         epochs._data[:, 0, impulse_idx] = 1.0
-        df = pd.DataFrame({'cnd': ['fast', 'fast']})
+        df = pd.DataFrame({"cnd": ["fast", "fast"]})
 
-        epochs.shift_by_condition(df, cnd_info={'fast': -0.1}, cnd_header='cnd')
+        epochs.shift_by_condition(df, cnd_info={"fast": -0.1}, cnd_header="cnd")
 
         assert np.argmax(epochs._data[0, 0, :]) == impulse_idx - 10
 
     @pytest.mark.unit
     def test_returns_self_for_chaining(self):
         epochs = make_synthetic_epochs([1, 1], event_id=1, sfreq=100)
-        df = pd.DataFrame({'cnd': ['a', 'a']})
+        df = pd.DataFrame({"cnd": ["a", "a"]})
 
-        result = epochs.shift_by_condition(df, cnd_info={'a': 0.05}, cnd_header='cnd')
+        result = epochs.shift_by_condition(df, cnd_info={"a": 0.05}, cnd_header="cnd")
 
         assert result is epochs
 
@@ -838,6 +862,7 @@ class TestEpochsShiftByCondition:
 # ============================================================================
 # ArtefactReject.__init__
 # ============================================================================
+
 
 class TestArtefactRejectInit:
     """Tests for attribute storage."""
@@ -862,6 +887,7 @@ class TestArtefactRejectInit:
 # fit_ICA
 # ============================================================================
 
+
 class TestFitICA:
     """Tests for ICA fitting."""
 
@@ -871,7 +897,7 @@ class TestFitICA:
         epochs = make_artefact_epochs(n_ch=6, n_epochs=10)
         ar = ArtefactReject()
 
-        ica = ar.fit_ICA(epochs, method='picard')
+        ica = ar.fit_ICA(epochs, method="picard")
 
         assert ica.n_components == 5
 
@@ -881,12 +907,13 @@ class TestFitICA:
         ar = ArtefactReject()
 
         with pytest.raises(ValueError, match="Unknown ICA method"):
-            ar.fit_ICA(epochs, method='bogus')
+            ar.fit_ICA(epochs, method="bogus")
 
 
 # ============================================================================
 # apply_ICA
 # ============================================================================
+
 
 class TestApplyICA:
     """Tests for applying ICA component removal."""
@@ -896,7 +923,7 @@ class TestApplyICA:
     def test_empty_exclude_leaves_data_unchanged(self):
         epochs = make_artefact_epochs(n_ch=6, n_epochs=10, seed=1)
         ar = ArtefactReject()
-        ica = ar.fit_ICA(epochs, method='picard')
+        ica = ar.fit_ICA(epochs, method="picard")
         before = epochs.get_data().copy()
 
         ica.exclude = []
@@ -909,7 +936,7 @@ class TestApplyICA:
     def test_nonempty_exclude_changes_data(self):
         epochs = make_artefact_epochs(n_ch=6, n_epochs=10, seed=1)
         ar = ArtefactReject()
-        ica = ar.fit_ICA(epochs, method='picard')
+        ica = ar.fit_ICA(epochs, method="picard")
         before = epochs.get_data().copy()
 
         ica.exclude = [0]
@@ -922,6 +949,7 @@ class TestApplyICA:
 # automated_ica_blink_selection
 # ============================================================================
 
+
 class TestAutomatedIcaBlinkSelection:
     """Tests for automatic blink-component detection."""
 
@@ -930,7 +958,7 @@ class TestAutomatedIcaBlinkSelection:
         """Regression test: raw.copy().pick('eog') used to raise ValueError
         immediately on zero EOG channels, before the method's own
         defensive `if pick_eog.size > 0` check could ever run."""
-        info = mne.create_info(['F1', 'F2', 'F3'], 250, ch_types='eeg')
+        info = mne.create_info(["F1", "F2", "F3"], 250, ch_types="eeg")
         data = np.random.default_rng(0).normal(0, 1e-5, size=(3, 5000))
         raw = mne.io.RawArray(data, info)
         ica = mne.preprocessing.ICA(n_components=2, random_state=97)
@@ -948,11 +976,9 @@ class TestAutomatedIcaBlinkSelection:
     def test_with_eog_channels_returns_scores(self):
         raw = make_eog_correlated_raw()
         ar = ArtefactReject()
-        ica = ar.fit_ICA(raw, method='picard')
+        ica = ar.fit_ICA(raw, method="picard")
 
-        eog_epochs, eog_inds, eog_scores = ar.automated_ica_blink_selection(
-            ica, raw, threshold=0.5
-        )
+        eog_epochs, eog_inds, eog_scores = ar.automated_ica_blink_selection(ica, raw, threshold=0.5)
 
         assert eog_epochs is not None
         assert eog_scores is not None
@@ -963,25 +989,26 @@ class TestAutomatedIcaBlinkSelection:
 # filt_pad
 # ============================================================================
 
+
 class TestFiltPad:
     """Tests for edge-mean padding."""
 
     @pytest.mark.unit
     def test_pads_with_edge_means(self):
         ar = ArtefactReject()
-        X = np.array([[1., 2., 3., 4., 5., 6.], [10., 20., 30., 40., 50., 60.]])
+        X = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]])
 
         padded = ar.filt_pad(X.copy(), pad_length=2)
 
         assert padded.shape == (2, 10)
-        np.testing.assert_allclose(padded[:, :2], [[1.5, 1.5], [15., 15.]])
-        np.testing.assert_allclose(padded[:, -2:], [[5.5, 5.5], [55., 55.]])
+        np.testing.assert_allclose(padded[:, :2], [[1.5, 1.5], [15.0, 15.0]])
+        np.testing.assert_allclose(padded[:, -2:], [[5.5, 5.5], [55.0, 55.0]])
         np.testing.assert_array_equal(padded[:, 2:8], X)
 
     @pytest.mark.unit
     def test_clamps_pad_length_to_half_signal(self):
         ar = ArtefactReject()
-        X = np.array([[1., 2., 3., 4.]])  # 4 samples, half = 2
+        X = np.array([[1.0, 2.0, 3.0, 4.0]])  # 4 samples, half = 2
 
         padded = ar.filt_pad(X.copy(), pad_length=100)
 
@@ -991,6 +1018,7 @@ class TestFiltPad:
 # ============================================================================
 # box_smoothing
 # ============================================================================
+
 
 class TestBoxSmoothing:
     """Tests for boxcar smoothing."""
@@ -1018,6 +1046,7 @@ class TestBoxSmoothing:
 # ============================================================================
 # mark_bads
 # ============================================================================
+
 
 class TestMarkBads:
     """Tests for artifact-segment boundary detection, including the
@@ -1095,12 +1124,14 @@ class TestMarkBads:
 # z_score_data
 # ============================================================================
 
+
 class TestZScoreData:
     """Tests for z-scoring and data-driven threshold adjustment."""
 
     @pytest.mark.unit
     def test_matches_manual_computation_no_mask(self):
         from scipy.stats import zscore
+
         ar = ArtefactReject()
         rng = np.random.default_rng(0)
         X = rng.normal(0, 1, size=(2, 3, 10))
@@ -1110,9 +1141,7 @@ class TestZScoreData:
         Xr = X.swapaxes(0, 1).reshape(3, -1)
         Xz_manual = zscore(Xr, axis=1)
         Zn_manual = Xz_manual.sum(axis=0) / np.sqrt(3)
-        thresh_manual = (
-            4.0 + np.median(Zn_manual) + abs(Zn_manual.min() - np.median(Zn_manual))
-        )
+        thresh_manual = 4.0 + np.median(Zn_manual) + abs(Zn_manual.min() - np.median(Zn_manual))
 
         np.testing.assert_allclose(Z_n.reshape(-1), Zn_manual)
         assert thresh == pytest.approx(thresh_manual)
@@ -1120,6 +1149,7 @@ class TestZScoreData:
     @pytest.mark.unit
     def test_mask_recomputes_zscore_on_masked_samples_only(self):
         from scipy.stats import zscore
+
         ar = ArtefactReject()
         rng = np.random.default_rng(0)
         X = rng.normal(0, 1, size=(2, 3, 20))
@@ -1134,8 +1164,10 @@ class TestZScoreData:
         Xz[:, mask_tiled] = zscore(Xr[:, mask_tiled], axis=1)
         Zn_manual = Xz.sum(axis=0) / np.sqrt(3)
         Zn_manual[mask_tiled] = Xz[:, mask_tiled].sum(axis=0) / np.sqrt(3)
-        thresh_manual = 4.0 + np.median(Zn_manual[mask_tiled]) + abs(
-            Zn_manual[mask_tiled].min() - np.median(Zn_manual[mask_tiled])
+        thresh_manual = (
+            4.0
+            + np.median(Zn_manual[mask_tiled])
+            + abs(Zn_manual[mask_tiled].min() - np.median(Zn_manual[mask_tiled]))
         )
 
         np.testing.assert_allclose(Z_n.reshape(-1), Zn_manual)
@@ -1155,6 +1187,7 @@ class TestZScoreData:
 # ============================================================================
 # preprocess_epochs
 # ============================================================================
+
 
 class TestPreprocessEpochs:
     """Regression tests for the mutable-default-argument and
@@ -1195,6 +1228,7 @@ class TestPreprocessEpochs:
 class _WarningsAsErrors:
     def __enter__(self):
         import warnings
+
         self._cm = warnings.catch_warnings()
         self._cm.__enter__()
         warnings.simplefilter("error", UserWarning)
@@ -1212,6 +1246,7 @@ def warnings_as_errors():
 # ============================================================================
 # apply_hilbert
 # ============================================================================
+
 
 class TestApplyHilbert:
     """Tests for Hilbert envelope extraction."""
@@ -1231,6 +1266,7 @@ class TestApplyHilbert:
 # ============================================================================
 # auto_repair_noise (full pipeline)
 # ============================================================================
+
 
 class TestAutoRepairNoise:
     """Integration tests for the full detect-and-repair pipeline."""
@@ -1269,15 +1305,13 @@ class TestAutoRepairNoise:
     @pytest.mark.slow
     def test_drop_bads_false_marks_metadata_when_present(self):
         epochs = make_artefact_epochs(inject_noise=True)
-        epochs.metadata = pd.DataFrame({'trial': np.arange(len(epochs))})
+        epochs.metadata = pd.DataFrame({"trial": np.arange(len(epochs))})
         ar = ArtefactReject(z_thresh=4.0, max_bad=3, flt_pad=0.1, filter_z=True)
 
-        cleaned, _, _ = ar.auto_repair_noise(
-            epochs, sj=1, session=1, drop_bads=False
-        )
+        cleaned, _, _ = ar.auto_repair_noise(epochs, sj=1, session=1, drop_bads=False)
 
         assert len(cleaned) == len(epochs)
-        assert 'bad_epochs' in cleaned.metadata.columns
+        assert "bad_epochs" in cleaned.metadata.columns
 
     @pytest.mark.unit
     @pytest.mark.slow
@@ -1290,16 +1324,15 @@ class TestAutoRepairNoise:
         assert epochs.metadata is None
         ar = ArtefactReject(z_thresh=4.0, max_bad=3, flt_pad=0.1, filter_z=True)
 
-        cleaned, _, _ = ar.auto_repair_noise(
-            epochs, sj=1, session=1, drop_bads=False
-        )
+        cleaned, _, _ = ar.auto_repair_noise(epochs, sj=1, session=1, drop_bads=False)
 
-        assert 'bad_epochs' in cleaned.metadata.columns
+        assert "bad_epochs" in cleaned.metadata.columns
 
 
 # ============================================================================
 # update_heat_map
 # ============================================================================
+
 
 class TestUpdateHeatMap:
     """Tests for heat_map/cleaned_info/not_cleaned_info state mutation."""
@@ -1307,7 +1340,7 @@ class TestUpdateHeatMap:
     @pytest.mark.unit
     def test_cleaned_updates_heat_map_and_cleaned_info(self):
         ar = ArtefactReject()
-        channels = np.array(['Ch1', 'Ch2', 'Ch3'])
+        channels = np.array(["Ch1", "Ch2", "Ch3"])
         ar.heat_map = np.zeros((5, 3))
         ar.cleaned_info = {ch: 0 for ch in channels}
         ar.not_cleaned_info = {ch: 0 for ch in channels}
@@ -1315,14 +1348,14 @@ class TestUpdateHeatMap:
         ar.update_heat_map(channels, ch_idx=np.array([0, 2]), tr_idx=1, upd_value=1)
 
         np.testing.assert_array_equal(ar.heat_map[1], [1, 0, 1])
-        assert ar.cleaned_info['Ch1'] == 1
-        assert ar.cleaned_info['Ch3'] == 1
-        assert ar.cleaned_info['Ch2'] == 0
+        assert ar.cleaned_info["Ch1"] == 1
+        assert ar.cleaned_info["Ch3"] == 1
+        assert ar.cleaned_info["Ch2"] == 0
 
     @pytest.mark.unit
     def test_bad_updates_heat_map_and_not_cleaned_info(self):
         ar = ArtefactReject()
-        channels = np.array(['Ch1', 'Ch2', 'Ch3'])
+        channels = np.array(["Ch1", "Ch2", "Ch3"])
         ar.heat_map = np.zeros((5, 3))
         ar.cleaned_info = {ch: 0 for ch in channels}
         ar.not_cleaned_info = {ch: 0 for ch in channels}
@@ -1330,34 +1363,35 @@ class TestUpdateHeatMap:
         ar.update_heat_map(channels, ch_idx=np.array([1]), tr_idx=2, upd_value=-1)
 
         np.testing.assert_array_equal(ar.heat_map[2], [0, -1, 0])
-        assert ar.not_cleaned_info['Ch2'] == 1
+        assert ar.not_cleaned_info["Ch2"] == 1
 
 
 # ============================================================================
 # Plotting smoke tests (no plt.show() blocks; safe to run headless)
 # ============================================================================
 
+
 class TestPlottingSmokeTests:
     """Smoke tests for the plotting methods used in QC reports."""
 
     def teardown_method(self):
-        plt.close('all')
+        plt.close("all")
 
     @pytest.mark.unit
     def test_plot_hist_auto_repair_returns_false_when_all_zero(self):
         ar = ArtefactReject()
-        ar.cleaned_info = {'Ch1': 0, 'Ch2': 0}
+        ar.cleaned_info = {"Ch1": 0, "Ch2": 0}
 
-        result = ar.plot_hist_auto_repair('cleaned')
+        result = ar.plot_hist_auto_repair("cleaned")
 
         assert result is False
 
     @pytest.mark.unit
     def test_plot_hist_auto_repair_returns_figure_when_nonzero(self):
         ar = ArtefactReject()
-        ar.cleaned_info = {'Ch1': 3, 'Ch2': 0}
+        ar.cleaned_info = {"Ch1": 3, "Ch2": 0}
 
-        result = ar.plot_hist_auto_repair('cleaned')
+        result = ar.plot_hist_auto_repair("cleaned")
 
         assert isinstance(result, plt.Figure)
 
@@ -1366,7 +1400,7 @@ class TestPlottingSmokeTests:
         ar = ArtefactReject()
         ar.heat_map = np.array([[0, 1, -1], [1, 0, 0]])
 
-        fig = ar.plot_heat_map(np.array(['A', 'B', 'C']))
+        fig = ar.plot_heat_map(np.array(["A", "B", "C"]))
 
         assert isinstance(fig, plt.Figure)
 
@@ -1382,12 +1416,10 @@ class TestPlottingSmokeTests:
     def test_plot_auto_repair_composes_all_figures(self):
         ar = ArtefactReject()
         ar.heat_map = np.array([[0, 1, -1], [1, 0, 0]])
-        ar.cleaned_info = {'A': 1, 'B': 0, 'C': 0}
-        ar.not_cleaned_info = {'A': 0, 'B': 0, 'C': 0}
+        ar.cleaned_info = {"A": 1, "B": 0, "C": 0}
+        ar.not_cleaned_info = {"A": 0, "B": 0, "C": 0}
 
-        figs = ar.plot_auto_repair(
-            np.array(['A', 'B', 'C']), np.random.randn(2, 20), 1.5
-        )
+        figs = ar.plot_auto_repair(np.array(["A", "B", "C"]), np.random.randn(2, 20), 1.5)
 
         # zscore plot + heatmap + cleaned-histogram (bad-histogram is
         # skipped since not_cleaned_info is all zero)
@@ -1398,6 +1430,7 @@ class TestPlottingSmokeTests:
 # run_blink_ICA (end-to-end with mocked interactive prompts)
 # ============================================================================
 
+
 class TestRunBlinkICA:
     """End-to-end test with input()/time.sleep() mocked out, since the
     real method blocks on terminal input for interactive confirmation."""
@@ -1405,8 +1438,8 @@ class TestRunBlinkICA:
     @pytest.mark.unit
     @pytest.mark.slow
     def test_auto_confirm_applies_ica(self, monkeypatch):
-        monkeypatch.setattr(time, 'sleep', lambda *a, **k: None)
-        monkeypatch.setattr('builtins.input', lambda *a, **k: 'y')
+        monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
+        monkeypatch.setattr("builtins.input", lambda *a, **k: "y")
 
         raw = make_eog_correlated_raw(n_ch=6, n_samples=15000)
         ar = ArtefactReject()
@@ -1417,12 +1450,17 @@ class TestRunBlinkICA:
         # correctness, so this keeps the test focused on the confirm
         # loop + apply behavior.
         cleaned = ar.run_blink_ICA(
-            fit_inst=raw, raw=raw, ica_inst=raw.copy(),
-            sj=1, session=1, method='picard', threshold=0.5,
+            fit_inst=raw,
+            raw=raw,
+            ica_inst=raw.copy(),
+            sj=1,
+            session=1,
+            method="picard",
+            threshold=0.5,
         )
 
         assert cleaned is not None
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

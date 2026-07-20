@@ -27,3 +27,23 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -m "not slow"
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install black and isort
+        run: pip install black isort
+
+      - name: Check formatting (black)
+        run: black --check open_dvm tests
+
+      - name: Check import order (isort)
+        run: isort --check open_dvm tests

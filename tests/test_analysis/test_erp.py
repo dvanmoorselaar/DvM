@@ -23,10 +23,10 @@ Organization
   TestERPDataInjectionAndValidation: cross-cutting edge cases
 """
 
-import pytest
+import mne
 import numpy as np
 import pandas as pd
-import mne
+import pytest
 
 from open_dvm.analysis.ERP import ERP
 from tests.fixtures.sample_data import (
@@ -34,10 +34,10 @@ from tests.fixtures.sample_data import (
     create_multilocation_test_data,
 )
 
-
 # ============================================================================
 # select_lateralization_idx: AND-logic spatial restriction
 # ============================================================================
+
 
 class TestSpatialRestrictionANDLogic:
     """Tests for the AND logic in spatial restrictions.
@@ -51,10 +51,7 @@ class TestSpatialRestrictionANDLogic:
         """Single constraint filters correctly."""
         data, trial_info = create_lateralization_test_data()
 
-        idx = ERP.select_lateralization_idx(
-            trial_info,
-            pos_labels={'dist1_loc': [0]}
-        )
+        idx = ERP.select_lateralization_idx(trial_info, pos_labels={"dist1_loc": [0]})
 
         expected = np.array([0, 1, 2, 3])
         np.testing.assert_array_equal(idx, expected)
@@ -69,9 +66,7 @@ class TestSpatialRestrictionANDLogic:
         data, trial_info = create_lateralization_test_data()
 
         idx = ERP.select_lateralization_idx(
-            trial_info,
-            pos_labels={'dist1_loc': [0]},
-            spatial_restriction={'dist2_loc': [4]}
+            trial_info, pos_labels={"dist1_loc": [0]}, spatial_restriction={"dist2_loc": [4]}
         )
 
         expected = np.array([1])
@@ -83,9 +78,7 @@ class TestSpatialRestrictionANDLogic:
         data, trial_info = create_multilocation_test_data()
 
         idx = ERP.select_lateralization_idx(
-            trial_info,
-            pos_labels={'dist1_loc': [0, 1]},
-            spatial_restriction={'dist2_loc': [0, 4]}
+            trial_info, pos_labels={"dist1_loc": [0, 1]}, spatial_restriction={"dist2_loc": [0, 4]}
         )
 
         expected = np.array([0, 1, 3, 4])
@@ -97,9 +90,7 @@ class TestSpatialRestrictionANDLogic:
         data, trial_info = create_lateralization_test_data()
 
         idx = ERP.select_lateralization_idx(
-            trial_info,
-            pos_labels={'dist1_loc': [0]},
-            spatial_restriction={'dist2_loc': [99]}
+            trial_info, pos_labels={"dist1_loc": [0]}, spatial_restriction={"dist2_loc": [99]}
         )
 
         np.testing.assert_array_equal(idx, np.array([], dtype=int))
@@ -110,9 +101,7 @@ class TestSpatialRestrictionANDLogic:
         data, trial_info = create_lateralization_test_data()
 
         idx = ERP.select_lateralization_idx(
-            trial_info,
-            pos_labels={'dist1_loc': [0, 1, 2, 3, 4, 5, 6, 9]},
-            spatial_restriction=None
+            trial_info, pos_labels={"dist1_loc": [0, 1, 2, 3, 4, 5, 6, 9]}, spatial_restriction=None
         )
 
         np.testing.assert_array_equal(idx, np.arange(10))
@@ -123,14 +112,10 @@ class TestSpatialRestrictionANDLogic:
         data, trial_info = create_multilocation_test_data()
 
         idx_single = ERP.select_lateralization_idx(
-            trial_info,
-            pos_labels={'dist1_loc': [0, 1]},
-            spatial_restriction=None
+            trial_info, pos_labels={"dist1_loc": [0, 1]}, spatial_restriction=None
         )
         idx_multi = ERP.select_lateralization_idx(
-            trial_info,
-            pos_labels={'dist1_loc': [0, 1]},
-            spatial_restriction={'dist2_loc': [0]}
+            trial_info, pos_labels={"dist1_loc": [0, 1]}, spatial_restriction={"dist2_loc": [0]}
         )
 
         assert len(idx_single) > len(idx_multi)
@@ -139,13 +124,13 @@ class TestSpatialRestrictionANDLogic:
     @pytest.mark.unit
     def test_select_lateralization_idx_missing_restriction_column_raises(self):
         """A spatial_restriction key absent from trial_info raises KeyError."""
-        trial_info = pd.DataFrame({'trial': np.arange(5), 'loc': [0, 1, 2, 3, 4]})
+        trial_info = pd.DataFrame({"trial": np.arange(5), "loc": [0, 1, 2, 3, 4]})
 
         with pytest.raises(KeyError):
             ERP.select_lateralization_idx(
                 trial_info,
-                pos_labels={'loc': [0, 1, 2, 3, 4]},
-                spatial_restriction={'missing_column': [0]}
+                pos_labels={"loc": [0, 1, 2, 3, 4]},
+                spatial_restriction={"missing_column": [0]},
             )
 
 
@@ -153,19 +138,16 @@ class TestSpatialRestrictionANDLogic:
 # flip_topography
 # ============================================================================
 
+
 class TestFlipTopography:
     """Tests for topographic flipping of lateralized trials."""
 
     @pytest.mark.unit
-    def test_flip_swaps_electrode_pairs_for_flagged_trials(
-        self, lateralized_flip_epochs
-    ):
+    def test_flip_swaps_electrode_pairs_for_flagged_trials(self, lateralized_flip_epochs):
         """Trials matching topo_flip get O1<->O2 and P7<->P8 swapped."""
         epochs, trial_info = lateralized_flip_epochs
 
-        flipped = ERP.flip_topography(
-            epochs.copy(), trial_info, topo_flip={'target_loc': [1]}
-        )
+        flipped = ERP.flip_topography(epochs.copy(), trial_info, topo_flip={"target_loc": [1]})
         data = flipped.get_data()[:, :, 0]  # constant across time
 
         # trial 0 (target_loc == 1): flipped
@@ -174,15 +156,11 @@ class TestFlipTopography:
         np.testing.assert_array_equal(data[2], [21, 20, 23, 22, -24])
 
     @pytest.mark.unit
-    def test_flip_leaves_unflagged_trials_unchanged(
-        self, lateralized_flip_epochs
-    ):
+    def test_flip_leaves_unflagged_trials_unchanged(self, lateralized_flip_epochs):
         """Trials not matching topo_flip are untouched."""
         epochs, trial_info = lateralized_flip_epochs
 
-        flipped = ERP.flip_topography(
-            epochs.copy(), trial_info, topo_flip={'target_loc': [1]}
-        )
+        flipped = ERP.flip_topography(epochs.copy(), trial_info, topo_flip={"target_loc": [1]})
         data = flipped.get_data()[:, :, 0]
 
         # trial 1 (target_loc == 2): unchanged
@@ -194,8 +172,7 @@ class TestFlipTopography:
         epochs, trial_info = lateralized_flip_epochs
 
         flipped = ERP.flip_topography(
-            epochs.copy(), trial_info, topo_flip={'target_loc': [1]},
-            flip_dict={'O1': 'P8'}
+            epochs.copy(), trial_info, topo_flip={"target_loc": [1]}, flip_dict={"O1": "P8"}
         )
         data = flipped.get_data()[:, :, 0]
 
@@ -209,29 +186,29 @@ class TestFlipTopography:
 # select_erp_data
 # ============================================================================
 
+
 class TestSelectErpData:
     """Tests for select_erp_data trial exclusion and flip integration."""
 
     @pytest.mark.unit
-    def test_excludes_trials_matching_excl_factor(self, sample_epochs_data,
-                                                    sample_trial_dataframe):
+    def test_excludes_trials_matching_excl_factor(self, sample_epochs_data, sample_trial_dataframe):
         epochs, _ = sample_epochs_data
         df = sample_trial_dataframe
-        n_incorrect = (~df['correct']).sum()
+        n_incorrect = (~df["correct"]).sum()
 
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.2, 0))
-        out_df, out_epochs = erp.select_erp_data(excl_factor={'correct': [False]})
+        out_df, out_epochs = erp.select_erp_data(excl_factor={"correct": [False]})
 
         assert len(out_df) == len(df) - n_incorrect
         assert len(out_epochs) == len(df) - n_incorrect
-        assert (out_df['correct']).all()
+        assert (out_df["correct"]).all()
 
     @pytest.mark.unit
     def test_topo_flip_delegates_to_flip_topography(self, lateralized_flip_epochs):
         epochs, trial_info = lateralized_flip_epochs
 
         erp = ERP(sj=1, epochs=epochs, df=trial_info, baseline=(-0.05, 0))
-        _, out_epochs = erp.select_erp_data(topo_flip={'target_loc': [1]})
+        _, out_epochs = erp.select_erp_data(topo_flip={"target_loc": [1]})
 
         data = out_epochs.get_data()[:, :, 0]
         np.testing.assert_array_equal(data[0], [1, 0, 3, 2, -4])
@@ -244,29 +221,28 @@ class TestSelectErpData:
         erp = ERP(sj=1, epochs=epochs, df=trial_info, baseline=(-0.05, 0))
         _, out_epochs = erp.select_erp_data()
 
-        np.testing.assert_array_equal(
-            out_epochs.get_data(), epochs.get_data()
-        )
+        np.testing.assert_array_equal(out_epochs.get_data(), epochs.get_data())
 
 
 # ============================================================================
 # create_erps
 # ============================================================================
 
+
 class TestCreateErps:
     """Tests for create_erps trial averaging, baseline, cropping, RT split."""
 
     @staticmethod
     def _build_epochs_df():
-        ch_names = ['Cz', 'Pz']
+        ch_names = ["Cz", "Pz"]
         sfreq, n_samples, tmin = 100, 20, -0.1
         rng = np.random.default_rng(0)
         data = rng.normal(0, 1, size=(4, len(ch_names), n_samples))
         for t in range(4):
             data[t] += t  # per-trial offset, present in baseline and post-baseline
-        info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+        info = mne.create_info(ch_names, sfreq, ch_types="eeg")
         epochs = mne.EpochsArray(data.copy(), info, tmin=tmin)
-        df = pd.DataFrame({'RT': [100, 900, 200, 800]})
+        df = pd.DataFrame({"RT": [100, 900, 200, 800]})
         return epochs, df, data
 
     def test_idx_none_averages_all_trials(self):
@@ -274,7 +250,7 @@ class TestCreateErps:
         epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        evoked = erp.create_erps(epochs, df, idx=None, erp_name='x', save=False)
+        evoked = erp.create_erps(epochs, df, idx=None, erp_name="x", save=False)
 
         baseline_idx = epochs.times <= 0
         manual = data.copy()
@@ -290,7 +266,7 @@ class TestCreateErps:
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
         idx = np.array([0, 1, 2, 3])
 
-        evoked = erp.create_erps(epochs, df, idx=idx, erp_name='x', save=False)
+        evoked = erp.create_erps(epochs, df, idx=idx, erp_name="x", save=False)
 
         baseline_idx = epochs.times <= 0
         manual = data.copy()
@@ -305,9 +281,7 @@ class TestCreateErps:
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
         idx = np.array([0, 1, 2, 3])
 
-        evoked = erp.create_erps(
-            epochs, df, idx=idx, time_oi=(0.0, 0.05), erp_name='x', save=False
-        )
+        evoked = erp.create_erps(epochs, df, idx=idx, time_oi=(0.0, 0.05), erp_name="x", save=False)
 
         assert evoked.times.min() == pytest.approx(0.0, abs=1e-8)
         assert evoked.times.max() == pytest.approx(0.05, abs=1e-8)
@@ -317,35 +291,33 @@ class TestCreateErps:
         epochs, df, _ = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.create_erps(epochs, df, idx=np.arange(4), erp_name='x', save=False)
+        erp.create_erps(epochs, df, idx=np.arange(4), erp_name="x", save=False)
 
-        assert not (tmp_path / 'erp').exists()
+        assert not (tmp_path / "erp").exists()
 
     def test_save_true_writes_evoked_file(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         epochs, df, _ = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.create_erps(epochs, df, idx=np.arange(4), erp_name='x', save=True)
+        erp.create_erps(epochs, df, idx=np.arange(4), erp_name="x", save=True)
 
-        assert (tmp_path / 'erp' / 'evoked' / 'x-ave.fif').is_file()
+        assert (tmp_path / "erp" / "evoked" / "x-ave.fif").is_file()
 
     def test_rt_split_writes_fast_and_slow_files(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         epochs, df, _ = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.create_erps(
-            epochs, df, idx=np.arange(4), erp_name='rt', RT_split=True, save=True
-        )
+        erp.create_erps(epochs, df, idx=np.arange(4), erp_name="rt", RT_split=True, save=True)
 
-        evoked_dir = tmp_path / 'erp' / 'evoked'
-        assert (evoked_dir / 'rt-ave.fif').is_file()
-        assert (evoked_dir / 'rt_fast-ave.fif').is_file()
-        assert (evoked_dir / 'rt_slow-ave.fif').is_file()
+        evoked_dir = tmp_path / "erp" / "evoked"
+        assert (evoked_dir / "rt-ave.fif").is_file()
+        assert (evoked_dir / "rt_fast-ave.fif").is_file()
+        assert (evoked_dir / "rt_slow-ave.fif").is_file()
 
         # RT = [100, 900, 200, 800], median = 500 -> trials 0,2 fast; 1,3 slow
-        fast = mne.read_evokeds(str(evoked_dir / 'rt_fast-ave.fif'))[0]
+        fast = mne.read_evokeds(str(evoked_dir / "rt_fast-ave.fif"))[0]
         assert fast.nave == 2
 
 
@@ -353,20 +325,23 @@ class TestCreateErps:
 # condition_erps: end-to-end integration
 # ============================================================================
 
+
 class TestConditionErpsIntegration:
     """Integration tests for the full condition_erps pipeline."""
 
     @staticmethod
     def _build_epochs_df():
-        ch_names = ['Cz', 'Pz']
+        ch_names = ["Cz", "Pz"]
         sfreq, n_samples, tmin = 100, 20, -0.1
         rng = np.random.default_rng(3)
         data = rng.normal(0, 0.1, size=(8, len(ch_names), n_samples))
-        info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+        info = mne.create_info(ch_names, sfreq, ch_types="eeg")
         epochs = mne.EpochsArray(data, info, tmin=tmin)
-        df = pd.DataFrame({
-            'cnd': ['a', 'a', 'a', 'a', 'b', 'b', 'b', 'b'],
-        })
+        df = pd.DataFrame(
+            {
+                "cnd": ["a", "a", "a", "a", "b", "b", "b", "b"],
+            }
+        )
         return epochs, df, data
 
     def test_writes_one_evoked_file_per_condition(self, tmp_path, monkeypatch):
@@ -374,22 +349,20 @@ class TestConditionErpsIntegration:
         epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.condition_erps(cnds={'cnd': ['a', 'b']}, f_name='probe')
+        erp.condition_erps(cnds={"cnd": ["a", "b"]}, f_name="probe")
 
-        evoked_dir = tmp_path / 'erp' / 'evoked'
-        assert (evoked_dir / 'sub_01_a_probe-ave.fif').is_file()
-        assert (evoked_dir / 'sub_01_b_probe-ave.fif').is_file()
+        evoked_dir = tmp_path / "erp" / "evoked"
+        assert (evoked_dir / "sub_01_a_probe-ave.fif").is_file()
+        assert (evoked_dir / "sub_01_b_probe-ave.fif").is_file()
 
     def test_condition_data_matches_manual_average(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.condition_erps(cnds={'cnd': ['a', 'b']}, f_name='probe')
+        erp.condition_erps(cnds={"cnd": ["a", "b"]}, f_name="probe")
 
-        ev_a = mne.read_evokeds(
-            str(tmp_path / 'erp' / 'evoked' / 'sub_01_a_probe-ave.fif')
-        )[0]
+        ev_a = mne.read_evokeds(str(tmp_path / "erp" / "evoked" / "sub_01_a_probe-ave.fif"))[0]
         baseline_idx = epochs.times <= 0
         manual_a = data[[0, 1, 2, 3]].copy()
         for t in range(manual_a.shape[0]):
@@ -401,29 +374,27 @@ class TestConditionErpsIntegration:
         epochs, df, data = self._build_epochs_df()
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.1, 0))
 
-        erp.condition_erps(cnds={'cnd': ['a', 'missing']}, f_name='probe')
+        erp.condition_erps(cnds={"cnd": ["a", "missing"]}, f_name="probe")
 
-        evoked_dir = tmp_path / 'erp' / 'evoked'
-        assert (evoked_dir / 'sub_01_a_probe-ave.fif').is_file()
-        assert not (evoked_dir / 'sub_01_missing_probe-ave.fif').exists()
-        assert 'no data found for missing' in capsys.readouterr().out
+        evoked_dir = tmp_path / "erp" / "evoked"
+        assert (evoked_dir / "sub_01_a_probe-ave.fif").is_file()
+        assert not (evoked_dir / "sub_01_missing_probe-ave.fif").exists()
+        assert "no data found for missing" in capsys.readouterr().out
 
     def test_pos_labels_restricts_trials(self, tmp_path, monkeypatch):
         """pos_labels selects a subset of trials before condition splitting."""
         monkeypatch.chdir(tmp_path)
-        ch_names = ['Cz']
+        ch_names = ["Cz"]
         sfreq, n_samples, tmin = 100, 10, -0.05
         data = np.zeros((4, 1, n_samples))
-        info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+        info = mne.create_info(ch_names, sfreq, ch_types="eeg")
         epochs = mne.EpochsArray(data, info, tmin=tmin)
-        df = pd.DataFrame({'target_loc': [1, 2, 1, 2]})
+        df = pd.DataFrame({"target_loc": [1, 2, 1, 2]})
         erp = ERP(sj=1, epochs=epochs, df=df, baseline=(-0.05, 0))
 
-        erp.condition_erps(pos_labels={'target_loc': [1]}, f_name='probe')
+        erp.condition_erps(pos_labels={"target_loc": [1]}, f_name="probe")
 
-        ev = mne.read_evokeds(
-            str(tmp_path / 'erp' / 'evoked' / 'sub_01_all_data_probe-ave.fif')
-        )[0]
+        ev = mne.read_evokeds(str(tmp_path / "erp" / "evoked" / "sub_01_all_data_probe-ave.fif"))[0]
         assert ev.nave == 2  # only the two target_loc==1 trials
 
 
@@ -431,15 +402,16 @@ class TestConditionErpsIntegration:
 # extract_erp_features
 # ============================================================================
 
+
 class TestExtractERPFeatures:
     """Tests for extract_erp_features method (mean amplitude, AUC, latency)."""
 
     @pytest.mark.unit
     def test_extract_mean_amplitude(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
 
-        result = ERP.extract_erp_features(x, times, method='mean_amp')
+        result = ERP.extract_erp_features(x, times, method="mean_amp")
 
         assert result.shape == (20,)
         assert np.all(result > -20)
@@ -449,9 +421,9 @@ class TestExtractERPFeatures:
     @pytest.mark.unit
     def test_extract_auc_total(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
 
-        result = ERP.extract_erp_features(x, times, method='auc')
+        result = ERP.extract_erp_features(x, times, method="auc")
 
         assert result.shape == (20,)
         assert np.all(np.isfinite(result))
@@ -460,9 +432,9 @@ class TestExtractERPFeatures:
     @pytest.mark.unit
     def test_extract_auc_positive(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
 
-        result = ERP.extract_erp_features(x, times, method='auc_pos')
+        result = ERP.extract_erp_features(x, times, method="auc_pos")
 
         assert result.shape == (20,)
         assert np.all(result >= 0)
@@ -470,9 +442,9 @@ class TestExtractERPFeatures:
     @pytest.mark.unit
     def test_extract_auc_negative(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
 
-        result = ERP.extract_erp_features(x, times, method='auc_neg')
+        result = ERP.extract_erp_features(x, times, method="auc_neg")
 
         assert result.shape == (20,)
         assert np.all(result <= 0)
@@ -482,10 +454,10 @@ class TestExtractERPFeatures:
         times = np.linspace(0, 0.4, 100)
         x = np.random.randn(5, len(times)) * 0.5
         peak_idx = 50
-        x[:, peak_idx - 5:peak_idx + 5] = 5
+        x[:, peak_idx - 5 : peak_idx + 5] = 5
 
         result = ERP.extract_erp_features(
-            x, times, method='onset_latency', threshold=0.5, polarity='pos'
+            x, times, method="onset_latency", threshold=0.5, polarity="pos"
         )
 
         assert result.shape == (5,)
@@ -498,10 +470,10 @@ class TestExtractERPFeatures:
         times = np.linspace(0, 0.4, 100)
         x = np.random.randn(5, len(times)) * 0.5
         peak_idx = 50
-        x[:, peak_idx - 5:peak_idx + 5] = -5
+        x[:, peak_idx - 5 : peak_idx + 5] = -5
 
         result = ERP.extract_erp_features(
-            x, times, method='onset_latency', threshold=0.5, polarity='neg'
+            x, times, method="onset_latency", threshold=0.5, polarity="neg"
         )
 
         assert result.shape == (5,)
@@ -511,12 +483,12 @@ class TestExtractERPFeatures:
     @pytest.mark.unit
     def test_extract_features_preserves_input(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent'].copy()
+        x = waveforms["absent"].copy()
         x_orig = x.copy()
 
-        ERP.extract_erp_features(x, times, method='mean_amp')
-        ERP.extract_erp_features(x, times, method='auc')
-        ERP.extract_erp_features(x, times, method='auc_neg')
+        ERP.extract_erp_features(x, times, method="mean_amp")
+        ERP.extract_erp_features(x, times, method="auc")
+        ERP.extract_erp_features(x, times, method="auc_neg")
 
         np.testing.assert_array_equal(x, x_orig)
 
@@ -527,12 +499,12 @@ class TestExtractERPFeatures:
         times = np.linspace(0, 0.4, 100)
         x = np.random.randn(5, 100)
 
-        for method in ['mean_amp', 'auc', 'auc_pos', 'auc_neg']:
+        for method in ["mean_amp", "auc", "auc_pos", "auc_neg"]:
             result = ERP.extract_erp_features(x, times, method=method)
             assert result.shape == (5,)
 
         result = ERP.extract_erp_features(
-            x, times, method='onset_latency', threshold=0.5, polarity='pos'
+            x, times, method="onset_latency", threshold=0.5, polarity="pos"
         )
         assert result.shape == (5,)
 
@@ -541,40 +513,38 @@ class TestExtractERPFeatures:
 # select_erp_window
 # ============================================================================
 
+
 class TestSelectErpWindow:
     """Tests for select_erp_window peak-detection window selection."""
 
     @pytest.mark.unit
     def test_cnd_avg_centers_on_grand_mean_positive_peak(self, peaked_erps):
         window = ERP.select_erp_window(
-            peaked_erps, elec_oi=['Cz', 'Pz'], method='cnd_avg',
-            polarity='pos', window_size=0.02
+            peaked_erps, elec_oi=["Cz", "Pz"], method="cnd_avg", polarity="pos", window_size=0.02
         )
 
-        assert window[2] == 'pos'
+        assert window[2] == "pos"
         assert window[0] == pytest.approx(0.09, abs=1e-6)
         assert window[1] == pytest.approx(0.11, abs=1e-6)
 
     @pytest.mark.unit
     def test_cnd_avg_negative_polarity_finds_cond2_dip(self, peaked_erps):
         window = ERP.select_erp_window(
-            peaked_erps, elec_oi=['Cz', 'Pz'], method='cnd_avg',
-            polarity='neg', window_size=0.02
+            peaked_erps, elec_oi=["Cz", "Pz"], method="cnd_avg", polarity="neg", window_size=0.02
         )
 
-        assert window[2] == 'neg'
+        assert window[2] == "neg"
         assert window[0] == pytest.approx(0.19, abs=1e-6)
         assert window[1] == pytest.approx(0.21, abs=1e-6)
 
     @pytest.mark.unit
     def test_cnd_spc_returns_per_condition_windows(self, peaked_erps):
         windows = ERP.select_erp_window(
-            peaked_erps, elec_oi=['Cz', 'Pz'], method='cnd_spc',
-            polarity='pos', window_size=0.02
+            peaked_erps, elec_oi=["Cz", "Pz"], method="cnd_spc", polarity="pos", window_size=0.02
         )
 
-        assert set(windows.keys()) == {'cond1', 'cond2'}
-        assert windows['cond1'][0] == pytest.approx(0.09, abs=1e-6)
+        assert set(windows.keys()) == {"cond1", "cond2"}
+        assert windows["cond1"][0] == pytest.approx(0.09, abs=1e-6)
         # cond2's own positive-polarity peak is noise-driven (its designed
         # spike is negative), so only cond1 is checked precisely here.
 
@@ -585,8 +555,11 @@ class TestSelectErpWindow:
         degenerate all-zero difference wave, so the peak search falls
         back to whatever noise is left (still returns a valid window)."""
         window = ERP.select_erp_window(
-            peaked_erps, elec_oi=[['Cz'], ['Pz']], method='cnd_avg',
-            polarity='pos', window_size=0.02
+            peaked_erps,
+            elec_oi=[["Cz"], ["Pz"]],
+            method="cnd_avg",
+            polarity="pos",
+            window_size=0.02,
         )
 
         assert len(window) == 3
@@ -599,11 +572,14 @@ class TestSelectErpWindow:
         the docstring documenting erps as 'dict or list'. A flat list has
         no conditions, so it's just averaged directly."""
         window = ERP.select_erp_window(
-            peaked_erps['cond1'], elec_oi=['Cz', 'Pz'], method='cnd_avg',
-            polarity='pos', window_size=0.02
+            peaked_erps["cond1"],
+            elec_oi=["Cz", "Pz"],
+            method="cnd_avg",
+            polarity="pos",
+            window_size=0.02,
         )
 
-        assert window[2] == 'pos'
+        assert window[2] == "pos"
         assert window[0] == pytest.approx(0.09, abs=1e-6)
         assert window[1] == pytest.approx(0.11, abs=1e-6)
 
@@ -614,8 +590,11 @@ class TestSelectErpWindow:
         with a cryptic AttributeError."""
         with pytest.raises(TypeError, match="cnd_spc"):
             ERP.select_erp_window(
-                peaked_erps['cond1'], elec_oi=['Cz', 'Pz'], method='cnd_spc',
-                polarity='pos', window_size=0.02
+                peaked_erps["cond1"],
+                elec_oi=["Cz", "Pz"],
+                method="cnd_spc",
+                polarity="pos",
+                window_size=0.02,
             )
 
 
@@ -623,17 +602,18 @@ class TestSelectErpWindow:
 # jackknife_contrast / jack_latency_contrast
 # ============================================================================
 
+
 class TestLatencyAnalysisConditionNames:
     """Tests for jackknife-based latency analysis with condition names."""
 
     @pytest.mark.unit
     def test_jackknife_contrast_basic(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x1 = waveforms['absent']
-        x2 = waveforms['present']
+        x1 = waveforms["absent"]
+        x2 = waveforms["present"]
 
         lat_diff, t_val = ERP.jackknife_contrast(
-            x1, x2, times, 75, cnd1_name='absent', cnd2_name='present'
+            x1, x2, times, 75, cnd1_name="absent", cnd2_name="present"
         )
 
         assert isinstance(lat_diff, (float, np.floating))
@@ -644,19 +624,23 @@ class TestLatencyAnalysisConditionNames:
     def test_jackknife_contrast_condition_names_are_printed(self, sample_waveforms, capsys):
         waveforms, times = sample_waveforms
         ERP.jackknife_contrast(
-            waveforms['absent'], waveforms['present'], times, 75,
-            cnd1_name='distractor_absent', cnd2_name='distractor_present'
+            waveforms["absent"],
+            waveforms["present"],
+            times,
+            75,
+            cnd1_name="distractor_absent",
+            cnd2_name="distractor_present",
         )
 
         out = capsys.readouterr().out
-        assert 'distractor_absent' in out
-        assert 'distractor_present' in out
+        assert "distractor_absent" in out
+        assert "distractor_present" in out
 
     @pytest.mark.unit
     def test_jackknife_contrast_default_names(self, sample_waveforms):
         waveforms, times = sample_waveforms
         lat_diff, t_val = ERP.jackknife_contrast(
-            waveforms['absent'], waveforms['present'], times, 75
+            waveforms["absent"], waveforms["present"], times, 75
         )
 
         assert isinstance(lat_diff, (float, np.floating))
@@ -665,14 +649,13 @@ class TestLatencyAnalysisConditionNames:
     @pytest.mark.unit
     def test_jack_latency_contrast_with_names(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x1 = waveforms['absent'].mean(axis=0)
-        x2 = waveforms['present'].mean(axis=0)
+        x1 = waveforms["absent"].mean(axis=0)
+        x2 = waveforms["present"].mean(axis=0)
         c1 = np.max(x1) * 0.75
         c2 = np.max(x2) * 0.75
 
         lat_diff = ERP.jack_latency_contrast(
-            x1, x2, c1, c2, times, print_output=False,
-            cnd1_name='absent', cnd2_name='present'
+            x1, x2, c1, c2, times, print_output=False, cnd1_name="absent", cnd2_name="present"
         )
 
         assert isinstance(lat_diff, (float, np.floating))
@@ -682,6 +665,7 @@ class TestLatencyAnalysisConditionNames:
 # compare_latencies
 # ============================================================================
 
+
 class TestCompareLatencies:
     """Tests for compare_latencies (list form and dict form)."""
 
@@ -689,7 +673,7 @@ class TestCompareLatencies:
     def test_list_form_compares_two_raw_waveforms(self, sample_waveforms):
         waveforms, times = sample_waveforms
         lat_diff, t_val = ERP.compare_latencies(
-            [waveforms['absent'], waveforms['present']], times=times, percent_amp=75
+            [waveforms["absent"], waveforms["present"]], times=times, percent_amp=75
         )
 
         assert isinstance(lat_diff, (float, np.floating))
@@ -698,7 +682,7 @@ class TestCompareLatencies:
     @pytest.mark.unit
     def test_dict_form_single_pair_returns_tuple(self, peaked_erps):
         result = ERP.compare_latencies(
-            peaked_erps, elec_oi=['Cz', 'Pz'], percent_amp=50, polarity='pos'
+            peaked_erps, elec_oi=["Cz", "Pz"], percent_amp=50, polarity="pos"
         )
 
         assert isinstance(result, tuple)
@@ -706,33 +690,28 @@ class TestCompareLatencies:
 
     @pytest.mark.unit
     def test_dict_form_prints_condition_pair_and_names(self, peaked_erps, capsys):
-        ERP.compare_latencies(
-            peaked_erps, elec_oi=['Cz', 'Pz'], percent_amp=50, polarity='pos'
-        )
+        ERP.compare_latencies(peaked_erps, elec_oi=["Cz", "Pz"], percent_amp=50, polarity="pos")
 
         out = capsys.readouterr().out
-        assert 'cond1' in out
-        assert 'cond2' in out
+        assert "cond1" in out
+        assert "cond2" in out
 
     @pytest.mark.unit
     def test_dict_form_multi_condition_returns_dict_of_pairs(self, peaked_erps):
         # a 3rd condition with its own peak/noise (not a copy of cond1/cond2 --
         # identical waveforms would trigger the zero-jackknife-variance error)
         from tests.fixtures.sample_data import create_peaked_erps
-        cond3 = create_peaked_erps(
-            peak_times=(0.15, 0.15), peak_polarities=(1, 1), seed=7
-        )['cond1']
+
+        cond3 = create_peaked_erps(peak_times=(0.15, 0.15), peak_polarities=(1, 1), seed=7)["cond1"]
         three_cnd = dict(peaked_erps)
-        three_cnd['cond3'] = cond3
+        three_cnd["cond3"] = cond3
 
         result = ERP.compare_latencies(
-            three_cnd, elec_oi=['Cz', 'Pz'], percent_amp=50, polarity='pos'
+            three_cnd, elec_oi=["Cz", "Pz"], percent_amp=50, polarity="pos"
         )
 
         assert isinstance(result, dict)
-        assert set(result.keys()) == {
-            'cond1_cond2', 'cond1_cond3', 'cond2_cond3'
-        }
+        assert set(result.keys()) == {"cond1_cond2", "cond1_cond3", "cond2_cond3"}
         for pair_result in result.values():
             assert len(pair_result) == 2
 
@@ -740,6 +719,7 @@ class TestCompareLatencies:
 # ============================================================================
 # Group-level ERP analysis
 # ============================================================================
+
 
 class TestGroupERPAnalysis:
     """Tests for group-level ERP analysis methods."""
@@ -752,9 +732,7 @@ class TestGroupERPAnalysis:
         contra_channels = channels[5:8]
         ipsi_channels = channels[10:13]
 
-        contra_idx, ipsi_idx = ERP.lateralized_erp_idx(
-            erp_list, contra_channels, ipsi_channels
-        )
+        contra_idx, ipsi_idx = ERP.lateralized_erp_idx(erp_list, contra_channels, ipsi_channels)
 
         assert isinstance(contra_idx, np.ndarray)
         assert isinstance(ipsi_idx, np.ndarray)
@@ -772,9 +750,7 @@ class TestGroupERPAnalysis:
         contra_channels = [channels[0], channels[5]]
         ipsi_channels = [channels[10], channels[15]]
 
-        contra_idx, ipsi_idx = ERP.lateralized_erp_idx(
-            erp_list, contra_channels, ipsi_channels
-        )
+        contra_idx, ipsi_idx = ERP.lateralized_erp_idx(erp_list, contra_channels, ipsi_channels)
 
         assert channels[contra_idx[0]] == channels[0]
         assert channels[contra_idx[1]] == channels[5]
@@ -787,7 +763,7 @@ class TestGroupERPAnalysis:
         evoked2 = sample_epochs[50:].average()
         erp_list = [evoked1, evoked2]
 
-        evoked_X, group_evoked = ERP.group_erp(erp_list, elec_oi='all')
+        evoked_X, group_evoked = ERP.group_erp(erp_list, elec_oi="all")
 
         assert isinstance(evoked_X, np.ndarray)
         assert isinstance(group_evoked, mne.Evoked)
@@ -837,7 +813,7 @@ class TestGroupERPAnalysis:
         standard_1020 channel names skipped every run because it never
         matched the old hardcoded-biosemi64 electrode dictionary)."""
         diff, evoked_lat = ERP.group_lateralized_erp(
-            biosemi64_evoked_pair, ['O1', 'P7'], ['O2', 'P8']
+            biosemi64_evoked_pair, ["O1", "P7"], ["O2", "P8"]
         )
 
         # O1-O2 = 5-2 = 3, P7-P8 = 3-1 = 2, mean = 2.5
@@ -845,18 +821,16 @@ class TestGroupERPAnalysis:
         np.testing.assert_allclose(diff, 2.5)
 
         ch_names = evoked_lat.ch_names
-        assert evoked_lat.data[ch_names.index('O1'), 0] == pytest.approx(3.0)
-        assert evoked_lat.data[ch_names.index('O2'), 0] == pytest.approx(-3.0)
-        assert evoked_lat.data[ch_names.index('Cz'), 0] == pytest.approx(0.0)
+        assert evoked_lat.data[ch_names.index("O1"), 0] == pytest.approx(3.0)
+        assert evoked_lat.data[ch_names.index("O2"), 0] == pytest.approx(-3.0)
+        assert evoked_lat.data[ch_names.index("Cz"), 0] == pytest.approx(0.0)
 
     @pytest.mark.unit
-    def test_group_lateralized_erp_set_mean_averages_across_subjects(
-        self, biosemi64_evoked_pair
-    ):
+    def test_group_lateralized_erp_set_mean_averages_across_subjects(self, biosemi64_evoked_pair):
         """Regression test: set_mean was previously a dead parameter
         (declared and documented but never used in the function body)."""
         diff, _ = ERP.group_lateralized_erp(
-            biosemi64_evoked_pair, ['O1', 'P7'], ['O2', 'P8'], set_mean=True
+            biosemi64_evoked_pair, ["O1", "P7"], ["O2", "P8"], set_mean=True
         )
 
         assert diff.shape == (10,)  # (n_times,), averaged over subjects
@@ -868,33 +842,32 @@ class TestGroupERPAnalysis:
         convention (odd/even digit suffix), so it isn't limited to a
         hardcoded biosemi64 electrode list -- any montage with that
         left/right numbering convention works, including subsets."""
-        ch_names = ['A1', 'A2', 'B3', 'B4', 'Cz']
-        info = mne.create_info(ch_names, 100, ch_types='eeg')
+        ch_names = ["A1", "A2", "B3", "B4", "Cz"]
+        info = mne.create_info(ch_names, 100, ch_types="eeg")
         data = np.zeros((len(ch_names), 5))
         for name, val in zip(ch_names, [1, 2, 3, 4, 5]):
             data[ch_names.index(name)] = val
         erp_list = [mne.EvokedArray(data.copy(), info, tmin=-0.05) for _ in range(2)]
 
-        diff, evoked_lat = ERP.group_lateralized_erp(erp_list, ['A1', 'B3'], ['A2', 'B4'])
+        diff, evoked_lat = ERP.group_lateralized_erp(erp_list, ["A1", "B3"], ["A2", "B4"])
 
         # (1-2) and (3-4), mean = -1
         np.testing.assert_allclose(diff, -1.0)
-        assert evoked_lat.data[ch_names.index('A1'), 0] == pytest.approx(-1.0)
-        assert evoked_lat.data[ch_names.index('A2'), 0] == pytest.approx(1.0)
-        assert evoked_lat.data[ch_names.index('Cz'), 0] == pytest.approx(0.0)
+        assert evoked_lat.data[ch_names.index("A1"), 0] == pytest.approx(-1.0)
+        assert evoked_lat.data[ch_names.index("A2"), 0] == pytest.approx(1.0)
+        assert evoked_lat.data[ch_names.index("Cz"), 0] == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_group_lateralized_erp_accepts_custom_flip_dict(self, biosemi64_evoked_pair):
         """An explicit flip_dict overrides the auto-generated pairing."""
         diff, evoked_lat = ERP.group_lateralized_erp(
-            biosemi64_evoked_pair, ['O1', 'P7'], ['O2', 'P8'],
-            flip_dict={'O1': 'O2'}
+            biosemi64_evoked_pair, ["O1", "P7"], ["O2", "P8"], flip_dict={"O1": "O2"}
         )
 
         ch_names = evoked_lat.ch_names
-        assert evoked_lat.data[ch_names.index('O1'), 0] == pytest.approx(3.0)
+        assert evoked_lat.data[ch_names.index("O1"), 0] == pytest.approx(3.0)
         # P7/P8 untouched since they weren't in the custom flip_dict
-        assert evoked_lat.data[ch_names.index('P7'), 0] == pytest.approx(3.0)
+        assert evoked_lat.data[ch_names.index("P7"), 0] == pytest.approx(3.0)
 
 
 class TestSelectWaveformVariations:
@@ -931,7 +904,7 @@ class TestGetERPParams:
     def test_get_erp_params_dict_input_with_evoked(self, sample_epochs):
         erp1 = sample_epochs[:50].average()
         erp2 = sample_epochs[50:].average()
-        erp_dict = {'condition1': [erp1], 'condition2': [erp2]}
+        erp_dict = {"condition1": [erp1], "condition2": [erp2]}
 
         result = ERP.get_erp_params(erp_dict)
 
@@ -943,6 +916,7 @@ class TestGetERPParams:
 # export_erp_metrics_to_csv
 # ============================================================================
 
+
 class TestExportErpMetricsToCsv:
     """Tests for export_erp_metrics_to_csv output."""
 
@@ -951,15 +925,18 @@ class TestExportErpMetricsToCsv:
         monkeypatch.chdir(tmp_path)
 
         ERP.export_erp_metrics_to_csv(
-            peaked_erps, window_oi=[0.05, 0.15], elec_oi=['Cz', 'Pz'],
-            method='mean_amp', name='probe_metrics'
+            peaked_erps,
+            window_oi=[0.05, 0.15],
+            elec_oi=["Cz", "Pz"],
+            method="mean_amp",
+            name="probe_metrics",
         )
 
-        path = tmp_path / 'erp' / 'stats' / 'probe_metrics.csv'
+        path = tmp_path / "erp" / "stats" / "probe_metrics.csv"
         assert path.is_file()
 
         df = pd.read_csv(path)
-        assert list(df.columns) == ['cond1', 'cond2']
+        assert list(df.columns) == ["cond1", "cond2"]
         assert len(df) == 5  # n_subjects in the peaked_erps fixture
 
     @pytest.mark.unit
@@ -969,29 +946,34 @@ class TestExportErpMetricsToCsv:
         monkeypatch.chdir(tmp_path)
 
         ERP.export_erp_metrics_to_csv(
-            peaked_erps, window_oi=[0.05, 0.15], elec_oi=[['Cz'], ['Pz']],
-            method='mean_amp', name='probe_metrics_lat'
+            peaked_erps,
+            window_oi=[0.05, 0.15],
+            elec_oi=[["Cz"], ["Pz"]],
+            method="mean_amp",
+            name="probe_metrics_lat",
         )
 
-        path = tmp_path / 'erp' / 'stats' / 'probe_metrics_lat.csv'
+        path = tmp_path / "erp" / "stats" / "probe_metrics_lat.csv"
         df = pd.read_csv(path)
         assert list(df.columns) == [
-            'cond1_contra', 'cond1_ipsi', 'cond1_diff',
-            'cond2_contra', 'cond2_ipsi', 'cond2_diff',
+            "cond1_contra",
+            "cond1_ipsi",
+            "cond1_diff",
+            "cond2_contra",
+            "cond2_ipsi",
+            "cond2_diff",
         ]
 
     @pytest.mark.unit
     def test_rejects_invalid_erps_type(self):
         with pytest.raises(ValueError, match="erps must be"):
-            ERP.export_erp_metrics_to_csv(
-                "not-a-dict-or-list", window_oi=[0, 1], elec_oi=['Cz']
-            )
+            ERP.export_erp_metrics_to_csv("not-a-dict-or-list", window_oi=[0, 1], elec_oi=["Cz"])
 
     @pytest.mark.unit
     def test_rejects_invalid_window_oi_type(self, peaked_erps):
         with pytest.raises(ValueError, match="window_oi must be"):
             ERP.export_erp_metrics_to_csv(
-                peaked_erps, window_oi="not-a-list-or-dict", elec_oi=['Cz', 'Pz']
+                peaked_erps, window_oi="not-a-list-or-dict", elec_oi=["Cz", "Pz"]
             )
 
 
@@ -999,13 +981,12 @@ class TestExportErpMetricsToCsv:
 # residual_eye
 # ============================================================================
 
+
 class TestResidualEye:
     """Tests for residual_eye HEOG computation."""
 
     @pytest.mark.unit
-    def test_computes_documented_residual_formula(
-        self, residual_eye_data, tmp_path, monkeypatch
-    ):
+    def test_computes_documented_residual_formula(self, residual_eye_data, tmp_path, monkeypatch):
         """residual = mean(mean(left HEOG), -mean(right HEOG)), per the
         method's own docstring, using the default heog_right_positive=True
         (i.e. no sign correction applied)."""
@@ -1014,19 +995,22 @@ class TestResidualEye:
 
         erp = ERP(sj=1, epochs=epochs, df=trial_info, baseline=(-0.1, 0))
         erp.residual_eye(
-            left_info={'target_loc': [1]}, right_info={'target_loc': [2]},
-            ch_oi=['HEOG'], f_name='probe_resid'
+            left_info={"target_loc": [1]},
+            right_info={"target_loc": [2]},
+            ch_oi=["HEOG"],
+            f_name="probe_resid",
         )
 
-        path = tmp_path / 'erp' / 'eog' / 'sub_01_probe_resid.p'
+        path = tmp_path / "erp" / "eog" / "sub_01_probe_resid.p"
         assert path.is_file()
 
         import pickle
-        with open(path, 'rb') as f:
+
+        with open(path, "rb") as f:
             result = pickle.load(f)
 
-        assert set(result.keys()) == {'all_data'}
-        np.testing.assert_allclose(result['all_data'], expected)
+        assert set(result.keys()) == {"all_data"}
+        np.testing.assert_allclose(result["all_data"], expected)
 
     @pytest.mark.unit
     def test_heog_right_positive_false_flips_result_sign(
@@ -1041,22 +1025,26 @@ class TestResidualEye:
 
         erp = ERP(sj=1, epochs=epochs, df=trial_info, baseline=(-0.1, 0))
         erp.residual_eye(
-            left_info={'target_loc': [1]}, right_info={'target_loc': [2]},
-            ch_oi=['HEOG'], f_name='probe_resid_flipped',
-            heog_right_positive=False
+            left_info={"target_loc": [1]},
+            right_info={"target_loc": [2]},
+            ch_oi=["HEOG"],
+            f_name="probe_resid_flipped",
+            heog_right_positive=False,
         )
 
-        path = tmp_path / 'erp' / 'eog' / 'sub_01_probe_resid_flipped.p'
+        path = tmp_path / "erp" / "eog" / "sub_01_probe_resid_flipped.p"
         import pickle
-        with open(path, 'rb') as f:
+
+        with open(path, "rb") as f:
             result = pickle.load(f)
 
-        np.testing.assert_allclose(result['all_data'], -expected)
+        np.testing.assert_allclose(result["all_data"], -expected)
 
 
 # ============================================================================
 # generate_erp_report
 # ============================================================================
+
 
 class TestGenerateErpReport:
     """Smoke test for HTML report generation."""
@@ -1066,18 +1054,22 @@ class TestGenerateErpReport:
         monkeypatch.chdir(tmp_path)
         evoked = sample_epochs.average()
         erp = ERP(
-            sj=1, epochs=sample_epochs, df=pd.DataFrame({'x': range(len(sample_epochs))}),
-            baseline=(None, 0), report=True
+            sj=1,
+            epochs=sample_epochs,
+            df=pd.DataFrame({"x": range(len(sample_epochs))}),
+            baseline=(None, 0),
+            report=True,
         )
 
-        erp.generate_erp_report({'all_data': evoked}, 'probe_report')
+        erp.generate_erp_report({"all_data": evoked}, "probe_report")
 
-        assert (tmp_path / 'erp' / 'report' / 'probe_report.html').is_file()
+        assert (tmp_path / "erp" / "report" / "probe_report.html").is_file()
 
 
 # ============================================================================
 # ERP component analysis (realistic scenarios)
 # ============================================================================
+
 
 class TestERPComponentAnalysis:
     """Tests for realistic ERP component analysis scenarios."""
@@ -1088,10 +1080,10 @@ class TestERPComponentAnalysis:
         n_trials = 30
         x = np.random.randn(n_trials, len(times)) * 0.5
         peak_idx = 200
-        x[:, peak_idx - 20:peak_idx + 20] = -3
+        x[:, peak_idx - 20 : peak_idx + 20] = -3
 
-        mean_amp = ERP.extract_erp_features(x, times, method='mean_amp')
-        auc_neg = ERP.extract_erp_features(x, times, method='auc_neg')
+        mean_amp = ERP.extract_erp_features(x, times, method="mean_amp")
+        auc_neg = ERP.extract_erp_features(x, times, method="auc_neg")
 
         assert np.mean(mean_amp) < 0
         assert np.mean(auc_neg) < 0
@@ -1102,10 +1094,10 @@ class TestERPComponentAnalysis:
         n_trials = 20
         x = np.random.randn(n_trials, len(times)) * 0.5
         peak_idx = 300
-        x[:, peak_idx - 40:peak_idx + 40] = 5
+        x[:, peak_idx - 40 : peak_idx + 40] = 5
 
-        mean_amp = ERP.extract_erp_features(x, times, method='mean_amp')
-        auc_pos = ERP.extract_erp_features(x, times, method='auc_pos')
+        mean_amp = ERP.extract_erp_features(x, times, method="mean_amp")
+        auc_pos = ERP.extract_erp_features(x, times, method="auc_pos")
 
         assert np.mean(mean_amp) > 0
         assert np.mean(auc_pos) > 0
@@ -1117,15 +1109,14 @@ class TestERPComponentAnalysis:
         features = {}
         for condition, waveform in waveforms.items():
             features[condition] = {
-                'mean_amp': ERP.extract_erp_features(waveform, times, method='mean_amp'),
-                'auc': ERP.extract_erp_features(waveform, times, method='auc'),
+                "mean_amp": ERP.extract_erp_features(waveform, times, method="mean_amp"),
+                "auc": ERP.extract_erp_features(waveform, times, method="auc"),
             }
 
-        assert 'absent' in features
-        assert 'present' in features
-        mean_diff = (
-            np.mean(features['absent']['mean_amp'])
-            - np.mean(features['present']['mean_amp'])
+        assert "absent" in features
+        assert "present" in features
+        mean_diff = np.mean(features["absent"]["mean_amp"]) - np.mean(
+            features["present"]["mean_amp"]
         )
         assert isinstance(mean_diff, (float, np.floating))
 
@@ -1136,44 +1127,39 @@ class TestWaveformAnalysisCombinations:
     @pytest.mark.unit
     def test_multi_condition_feature_comparison(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        conditions = {'absent': waveforms['absent'], 'present': waveforms['present']}
+        conditions = {"absent": waveforms["absent"], "present": waveforms["present"]}
 
         features = {}
         for cond_name, waveform in conditions.items():
             features[cond_name] = {
-                'mean_amp': np.mean(
-                    ERP.extract_erp_features(waveform, times, method='mean_amp')
-                ),
-                'auc': np.mean(
-                    ERP.extract_erp_features(waveform, times, method='auc')
-                ),
+                "mean_amp": np.mean(ERP.extract_erp_features(waveform, times, method="mean_amp")),
+                "auc": np.mean(ERP.extract_erp_features(waveform, times, method="auc")),
             }
 
-        amp_diff = features['absent']['mean_amp'] - features['present']['mean_amp']
+        amp_diff = features["absent"]["mean_amp"] - features["present"]["mean_amp"]
         assert isinstance(amp_diff, (float, np.floating))
 
     @pytest.mark.unit
     def test_individual_subject_erp_pipeline(self, sample_waveforms):
         waveforms, times = sample_waveforms
         subject_erps = {}
-        for cond in ['absent', 'present']:
+        for cond in ["absent", "present"]:
             waveform = waveforms[cond]
             subject_erps[cond] = {
-                'mean_amplitude': np.mean(
-                    ERP.extract_erp_features(waveform, times, method='mean_amp')
+                "mean_amplitude": np.mean(
+                    ERP.extract_erp_features(waveform, times, method="mean_amp")
                 ),
-                'latency': np.mean(
+                "latency": np.mean(
                     ERP.extract_erp_features(
-                        waveform, times, method='onset_latency', polarity='neg'
+                        waveform, times, method="onset_latency", polarity="neg"
                     )
                 ),
-                'auc': np.mean(ERP.extract_erp_features(waveform, times, method='auc')),
+                "auc": np.mean(ERP.extract_erp_features(waveform, times, method="auc")),
             }
 
         for cond in subject_erps:
             assert all(
-                metric in subject_erps[cond]
-                for metric in ['mean_amplitude', 'latency', 'auc']
+                metric in subject_erps[cond] for metric in ["mean_amplitude", "latency", "auc"]
             )
 
 
@@ -1181,18 +1167,21 @@ class TestWaveformAnalysisCombinations:
 # Edge cases and error handling
 # ============================================================================
 
+
 class TestEdgeCases:
     """Tests for edge cases and error conditions."""
 
     @pytest.mark.unit
     def test_select_lateralization_idx_empty_trial_info(self):
-        empty_trial_info = pd.DataFrame({
-            'trial': [], 'dist1_loc': [], 'dist2_loc': [],
-        })
-
-        idx = ERP.select_lateralization_idx(
-            empty_trial_info, pos_labels={'dist1_loc': [0]}
+        empty_trial_info = pd.DataFrame(
+            {
+                "trial": [],
+                "dist1_loc": [],
+                "dist2_loc": [],
+            }
         )
+
+        idx = ERP.select_lateralization_idx(empty_trial_info, pos_labels={"dist1_loc": [0]})
 
         assert len(idx) == 0
 
@@ -1220,6 +1209,7 @@ class TestEdgeCases:
 # Regression tests
 # ============================================================================
 
+
 class TestRegressions:
     """Regression tests to ensure fixes don't break existing functionality."""
 
@@ -1227,9 +1217,7 @@ class TestRegressions:
     def test_single_key_restriction_unchanged(self):
         data, trial_info = create_lateralization_test_data()
 
-        idx = ERP.select_lateralization_idx(
-            trial_info, pos_labels={'dist1_loc': [0]}
-        )
+        idx = ERP.select_lateralization_idx(trial_info, pos_labels={"dist1_loc": [0]})
 
         assert len(idx) == 4
         np.testing.assert_array_equal(idx, [0, 1, 2, 3])
@@ -1238,7 +1226,7 @@ class TestRegressions:
     def test_latency_analysis_returns_correct_types(self, sample_waveforms):
         waveforms, times = sample_waveforms
         lat_diff, t_val = ERP.jackknife_contrast(
-            waveforms['absent'], waveforms['present'], times, 75
+            waveforms["absent"], waveforms["present"], times, 75
         )
 
         assert isinstance(lat_diff, (float, np.floating))
@@ -1249,16 +1237,17 @@ class TestRegressions:
 # Data validation and error handling
 # ============================================================================
 
+
 class TestERPDataValidation:
     """Tests for data validation and error handling in ERP methods."""
 
     @pytest.mark.unit
     def test_extract_features_invalid_method_raises(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
 
         with pytest.raises(ValueError, match="Unknown method"):
-            ERP.extract_erp_features(x, times, method='invalid_method')
+            ERP.extract_erp_features(x, times, method="invalid_method")
 
     @pytest.mark.unit
     def test_mean_amp_ignores_times_array_entirely(self, sample_waveforms):
@@ -1266,28 +1255,28 @@ class TestERPDataValidation:
         silently accepted -- this documents that behavior rather than
         pretending it errors."""
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
         wrong_times = np.linspace(0, 0.2, 50)
 
-        result = ERP.extract_erp_features(x, wrong_times, method='mean_amp')
+        result = ERP.extract_erp_features(x, wrong_times, method="mean_amp")
 
         assert result.shape == (20,)
 
     @pytest.mark.unit
     def test_auc_raises_on_mismatched_times_length(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
         wrong_times = np.linspace(0, 0.2, 50)
 
         with pytest.raises(ValueError, match="inconsistent numbers of samples"):
-            ERP.extract_erp_features(x, wrong_times, method='auc')
+            ERP.extract_erp_features(x, wrong_times, method="auc")
 
     @pytest.mark.unit
     def test_mean_amplitude_valid_output_range(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x = waveforms['absent']
+        x = waveforms["absent"]
 
-        result = ERP.extract_erp_features(x, times, method='mean_amp')
+        result = ERP.extract_erp_features(x, times, method="mean_amp")
 
         assert np.all(result > -100)
         assert np.all(result < 100)
@@ -1297,10 +1286,10 @@ class TestERPDataValidation:
         times = np.linspace(0, 0.4, 100)
         x = np.random.randn(5, len(times))
         peak_idx = 50
-        x[:, peak_idx - 5:peak_idx + 5] = 5
+        x[:, peak_idx - 5 : peak_idx + 5] = 5
 
         result = ERP.extract_erp_features(
-            x, times, method='onset_latency', threshold=0.5, polarity='pos'
+            x, times, method="onset_latency", threshold=0.5, polarity="pos"
         )
 
         assert np.all(result >= times.min())
@@ -1311,6 +1300,7 @@ class TestERPDataValidation:
 # Jackknife statistical properties
 # ============================================================================
 
+
 class TestStatisticalComparisons:
     """Tests for statistical properties of jackknife_contrast."""
 
@@ -1318,7 +1308,7 @@ class TestStatisticalComparisons:
     def test_jackknife_contrast_produces_t_value(self, sample_waveforms):
         waveforms, times = sample_waveforms
         lat_diff, t_val = ERP.jackknife_contrast(
-            waveforms['absent'], waveforms['present'], times, 75
+            waveforms["absent"], waveforms["present"], times, 75
         )
 
         assert np.isfinite(t_val)
@@ -1327,8 +1317,8 @@ class TestStatisticalComparisons:
     @pytest.mark.unit
     def test_jackknife_variance_estimation(self, sample_waveforms):
         waveforms, times = sample_waveforms
-        x1 = waveforms['absent']
-        x2 = waveforms['present'] + 0.01
+        x1 = waveforms["absent"]
+        x2 = waveforms["present"] + 0.01
 
         lat_diff, t_val = ERP.jackknife_contrast(x1, x2, times, 75)
 
@@ -1338,6 +1328,7 @@ class TestStatisticalComparisons:
 # ============================================================================
 # Advanced validation and errors
 # ============================================================================
+
 
 class TestERPValidationAndErrors:
     """Tests for validation and error handling in statistical methods."""
@@ -1358,7 +1349,7 @@ class TestERPValidationAndErrors:
         times = np.linspace(0, 0.4, 100)
         x = np.zeros((5, len(times)))
 
-        mean_amp = ERP.extract_erp_features(x, times, method='mean_amp')
+        mean_amp = ERP.extract_erp_features(x, times, method="mean_amp")
 
         np.testing.assert_array_almost_equal(mean_amp, np.zeros(5))
 
@@ -1367,7 +1358,7 @@ class TestERPValidationAndErrors:
         times = np.linspace(0, 0.4, 100)
         x = np.ones((5, len(times))) * 5
 
-        mean_amp = ERP.extract_erp_features(x, times, method='mean_amp')
+        mean_amp = ERP.extract_erp_features(x, times, method="mean_amp")
 
         np.testing.assert_array_almost_equal(mean_amp, np.ones(5) * 5)
 
@@ -1377,8 +1368,8 @@ class TestERPValidationAndErrors:
         x_pos = np.ones((1, len(times))) * 5
         x_neg = np.ones((1, len(times))) * -5
 
-        auc_pos = ERP.extract_erp_features(x_pos, times, method='auc_pos')[0]
-        auc_neg = ERP.extract_erp_features(x_neg, times, method='auc_neg')[0]
+        auc_pos = ERP.extract_erp_features(x_pos, times, method="auc_pos")[0]
+        auc_neg = ERP.extract_erp_features(x_neg, times, method="auc_neg")[0]
 
         assert abs(abs(auc_pos) - abs(auc_neg)) < 0.1
 
@@ -1391,7 +1382,7 @@ class TestERPDataInjectionAndValidation:
         times = np.linspace(0, 0.4, 100)
         x = np.random.randn(20, len(times)) * 5
 
-        result = ERP.extract_erp_features(x, times, method='mean_amp')
+        result = ERP.extract_erp_features(x, times, method="mean_amp")
 
         assert result is not None
         assert len(result) == 20
@@ -1401,11 +1392,11 @@ class TestERPDataInjectionAndValidation:
         times = np.linspace(0, 0.4, 100)
         x_small = np.random.randn(1, len(times))
 
-        result = ERP.extract_erp_features(x_small, times, method='mean_amp')
+        result = ERP.extract_erp_features(x_small, times, method="mean_amp")
 
         assert result is not None
         assert len(result) == 1
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

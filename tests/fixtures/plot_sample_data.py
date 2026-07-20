@@ -2,13 +2,13 @@
 Sample data fixtures for testing open_dvm.visualization.plot functionality.
 """
 
-import numpy as np
 import mne
+import numpy as np
 
 
 def make_condition_evokeds(
     amplitudes: dict,
-    ch_names=('C3', 'C5', 'C4', 'C6'),
+    ch_names=("C3", "C5", "C4", "C6"),
     n_subjects: int = 5,
     sfreq: float = 200,
     tmin: float = -0.1,
@@ -29,7 +29,7 @@ def make_condition_evokeds(
         to 0.
     """
     rng = np.random.default_rng(seed)
-    info = mne.create_info(list(ch_names), sfreq, ch_types='eeg')
+    info = mne.create_info(list(ch_names), sfreq, ch_types="eeg")
     evokeds = []
     for _ in range(n_subjects):
         data = np.zeros((len(ch_names), n_samples))
@@ -40,7 +40,7 @@ def make_condition_evokeds(
 
 
 def make_average_tfr(
-    ch_names=('C3', 'C4'),
+    ch_names=("C3", "C4"),
     freqs=None,
     amplitude_by_channel: dict = None,
     sfreq: float = 100,
@@ -55,7 +55,7 @@ def make_average_tfr(
     if freqs is None:
         freqs = np.linspace(4, 30, 8)
     ch_names = list(ch_names)
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
     times = tmin + np.arange(n_samples) / sfreq
     data = np.zeros((len(ch_names), len(freqs), n_samples))
     if amplitude_by_channel:
@@ -71,7 +71,7 @@ def make_bdm_result(
     times: np.ndarray,
     test_times: np.ndarray = None,
     freqs=None,
-    cnd: str = 'A',
+    cnd: str = "A",
     n_subjects: int = 5,
     noise_sd: float = 0.02,
     seed: int = 0,
@@ -82,16 +82,16 @@ def make_bdm_result(
     base dec_scores array.
     """
     rng = np.random.default_rng(seed)
-    info = {'times': times}
+    info = {"times": times}
     if test_times is not None:
-        info['test_times'] = test_times
+        info["test_times"] = test_times
     if freqs is not None:
-        info['freqs'] = freqs
+        info["freqs"] = freqs
 
     bdms = []
     for _ in range(n_subjects):
         scores = dec_scores + rng.normal(0, noise_sd, dec_scores.shape)
-        bdms.append({cnd: {'dec_scores': scores}, 'info': dict(info)})
+        bdms.append({cnd: {"dec_scores": scores}, "info": dict(info)})
     return bdms
 
 
@@ -99,7 +99,7 @@ def make_ctf_result(
     raw_slopes: np.ndarray,
     times: np.ndarray,
     bands,
-    cnd: str = 'A',
+    cnd: str = "A",
     n_subjects: int = 5,
     noise_sd: float = 0.02,
     seed: int = 0,
@@ -115,8 +115,10 @@ def make_ctf_result(
     ctfs = []
     for _ in range(n_subjects):
         slopes = raw_slopes + rng.normal(0, noise_sd, raw_slopes.shape)
-        ctfs.append({
-            cnd: {'raw_slopes': slopes},
-            'info': {'times': times, 'bands': bands},
-        })
+        ctfs.append(
+            {
+                cnd: {"raw_slopes": slopes},
+                "info": {"times": times, "bands": bands},
+            }
+        )
     return ctfs

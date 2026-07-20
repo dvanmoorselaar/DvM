@@ -1,15 +1,15 @@
 """
 open_dvm: Open source EEG analysis toolbox for cognitive neuroscience.
 
-A comprehensive Python package for EEG, eye-tracking, and behavioral 
+A comprehensive Python package for EEG, eye-tracking, and behavioral
 data analysis built on top of MNE-Python. Includes preprocessing,
-ERP analysis, time-frequency decomposition, multivariate decoding, 
+ERP analysis, time-frequency decomposition, multivariate decoding,
 spatial encoding models, and eye-trackingintegration.
 
 Main Modules
 ------------
 analysis : Core EEG analysis classes and preprocessing
-    RAW, Epochs, ERP, TFR, BDM, CTF, EYE classes and preprocessing 
+    RAW, Epochs, ERP, TFR, BDM, CTF, EYE classes and preprocessing
     pipeline
 
 visualization : Publication-quality plotting utilities
@@ -55,26 +55,26 @@ __author__ = "Dirk van Moorselaar"
 
 # Expose main analysis classes for convenience imports
 try:
-    from open_dvm.analysis.EEG import RAW, Epochs, ArtefactReject
-    from open_dvm.analysis.ERP import ERP
-    from open_dvm.analysis.TFR import TFR
     from open_dvm.analysis.BDM import BDM
     from open_dvm.analysis.CTF import CTF
+    from open_dvm.analysis.EEG import RAW, ArtefactReject, Epochs
+    from open_dvm.analysis.ERP import ERP
     from open_dvm.analysis.EYE import EYE, SaccadeDetector
     from open_dvm.analysis.preprocessing_pipeline import eeg_preprocessing_pipeline
+    from open_dvm.analysis.TFR import TFR
 except ImportError:
     # Allow importing module even if submodules have import errors during development
     pass
 
 __all__ = [
-    'RAW',
-    'Epochs', 
-    'ArtefactReject',
-    'ERP',
-    'TFR',
-    'BDM',
-    'CTF',
-    'EYE',
-    'SaccadeDetector',
-    'eeg_preprocessing_pipeline',
+    "RAW",
+    "Epochs",
+    "ArtefactReject",
+    "ERP",
+    "TFR",
+    "BDM",
+    "CTF",
+    "EYE",
+    "SaccadeDetector",
+    "eeg_preprocessing_pipeline",
 ]

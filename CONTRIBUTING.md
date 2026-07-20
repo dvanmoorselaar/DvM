@@ -33,7 +33,14 @@ coverage report --show-missing
 
 ## Code Style
 
-`black`, `isort`, `flake8`, and `mypy` configs are already present in `pyproject.toml` for anyone who wants to use them locally. **They are not currently enforced in CI** -- the existing codebase has substantial pre-existing formatting differences from `black`'s defaults (notably tab-based indentation throughout), so a strict style gate isn't in place yet. When touching a file, prefer matching its existing surrounding style over introducing a mix of tabs and spaces or unrelated reformatting in the same diff.
+The codebase is formatted with `black` and `isort` (configs in `pyproject.toml`):
+
+```bash
+black open_dvm tests
+isort open_dvm tests
+```
+
+`flake8` and `mypy` configs are also present for anyone who wants to use them locally, but aren't enforced yet -- there's a real backlog of `mypy` type errors and non-formatting `flake8` issues that hasn't been triaged. **`black`/`isort` are not currently enforced in CI either** (only the test suite runs), so please run them locally before opening a PR rather than relying on CI to catch drift.
 
 For file and folder naming conventions (raw/processed data layout, subject/session naming, etc.), see [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md).
 

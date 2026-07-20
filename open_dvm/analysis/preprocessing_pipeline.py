@@ -6,9 +6,9 @@ analysis in the DvM toolbox. The pipeline implements a comprehensive
 workflow from raw BDF files to cleaned, epoched data ready for analysis,
 following best practices in EEG preprocessing.
 
-The preprocessing pipeline integrates multiple processing steps 
-including filtering, epoching, behavioral data alignment, eye-tracking 
-integration,ICA-based artefact removal, and automatic bad epoch 
+The preprocessing pipeline integrates multiple processing steps
+including filtering, epoching, behavioral data alignment, eye-tracking
+integration,ICA-based artefact removal, and automatic bad epoch
 detection. All stepsare documented in an HTML quality control report.
 
 Key Features
@@ -27,9 +27,9 @@ Key Features
 
 Typical Usage
 -------------
-The main function `eeg_preprocessing_pipeline()` is designed to be 
-called in a loop across subjects and sessions. Users define 
-preprocessing parameters once and apply them consistently across the 
+The main function `eeg_preprocessing_pipeline()` is designed to be
+called in a loop across subjects and sessions. Users define
+preprocessing parameters once and apply them consistently across the
 entire dataset.
 
 Created by Dirk van Moorselaar on 8-12-2021.
@@ -41,10 +41,11 @@ from typing import Optional
 from open_dvm.analysis.EEG import *
 from open_dvm.support.FolderStructure import FolderStructure as FS
 from open_dvm.support.preprocessing_utils import (
-    log_preproc,
-    format_subject_id,
     find_raw_files,
+    format_subject_id,
+    log_preproc,
 )
+
 
 def eeg_preprocessing_pipeline(
     sj: int,
@@ -61,15 +62,15 @@ def eeg_preprocessing_pipeline(
     sj_info: dict,
     eye_info: dict,
     beh_oi: list[str],
-    trigger_header: str = 'trigger',
+    trigger_header: str = "trigger",
     flt_pad: float = 0.5,
     binary: int = 0,
-    preproc_name: str = 'main',
+    preproc_name: str = "main",
     nr_sjs: int = 24,
-    excl_factor: Optional[dict] = None
+    excl_factor: Optional[dict] = None,
 ) -> None:
     """
-    Preprocess EEG data with optional ICA and automatic artefact 
+    Preprocess EEG data with optional ICA and automatic artefact
     rejection.
 
     This function performs a complete preprocessing pipeline including:
@@ -164,7 +165,7 @@ def eeg_preprocessing_pipeline(
     Returns
     -------
     None
-        Saves preprocessed epochs to disk, generates HTML report, and 
+        Saves preprocessed epochs to disk, generates HTML report, and
         logs preprocessing statistics to a group-level CSV file.
 
     Notes
@@ -219,7 +220,7 @@ def eeg_preprocessing_pipeline(
     ...     '2': {'bad_chs': ['C4', 'CP2']},
     ...     '3': {'bad_chs': ['P3', 'P7']}
     ... }
-    >>> 
+    >>>
     >>> # Set preprocessing parameters
     >>> preproc_param = {
     ...     'high_pass': 0.01,
@@ -227,20 +228,20 @@ def eeg_preprocessing_pipeline(
     ...     'run_autoreject': True,
     ...     'notch': True
     ... }
-    >>> 
+    >>>
     >>> # Define electrode configuration
     >>> eog = ['V_up', 'V_do', 'H_r', 'H_l']
     >>> ref = ['Ref_r', 'Ref_l']
-    >>> 
+    >>>
     >>> # Set epoching parameters
     >>> event_id = list(range(1, 250))
     >>> t_min, t_max = -0.2, 0.5
     >>> flt_pad = 0.5
-    >>> 
+    >>>
     >>> # Define behavioral columns to include
     >>> beh_oi = ['nr_trials', 'display_trigger', 'RT', 'correct',
     ...           'block_type', 'target_loc', 'dist_loc']
-    >>> 
+    >>>
     >>> # Eye-tracking configuration
     >>> eye_info = {
     ...     'tracker_ext': 'asc',
@@ -254,7 +255,7 @@ def eeg_preprocessing_pipeline(
     ...     'screen_h': 29,
     ...     'eog': eog
     ... }
-    >>> 
+    >>>
     >>> # Preprocess all subjects
     >>> for sj in [1, 2, 3]:
     ...     eeg_preprocessing_pipeline(
@@ -281,136 +282,163 @@ def eeg_preprocessing_pipeline(
     if str(sj) in sj_info.keys():
         sj_info = sj_info[str(sj)]
     else:
-        sj_info = {'bad_chs': []}
+        sj_info = {"bad_chs": []}
 
     # initiate report with zero-padded subject and session IDs
     sj_fmt = format_subject_id(sj)
     ses_fmt = format_subject_id(session)
-    report_name = f'sj_{sj_fmt}_ses_{ses_fmt}.html'
-    report_file = FS.folder_tracker(ext=['preprocessing', 'report', 
-                                    preproc_name], 
-                                    fname=report_name)
-    report = mne.Report(title='preprocessing overview', 
-                        subject = f'{sj}_{session}')
+    report_name = f"sj_{sj_fmt}_ses_{ses_fmt}.html"
+    report_file = FS.folder_tracker(
+        ext=["preprocessing", "report", preproc_name], fname=report_name
+    )
+    report = mne.Report(title="preprocessing overview", subject=f"{sj}_{session}")
 
-    # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME 
-    base_folder = FS.folder_tracker(ext=['eeg', 'raw'], fname='')
-    
+    # READ IN RAW DATA, APPLY REREFERENCING AND CHANGE NAMING SCHEME
+    base_folder = FS.folder_tracker(ext=["eeg", "raw"], fname="")
+
     raw_files = []
     for run in eeg_runs:
-        files = find_raw_files(base_folder, sj, session, run, ext='bdf')
+        files = find_raw_files(base_folder, sj, session, run, ext="bdf")
         if not files:
-            run_str = f' (run {run})' if len(eeg_runs) > 1 else ''
+            run_str = f" (run {run})" if len(eeg_runs) > 1 else ""
             raise FileNotFoundError(
                 f"No BDF file found for subject {sj}, session {session}{run_str}\n"
                 f"Searched in: {base_folder}\n"
                 f"Expected file pattern: sub_*_ses_*.bdf or sub_*_ses_*_run_*.bdf"
             )
         raw_files.append(files[0])
-    
-    EEG = mne.concatenate_raws([
-        RAW(fpath, eog=eog) for fpath in raw_files
-    ])
-            
-    EEG.info['bads'] = sj_info['bad_chs'] if type(sj_info['bad_chs']) \
-                    == list else sj_info['bad_chs'][f'session_{session}']
 
-    #EEG.replace_channel(replace)
-    to_remove = sj_info['ch_remove'] if 'ch_remove' \
-                in sj_info.keys() else ['EXG7','EXG8']
-    EEG.rereference(ref_channels=ref, change_voltage=False, 
-                    to_remove = to_remove)
+    EEG = mne.concatenate_raws([RAW(fpath, eog=eog) for fpath in raw_files])
+
+    EEG.info["bads"] = (
+        sj_info["bad_chs"]
+        if type(sj_info["bad_chs"]) == list
+        else sj_info["bad_chs"][f"session_{session}"]
+    )
+
+    # EEG.replace_channel(replace)
+    to_remove = sj_info["ch_remove"] if "ch_remove" in sj_info.keys() else ["EXG7", "EXG8"]
+    EEG.rereference(ref_channels=ref, change_voltage=False, to_remove=to_remove)
 
     EEG.configure_montage(montage=montage)
 
     # get epoch triggers
-    events = EEG.select_events(event_id=event_id, binary=binary, 
-                               min_duration=0)
+    events = EEG.select_events(event_id=event_id, binary=binary, min_duration=0)
 
-    #FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
-    if preproc_param['run_ica']:
-        EEG_ica = EEG.copy().filter(l_freq=1., h_freq=None)
-        if preproc_param['notch']:
-            freqs = [i for i in [50,100,150] if i < EEG.info['sfreq'] / 2]
-            EEG_ica.notch_filter(freqs=freqs, 
-                 method='fir', phase='zero')
+    # FILTER DATA TWICE: ONCE FOR ICA AND ONCE FOR EPOCHING
+    if preproc_param["run_ica"]:
+        EEG_ica = EEG.copy().filter(l_freq=1.0, h_freq=None)
+        if preproc_param["notch"]:
+            freqs = [i for i in [50, 100, 150] if i < EEG.info["sfreq"] / 2]
+            EEG_ica.notch_filter(freqs=freqs, method="fir", phase="zero")
 
-    if preproc_param['high_pass']:                         
-        EEG.filter(h_freq=None, l_freq=preproc_param['high_pass'], 
-                   fir_design='firwin',
-                    skip_by_annotation='edge')
-        
+    if preproc_param["high_pass"]:
+        EEG.filter(
+            h_freq=None,
+            l_freq=preproc_param["high_pass"],
+            fir_design="firwin",
+            skip_by_annotation="edge",
+        )
+
     # report raw
     report = EEG.report_raw(report, events, event_id)
     report.save(report_file, overwrite=True, open_browser=False)
 
-    if preproc_param['notch']:
-        freqs = [i for i in [50,100,150] if i < EEG.info['sfreq'] / 2]
-        EEG.notch_filter(freqs=freqs, 
-                 method='fir', phase='zero')
+    if preproc_param["notch"]:
+        freqs = [i for i in [50, 100, 150] if i < EEG.info["sfreq"] / 2]
+        EEG.notch_filter(freqs=freqs, method="fir", phase="zero")
         # Add PSD after notch filtering without duplicating events
-        report.add_raw(EEG, title='After Notch Filter', psd=True)
-        report.save(report_file, overwrite = True, open_browser=False)
+        report.add_raw(EEG, title="After Notch Filter", psd=True)
+        report.save(report_file, overwrite=True, open_browser=False)
 
-    # EPOCH DATA 
-    epochs = Epochs(sj, session, EEG, events, event_id=event_id,
-            tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, 
-            reject_by_annotation = False) 
-    
+    # EPOCH DATA
+    epochs = Epochs(
+        sj,
+        session,
+        EEG,
+        events,
+        event_id=event_id,
+        tmin=t_min,
+        tmax=t_max,
+        baseline=None,
+        flt_pad=flt_pad,
+        reject_by_annotation=False,
+    )
+
     # MATCH BEHAVIOR FILE
-    idx_remove = sj_info['bdf_remove'] if 'bdf_remove' \
-                                            in sj_info.keys() else None
-    missing, report_str = epochs.align_meta_data(events,trigger_header, 
-                                                beh_oi=beh_oi,
-                                                idx_remove=idx_remove,
-                                                eye_inf = eye_info,
-                                                del_practice=True,
-                                                excl_factor=excl_factor)
+    idx_remove = sj_info["bdf_remove"] if "bdf_remove" in sj_info.keys() else None
+    missing, report_str = epochs.align_meta_data(
+        events,
+        trigger_header,
+        beh_oi=beh_oi,
+        idx_remove=idx_remove,
+        eye_inf=eye_info,
+        del_practice=True,
+        excl_factor=excl_factor,
+    )
 
-    report.add_html(report_str, title='Linking events to behavior')
-    report.add_epochs(epochs, title='initial epoch', psd=True)
+    report.add_html(report_str, title="Linking events to behavior")
+    report.add_epochs(epochs, title="initial epoch", psd=True)
     report.save(report_file, overwrite=True, open_browser=False)
 
     # ICA
-    AR = ArtefactReject(z_thresh = 4, max_bad = 5, flt_pad = epochs.flt_pad, 
-                        filter_z = True)
-    if preproc_param['run_ica']: 
-        epochs_ica = Epochs(sj, session, EEG_ica, events, event_id=event_id,
-                    tmin=t_min, tmax=t_max, baseline=None, flt_pad = flt_pad, 
-                    reject_by_annotation = False) 
-        _, _ = epochs_ica.align_meta_data(events,trigger_header, 
-                                                beh_oi=beh_oi,
-                                                idx_remove=idx_remove,
-                                                eye_inf = eye_info,
-                                                del_practice=True,
-                                                excl_factor=excl_factor)   
-        epochs = AR.run_blink_ICA(epochs_ica, EEG, epochs, sj, session, 
-                                method='picard', threshold=0.9, 
-                                report=report, report_path=report_file)
+    AR = ArtefactReject(z_thresh=4, max_bad=5, flt_pad=epochs.flt_pad, filter_z=True)
+    if preproc_param["run_ica"]:
+        epochs_ica = Epochs(
+            sj,
+            session,
+            EEG_ica,
+            events,
+            event_id=event_id,
+            tmin=t_min,
+            tmax=t_max,
+            baseline=None,
+            flt_pad=flt_pad,
+            reject_by_annotation=False,
+        )
+        _, _ = epochs_ica.align_meta_data(
+            events,
+            trigger_header,
+            beh_oi=beh_oi,
+            idx_remove=idx_remove,
+            eye_inf=eye_info,
+            del_practice=True,
+            excl_factor=excl_factor,
+        )
+        epochs = AR.run_blink_ICA(
+            epochs_ica,
+            EEG,
+            epochs,
+            sj,
+            session,
+            method="picard",
+            threshold=0.9,
+            report=report,
+            report_path=report_file,
+        )
         del EEG_ica, epochs_ica
 
-    # START AUTOMATIC ARTEFACT REJECTION 
-    if preproc_param['run_autoreject']:
-        drop_bads = preproc_param['drop_bads'] if 'drop_bads' in \
-                                                preproc_param.keys() else True
-        epochs, z_thresh, report = AR.auto_repair_noise(epochs, sj, session,
-                                                      drop_bads, report=report)
+    # START AUTOMATIC ARTEFACT REJECTION
+    if preproc_param["run_autoreject"]:
+        drop_bads = preproc_param["drop_bads"] if "drop_bads" in preproc_param.keys() else True
+        epochs, z_thresh, report = AR.auto_repair_noise(
+            epochs, sj, session, drop_bads, report=report
+        )
         report.save(report_file, overwrite=True, open_browser=False)
     else:
         z_thresh = 0
 
     # INTERPOLATE BADS
-    bads = epochs.info['bads']   
-    epochs.interpolate_bads(reset_bads=True, mode='accurate')
+    bads = epochs.info["bads"]
+    epochs.interpolate_bads(reset_bads=True, mode="accurate")
 
-    report.add_epochs(epochs, title='Epochs after artefact reject', psd=True)    
+    report.add_epochs(epochs, title="Epochs after artefact reject", psd=True)
     report.save(report_file, overwrite=True, open_browser=False)
 
     # save
     epochs.save_preprocessed(preproc_name)
-    log_file = FS.folder_tracker(ext=['preprocessing', 'group_info'], 
-                     fname=f'preproc_param_{preproc_name}.json')
-    to_update = dict(nr_clean=len(epochs), z_thresh=z_thresh, 
-                    nr_bads=len(bads), bad_el=bads)
-    log_preproc((sj, session), log_file, nr_sj=nr_sjs, 
-                nr_sessions=nr_sessions, to_update=to_update)
+    log_file = FS.folder_tracker(
+        ext=["preprocessing", "group_info"], fname=f"preproc_param_{preproc_name}.json"
+    )
+    to_update = dict(nr_clean=len(epochs), z_thresh=z_thresh, nr_bads=len(bads), bad_el=bads)
+    log_preproc((sj, session), log_file, nr_sj=nr_sjs, nr_sessions=nr_sessions, to_update=to_update)

@@ -4,23 +4,24 @@ Pytest configuration and shared fixtures for open_dvm tests.
 This file defines pytest fixtures and configuration used across all tests.
 """
 
-import pytest
-import numpy as np
-import pandas as pd
-import tempfile
 import os
+import tempfile
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import pytest
+
 from tests.fixtures.sample_data import (
+    create_biosemi64_evoked_pair,
+    create_lateralization_test_data,
+    create_lateralized_flip_epochs,
+    create_multilocation_test_data,
+    create_peaked_erps,
+    create_residual_eye_data,
     create_sample_epochs,
     create_sample_erp_dataframe,
     create_sample_waveforms,
-    create_lateralization_test_data,
-    create_multilocation_test_data,
-    create_lateralized_flip_epochs,
-    create_peaked_erps,
-    create_biosemi64_evoked_pair,
-    create_residual_eye_data,
 )
 
 
@@ -109,9 +110,5 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "unit: marks tests as unit tests"
-    )
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "unit: marks tests as unit tests")

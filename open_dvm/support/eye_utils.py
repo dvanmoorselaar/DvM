@@ -23,16 +23,18 @@ Created by Dirk van Moorselaar on 20-01-2026.
 Copyright (c) 2026 DvM. All rights reserved.
 """
 
-import os
 import json
+import os
 import warnings
+from contextlib import redirect_stdout
+from typing import Optional, Tuple, Union
+
+import mne
 import numpy as np
 import pandas as pd
-import mne
-from contextlib import redirect_stdout
-from numpy.lib.npyio import NpzFile
-from typing import Tuple, Optional, Union
 from IPython import embed
+from numpy.lib.npyio import NpzFile
+
 from open_dvm.support.preprocessing_utils import get_time_slice
 
 
@@ -43,7 +45,7 @@ def exclude_eye(
     epochs: mne.Epochs,
     eye_dict: dict,
     eye: Optional[NpzFile] = None,
-    preproc_file: Optional[str] = None
+    preproc_file: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, mne.Epochs]:
     """
     Exclude trials with eye movements using tracker or EOG data.
@@ -66,24 +68,24 @@ def exclude_eye(
         Epoched EEG data. Modified in-place by dropping trials.
     eye_dict : dict
         Eye movement detection parameters. Supported keys:
-            - 'window_oi' : tuple, time window to analyze (default: 
+            - 'window_oi' : tuple, time window to analyze (default:
                full epoch)
             - 'eye_ch' : str, EOG channel name (default: 'HEOG')
-            - 'angle_thresh' : float, max gaze deviation in visual 
+            - 'angle_thresh' : float, max gaze deviation in visual
                degrees
             - 'step_param' : tuple, (windowsize_ms, step_ms, thresh_uV)
               for EOG step detection (default: (200, 10, 15e-6))
             - 'use_tracker' : bool, use eye tracker data if available
             - 'use_eog' : bool, use EOG for trials without tracker data
             - 'drift_correct' : tuple, time window for drift correction
-            - 'viewing_dist' : float, viewing distance in cm 
+            - 'viewing_dist' : float, viewing distance in cm
                (for tracker)
-            - 'screen_res' : tuple, screen resolution (width, height) in 
+            - 'screen_res' : tuple, screen resolution (width, height) in
                pixels
             - 'screen_h' : float, screen height in cm
     eye : NpzFile, optional
-        Eye tracker data file containing 'x', 'y', 'times', 'sfreq' 
-        arrays. If None, attempts to use eye channels in epochs. 
+        Eye tracker data file containing 'x', 'y', 'times', 'sfreq'
+        arrays. If None, attempts to use eye channels in epochs.
         Default is None.
     preproc_file : str, optional
         Path to preprocessing CSV file to update with eye exclusion
@@ -136,173 +138,168 @@ def exclude_eye(
     """
 
     # initialize some parameters
-    if 'drift_correct' in eye_dict:
-        drift_correct = eye_dict['drift_correct']
+    if "drift_correct" in eye_dict:
+        drift_correct = eye_dict["drift_correct"]
     else:
         drift_correct = False
-    if 'window_oi' not in eye_dict:
-        eye_dict['window_oi'] = (epochs.tmin, epochs.tmax)
-    if 'eye_ch' not in eye_dict:
-        print('Eye channel is not specified in eyedict, using HEOG as default')
-        eye_dict['eye_ch'] = 'HEOG'
-    if 'use_eog' not in eye_dict:
-        eye_dict['use_eog'] = True
+    if "window_oi" not in eye_dict:
+        eye_dict["window_oi"] = (epochs.tmin, epochs.tmax)
+    if "eye_ch" not in eye_dict:
+        print("Eye channel is not specified in eyedict, using HEOG as default")
+        eye_dict["eye_ch"] = "HEOG"
+    if "use_eog" not in eye_dict:
+        eye_dict["use_eog"] = True
 
     # specify window of interest
-    s, e = eye_dict['window_oi']	
+    s, e = eye_dict["window_oi"]
     if drift_correct:
         if drift_correct[0] < s:
-            s = drift_correct[0]	
+            s = drift_correct[0]
 
     # check whether selection should be based on eyetracker data
-    if 'use_tracker' not in eye_dict or not eye_dict['use_tracker']:
+    if "use_tracker" not in eye_dict or not eye_dict["use_tracker"]:
         tracker_bins = np.full(df.shape[0], np.nan)
-        perc_tracker = 'no tracker'
-        window_idx = get_time_slice(epochs.times,s,e)
+        perc_tracker = "no tracker"
+        window_idx = get_time_slice(epochs.times, s, e)
     else:
-        if isinstance(eye,NpzFile) or ('x' in epochs.ch_names):
+        if isinstance(eye, NpzFile) or ("x" in epochs.ch_names):
             if eye is not None:
-                x, y, times = eye['x'], eye['y'], eye['times']
-                sfreq = int(eye['sfreq'])
-                window_idx = get_time_slice(times,s,e)
-                x = x[:,window_idx]
-                y = y[:,window_idx]
+                x, y, times = eye["x"], eye["y"], eye["times"]
+                sfreq = int(eye["sfreq"])
+                window_idx = get_time_slice(times, s, e)
+                x = x[:, window_idx]
+                y = y[:, window_idx]
                 times = times[window_idx]
             else:
-                window_idx = get_time_slice(epochs.times,s,e)
-                x = epochs._data[:, epochs.ch_names.index('x'), window_idx]
-                y = epochs._data[:, epochs.ch_names.index('y'), window_idx]
+                window_idx = get_time_slice(epochs.times, s, e)
+                x = epochs._data[:, epochs.ch_names.index("x"), window_idx]
+                y = epochs._data[:, epochs.ch_names.index("y"), window_idx]
                 times = epochs.times[window_idx]
-                sfreq = epochs.info['sfreq']
+                sfreq = epochs.info["sfreq"]
 
             from open_dvm.analysis import EYE
-            EO = EYE(sfreq = sfreq,
-                    viewing_dist = eye_dict['viewing_dist'],
-                    screen_res = eye_dict['screen_res'],
-                    screen_h = eye_dict['screen_h'])
-            angles = EO.angles_from_xy(x.copy(), y.copy(), times, 
-                                           drift_correct)
-            if eye_dict['window_oi'][0] > times[0]:
-                window_idx = get_time_slice(times, eye_dict['window_oi'][0], e)
-                angles_oi = np.array(angles)[:,window_idx]
+
+            EO = EYE(
+                sfreq=sfreq,
+                viewing_dist=eye_dict["viewing_dist"],
+                screen_res=eye_dict["screen_res"],
+                screen_h=eye_dict["screen_h"],
+            )
+            angles = EO.angles_from_xy(x.copy(), y.copy(), times, drift_correct)
+            if eye_dict["window_oi"][0] > times[0]:
+                window_idx = get_time_slice(times, eye_dict["window_oi"][0], e)
+                angles_oi = np.array(angles)[:, window_idx]
             else:
                 angles_oi = np.array(angles)
-            min_samples = 40 * epochs.info['sfreq'] / 1000  # 40 ms
-            tracker_bins = bin_tracker_angles(angles_oi, 
-                                               eye_dict['angle_thresh'], 
-                                            min_samples)
+            min_samples = 40 * epochs.info["sfreq"] / 1000  # 40 ms
+            tracker_bins = bin_tracker_angles(angles_oi, eye_dict["angle_thresh"], min_samples)
             nr_bad_trials = sum(tracker_bins == 1)
             perc_tracker = np.round(nr_bad_trials / tracker_bins.size * 100, 1)
         else:
-            warnings.warn('No eye tracker data found, \n'
-                        'skipping eye tracker based exclusion')
-            perc_tracker = 'no tracker data found'
+            warnings.warn("No eye tracker data found, \n" "skipping eye tracker based exclusion")
+            perc_tracker = "no tracker data found"
             tracker_bins = np.full(beh.shape[0], np.nan)
- 
 
     # apply step algorhytm to trials with missing data
     nan_idx = np.where(np.isnan(tracker_bins) > 0)[0]
-    if nan_idx.size > 0 and eye_dict['use_eog']:
-        eye_ch = eye_dict['eye_ch']
-        eog = epochs._data[nan_idx,epochs.ch_names.index(eye_ch),window_idx]
-        if 'step_param' not in eye_dict:
+    if nan_idx.size > 0 and eye_dict["use_eog"]:
+        eye_ch = eye_dict["eye_ch"]
+        eog = epochs._data[nan_idx, epochs.ch_names.index(eye_ch), window_idx]
+        if "step_param" not in eye_dict:
             size, step, thresh = (200, 10, 15e-6)
         else:
-            size, step, thresh = eye_dict['step_param']
-        idx_art = eog_filt(eog,sfreq = epochs.info['sfreq'], windowsize = size, 
-                                windowstep = step, thresh = thresh)
+            size, step, thresh = eye_dict["step_param"]
+        idx_art = eog_filt(
+            eog, sfreq=epochs.info["sfreq"], windowsize=size, windowstep=step, thresh=thresh
+        )
         tracker_bins[nan_idx[idx_art]] = 2
-        perc_eog = np.round(sum(tracker_bins == 2)/ tracker_bins.size*100,1)
-        print('{} trials missing eyetracking'.format(len(nan_idx)))
-        print('data (used eog instead)')
+        perc_eog = np.round(sum(tracker_bins == 2) / tracker_bins.size * 100, 1)
+        print("{} trials missing eyetracking".format(len(nan_idx)))
+        print("data (used eog instead)")
     else:
-        perc_eog = 'eog not used for exclusion'
+        perc_eog = "eog not used for exclusion"
 
-    perc_eye = np.round(sum(tracker_bins >= 1)/ tracker_bins.size*100,1)
-    
+    perc_eye = np.round(sum(tracker_bins >= 1) / tracker_bins.size * 100, 1)
+
     # Save eye exclusion information to preprocessing file
-    print('Eye exclusion info saved in preprocessing '
-          f'file (session {session})')
-    
+    print("Eye exclusion info saved in preprocessing " f"file (session {session})")
+
     # Create composite key for subject and session. 'all' (session-
     # combined entries) is passed through as-is; anything else is
     # coerced to a zero-padded int.
-    session_token = 'all' if isinstance(session, str) and \
-        session.lower() == 'all' else f'{int(session):02d}'
-    entry_key = f'sub_{int(sj):02d}_ses_{session_token}'
-    
+    session_token = (
+        "all" if isinstance(session, str) and session.lower() == "all" else f"{int(session):02d}"
+    )
+    entry_key = f"sub_{int(sj):02d}_ses_{session_token}"
+
     # Load existing data or create new
     try:
-        with open(preproc_file, 'r') as f:
+        with open(preproc_file, "r") as f:
             preproc_data = json.load(f)
     except (json.JSONDecodeError, IOError):
         # File doesn't exist or is corrupted, start fresh
         preproc_data = {}
-    
+
     # Ensure entry key exists
     if entry_key not in preproc_data:
         preproc_data[entry_key] = {}
-    
+
     # Extract numeric percentage from perc_tracker string if needed
     if isinstance(perc_tracker, str):
         try:
-            if '%' in perc_tracker:
-                tracker_val = float(perc_tracker.rstrip('%'))
+            if "%" in perc_tracker:
+                tracker_val = float(perc_tracker.rstrip("%"))
             else:
                 tracker_val = float(perc_tracker)
         except ValueError:
             tracker_val = None  # Handle non-numeric strings
     else:
         tracker_val = perc_tracker
-    
+
     # Extract numeric values from eog string
     if isinstance(perc_eog, str):
         try:
-            if '%' in perc_eog:
-                eog_val = float(perc_eog.split('%')[0])
+            if "%" in perc_eog:
+                eog_val = float(perc_eog.split("%")[0])
             else:
                 eog_val = float(perc_eog)
         except ValueError:
             eog_val = None  # Handle non-numeric strings
     else:
         eog_val = perc_eog
-    
+
     # Extract numeric value from eye exclusion percentage
     eye_excl_val = perc_eye
-    
+
     # Update eye exclusion info
-    preproc_data[entry_key]['tracker_percentage'] = tracker_val
-    preproc_data[entry_key]['eog_percentage'] = eog_val
-    preproc_data[entry_key]['eog_trials_n'] = int(nan_idx.size)
-    preproc_data[entry_key]['eye_exclusion_percentage'] = eye_excl_val
-    
+    preproc_data[entry_key]["tracker_percentage"] = tracker_val
+    preproc_data[entry_key]["eog_percentage"] = eog_val
+    preproc_data[entry_key]["eog_trials_n"] = int(nan_idx.size)
+    preproc_data[entry_key]["eye_exclusion_percentage"] = eye_excl_val
+
     # Save to JSON
     os.makedirs(os.path.dirname(preproc_file), exist_ok=True)
-    with open(preproc_file, 'w') as f:
+    with open(preproc_file, "w") as f:
         json.dump(preproc_data, f, indent=4)
 
     # remove trials from behavior and eeg
-    if 'level_0' not in df:
-        df.reset_index(inplace = True)
+    if "level_0" not in df:
+        df.reset_index(inplace=True)
     else:
-        df.drop('level_0', axis=1, inplace=True)
-        df.reset_index(inplace = True, drop = True)
-    to_drop = np.where(tracker_bins >= 1 )[0]	
+        df.drop("level_0", axis=1, inplace=True)
+        df.reset_index(inplace=True, drop=True)
+    to_drop = np.where(tracker_bins >= 1)[0]
     # Suppress verbose epoch drop output
-    with open(os.devnull, 'w', encoding='utf-8') as f:
+    with open(os.devnull, "w", encoding="utf-8") as f:
         with redirect_stdout(f):
-            epochs.drop(to_drop, reason='eye detection')
-    df.drop(to_drop, inplace = True, axis = 0)
-    df.reset_index(inplace = True, drop = True)
+            epochs.drop(to_drop, reason="eye detection")
+    df.drop(to_drop, inplace=True, axis=0)
+    df.reset_index(inplace=True, drop=True)
 
     return df, epochs
 
 
-def bin_tracker_angles(
-    angles: np.ndarray,
-    thresh: float,
-    min_samp: float
-) -> np.ndarray:
+def bin_tracker_angles(angles: np.ndarray, thresh: float, min_samp: float) -> np.ndarray:
     """Classify trials by fixation breaks from eye tracker data.
 
     Summarizes eye tracker gaze data per trial, marking trials that
@@ -311,7 +308,7 @@ def bin_tracker_angles(
     Parameters
     ----------
     angles : np.ndarray
-        Deviation from fixation in visual degrees, 
+        Deviation from fixation in visual degrees,
         shape (n_trials, n_times).
     thresh : float
         Maximum deviation threshold in visual degrees. Trials exceeding
@@ -349,15 +346,15 @@ def bin_tracker_angles(
     exclude_eye : Main exclusion function using this classifier
     """
 
-    #TODO: how to deal with trials without data
+    # TODO: how to deal with trials without data
     tracker_bins = []
     for i, angle in enumerate(angles):
         # get data where deviation from fix is larger than thresh
         binned = np.where(angle > thresh)[0]
-        segments = np.split(binned, np.where(np.diff(binned) != 1)[0]+1)
+        segments = np.split(binned, np.where(np.diff(binned) != 1)[0] + 1)
 
         # check whether a segment exceeds min duration
-        if np.where(np.array([s.size for s in segments])>min_samp)[0].size > 0:
+        if np.where(np.array([s.size for s in segments]) > min_samp)[0].size > 0:
             tracker_bins.append(1)
         elif np.any(np.isnan(angle)):
             tracker_bins.append(np.nan)
@@ -372,7 +369,7 @@ def eog_filt(
     sfreq: float,
     windowsize: int = 200,
     windowstep: int = 10,
-    thresh: float = 30e-6
+    thresh: float = 30e-6,
 ) -> np.ndarray:
     """Detect eye movements using sliding window on EOG channel.
 
@@ -435,26 +432,26 @@ def eog_filt(
     windowsize /= 1000.0 / sfreq
     s, e = 0, eog.shape[-1]
 
-    # create multiple windows based on window parameters 
-    # (accept that final samples of epoch may not be included) 
-    window_idx = [(i, i + int(windowsize)) 
-                    for i in range(s, e, int(windowstep)) 
-                    if i + int(windowsize) < e]
+    # create multiple windows based on window parameters
+    # (accept that final samples of epoch may not be included)
+    window_idx = [
+        (i, i + int(windowsize)) for i in range(s, e, int(windowstep)) if i + int(windowsize) < e
+    ]
 
     # loop over all epochs and store all eye events into a list
     eye_trials = []
     for i, x in enumerate(eog):
-        
-        for idx in window_idx:
-            window = x[idx[0]:idx[1]]
 
-            w1 = np.mean(window[:int(window.size/2)])
-            w2 = np.mean(window[int(window.size/2):])
+        for idx in window_idx:
+            window = x[idx[0] : idx[1]]
+
+            w1 = np.mean(window[: int(window.size / 2)])
+            w2 = np.mean(window[int(window.size / 2) :])
 
             if abs(w1 - w2) > thresh:
                 eye_trials.append(i)
                 break
 
-    eye_trials = np.array(eye_trials, dtype = int)			
+    eye_trials = np.array(eye_trials, dtype=int)
 
     return eye_trials

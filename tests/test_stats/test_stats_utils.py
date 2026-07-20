@@ -12,22 +12,23 @@ Organization
 
 import warnings
 
-import pytest
 import numpy as np
-from scipy.stats import ttest_rel, t as tdist
+import pytest
+from scipy.stats import t as tdist
+from scipy.stats import ttest_rel
 
 from open_dvm.stats.stats_utils import (
     bootstrap_SE,
     confidence_int,
-    paired_t,
     connected_adjacency,
+    paired_t,
     perform_stats,
 )
-
 
 # ============================================================================
 # bootstrap_SE
 # ============================================================================
+
 
 class TestBootstrapSE:
     @pytest.mark.unit
@@ -57,6 +58,7 @@ class TestBootstrapSE:
 # confidence_int
 # ============================================================================
 
+
 class TestConfidenceInt:
     @pytest.mark.unit
     def test_removes_between_subject_variance(self):
@@ -68,7 +70,7 @@ class TestConfidenceInt:
         noise = rng.normal(0, 0.5, size=(4, 3))
         data = subj_means + noise
 
-        ci = confidence_int(data, p_value=0.05, tail='two', morey=True)
+        ci = confidence_int(data, p_value=0.05, tail="two", morey=True)
 
         assert np.all(ci < 2.0)  # small: reflects only the 0.5-std noise
 
@@ -79,7 +81,7 @@ class TestConfidenceInt:
         noise = rng.normal(0, 0.5, size=(4, 3))
         data = subj_means + noise
 
-        ci = confidence_int(data, p_value=0.05, tail='two', morey=True)
+        ci = confidence_int(data, p_value=0.05, tail="two", morey=True)
 
         naive_std = np.std(data, axis=0, ddof=1)
         naive_ci = naive_std / np.sqrt(4) * abs(tdist.ppf(0.025, 3))
@@ -90,16 +92,17 @@ class TestConfidenceInt:
         rng = np.random.default_rng(0)
         data = rng.normal(0, 1, (10, 3))
 
-        with pytest.warns(UserWarning, match='Incorrect argument'):
-            ci_invalid = confidence_int(data, tail='bogus')
+        with pytest.warns(UserWarning, match="Incorrect argument"):
+            ci_invalid = confidence_int(data, tail="bogus")
 
-        ci_two = confidence_int(data, tail='two')
+        ci_two = confidence_int(data, tail="two")
         np.testing.assert_allclose(ci_invalid, ci_two)
 
 
 # ============================================================================
 # paired_t
 # ============================================================================
+
 
 class TestPairedT:
     @pytest.mark.unit
@@ -117,14 +120,14 @@ class TestPairedT:
 # connected_adjacency
 # ============================================================================
 
+
 class TestConnectedAdjacency:
     @staticmethod
     def _manual_adjacency(r, c, connect):
         expected = np.zeros((r * c, r * c), dtype=int)
         offsets = {
-            '4': [(-1, 0), (1, 0), (0, -1), (0, 1)],
-            '8': [(di, dj) for di in (-1, 0, 1) for dj in (-1, 0, 1)
-                  if not (di == 0 and dj == 0)],
+            "4": [(-1, 0), (1, 0), (0, -1), (0, 1)],
+            "8": [(di, dj) for di in (-1, 0, 1) for dj in (-1, 0, 1) if not (di == 0 and dj == 0)],
         }[connect]
         for i in range(r):
             for j in range(c):
@@ -136,8 +139,8 @@ class TestConnectedAdjacency:
         return expected
 
     @pytest.mark.unit
-    @pytest.mark.parametrize('connect', ['4', '8'])
-    @pytest.mark.parametrize('shape', [(3, 3), (3, 4)])
+    @pytest.mark.parametrize("connect", ["4", "8"])
+    @pytest.mark.parametrize("shape", [(3, 3), (3, 4)])
     def test_matches_manual_adjacency_square_and_nonsquare(self, connect, shape):
         r, c = shape
         grid = np.zeros((r, c))
@@ -150,21 +153,21 @@ class TestConnectedAdjacency:
     def test_patch_size_groups_into_coarser_grid(self):
         grid = np.zeros((4, 4))
 
-        adj = connected_adjacency(grid, '4', patch_size=(2, 2)).toarray().astype(int)
+        adj = connected_adjacency(grid, "4", patch_size=(2, 2)).toarray().astype(int)
 
         assert adj.shape == (4, 4)
-        np.testing.assert_array_equal(adj, self._manual_adjacency(2, 2, '4'))
+        np.testing.assert_array_equal(adj, self._manual_adjacency(2, 2, "4"))
 
     @pytest.mark.unit
     def test_invalid_connect_raises(self):
         grid = np.zeros((3, 3))
         with pytest.raises(ValueError):
-            connected_adjacency(grid, '6')
+            connected_adjacency(grid, "6")
 
     @pytest.mark.unit
     def test_matrix_is_symmetric(self):
         grid = np.zeros((5, 4))
-        adj = connected_adjacency(grid, '8').toarray()
+        adj = connected_adjacency(grid, "8").toarray()
 
         np.testing.assert_array_equal(adj, adj.T)
 
@@ -173,6 +176,7 @@ class TestConnectedAdjacency:
 # perform_stats
 # ============================================================================
 
+
 class TestPerformStats:
     @pytest.mark.unit
     def test_ttest_detects_injected_effect(self):
@@ -180,7 +184,7 @@ class TestPerformStats:
         y = rng.normal(0, 1, size=(20, 100))
         y[:, 40:60] += 1.5
 
-        t_vals, sig_mask, p_vals = perform_stats(y, chance=0, stat_test='ttest')
+        t_vals, sig_mask, p_vals = perform_stats(y, chance=0, stat_test="ttest")
 
         assert sig_mask[40:60].mean() > 0.8  # most of the true effect detected
         assert t_vals.shape == (100,)
@@ -192,7 +196,7 @@ class TestPerformStats:
         y = rng.normal(0, 1, size=(20, 100))
         y[:, 40:60] += 1.5
 
-        t_vals, sig_mask, p_vals = perform_stats(y, chance=0, stat_test='fdr')
+        t_vals, sig_mask, p_vals = perform_stats(y, chance=0, stat_test="fdr")
 
         assert sig_mask[40:60].mean() > 0.8
 
@@ -202,7 +206,7 @@ class TestPerformStats:
         y = rng.normal(0, 1, size=(20, 5, 30))
         y[:, 2, 10:15] += 3.0
 
-        t_vals, sig_mask, p_vals = perform_stats(y, chance=0, stat_test='fdr')
+        t_vals, sig_mask, p_vals = perform_stats(y, chance=0, stat_test="fdr")
 
         assert sig_mask.shape == (5, 30)
         assert sig_mask[2, 10:15].all()
@@ -216,7 +220,7 @@ class TestPerformStats:
         y = rng.normal(0, 1, size=(20, 100))
         y[:, 40:60] += 1.5
 
-        t_vals, clusters, p_vals = perform_stats(y, chance=0, stat_test='perm')
+        t_vals, clusters, p_vals = perform_stats(y, chance=0, stat_test="perm")
 
         assert len(clusters) == 1
         assert p_vals[0] < 0.05
@@ -231,7 +235,7 @@ class TestPerformStats:
         rng = np.random.default_rng(2)
         y = rng.normal(0, 1, size=(20, 50))  # pure noise, no effect
 
-        t_vals, clusters, p_vals = perform_stats(y, chance=0, stat_test='perm')
+        t_vals, clusters, p_vals = perform_stats(y, chance=0, stat_test="perm")
 
         assert len(clusters) == 0
 
@@ -240,14 +244,14 @@ class TestPerformStats:
         rng = np.random.default_rng(0)
         y = rng.normal(0, 1, (10, 20))
         with pytest.raises(ValueError):
-            perform_stats(y, stat_test='bogus')
+            perform_stats(y, stat_test="bogus")
 
     @pytest.mark.unit
     def test_noncallable_statfun_raises(self):
         rng = np.random.default_rng(0)
         y = rng.normal(0, 1, (10, 20))
         with pytest.raises(TypeError):
-            perform_stats(y, stat_test='perm', statfun='not_callable')
+            perform_stats(y, stat_test="perm", statfun="not_callable")
 
     @pytest.mark.unit
     def test_p_cluster_converts_to_threshold_consistently(self):
@@ -259,12 +263,8 @@ class TestPerformStats:
         n_subjects = y.shape[0]
         equivalent_threshold = tdist.ppf(1 - 0.05 / 2, n_subjects - 1)
 
-        _, clusters_a, p_vals_a = perform_stats(
-            y, stat_test='perm', p_cluster=0.05
-        )
-        _, clusters_b, p_vals_b = perform_stats(
-            y, stat_test='perm', threshold=equivalent_threshold
-        )
+        _, clusters_a, p_vals_a = perform_stats(y, stat_test="perm", p_cluster=0.05)
+        _, clusters_b, p_vals_b = perform_stats(y, stat_test="perm", threshold=equivalent_threshold)
 
         assert len(clusters_a) == len(clusters_b)
         np.testing.assert_allclose(p_vals_a, p_vals_b)
@@ -284,7 +284,7 @@ class TestPerformStatsPairedDifference:
         y2 = y1.copy()
         y2[:, 40:60] -= 3.0  # y1 > y2 in this window, identical elsewhere
 
-        t_vals, clusters, p_vals = perform_stats(y1, y2=y2, stat_test='perm')
+        t_vals, clusters, p_vals = perform_stats(y1, y2=y2, stat_test="perm")
 
         assert len(clusters) == 1
         assert p_vals[0] < 0.05
@@ -298,7 +298,7 @@ class TestPerformStatsPairedDifference:
         y1 = rng.normal(0, 1, size=(20, 60))
         y2 = rng.normal(0, 1, size=(20, 60))  # independent noise, no shared effect
 
-        _, clusters, _ = perform_stats(y1, y2=y2, stat_test='perm')
+        _, clusters, _ = perform_stats(y1, y2=y2, stat_test="perm")
 
         assert len(clusters) == 0
 
@@ -312,8 +312,8 @@ class TestPerformStatsPairedDifference:
         y2 = rng.normal(0, 1, size=(20, 100))
         y2[:, 40:60] -= 3.0
 
-        _, sig_mask_t, _ = perform_stats(y1, y2=y2, stat_test='ttest')
-        _, sig_mask_fdr, _ = perform_stats(y1, y2=y2, stat_test='fdr')
+        _, sig_mask_t, _ = perform_stats(y1, y2=y2, stat_test="ttest")
+        _, sig_mask_fdr, _ = perform_stats(y1, y2=y2, stat_test="fdr")
 
         assert sig_mask_t[40:60].mean() > 0.8
         assert sig_mask_fdr[40:60].mean() > 0.8
@@ -327,8 +327,8 @@ class TestPerformStatsPairedDifference:
         y1 = rng.normal(0, 1, size=(15, 50))
         y2 = rng.normal(0, 1, size=(15, 50))
 
-        t_a, clusters_a, p_a = perform_stats(y1, y2=y2, stat_test='perm')
-        t_b, clusters_b, p_b = perform_stats(y1 - y2, chance=0, stat_test='perm')
+        t_a, clusters_a, p_a = perform_stats(y1, y2=y2, stat_test="perm")
+        t_b, clusters_b, p_b = perform_stats(y1 - y2, chance=0, stat_test="perm")
 
         np.testing.assert_allclose(t_a, t_b)
         assert len(clusters_a) == len(clusters_b)
@@ -340,8 +340,8 @@ class TestPerformStatsPairedDifference:
         y1 = rng.normal(0, 1, size=(20, 100))
         y2 = rng.normal(0, 1, size=(18, 100))  # different n_subjects
 
-        with pytest.raises(ValueError, match='shape'):
-            perform_stats(y1, y2=y2, stat_test='perm')
+        with pytest.raises(ValueError, match="shape"):
+            perform_stats(y1, y2=y2, stat_test="perm")
 
     @pytest.mark.unit
     def test_y2_ignores_chance_argument(self):
@@ -352,15 +352,11 @@ class TestPerformStatsPairedDifference:
         y2 = y1.copy()
         y2[:, 40:60] -= 3.0
 
-        _, clusters_with_chance, _ = perform_stats(
-            y1, y2=y2, chance=0.5, stat_test='perm'
-        )
-        _, clusters_without_chance, _ = perform_stats(
-            y1, y2=y2, chance=0, stat_test='perm'
-        )
+        _, clusters_with_chance, _ = perform_stats(y1, y2=y2, chance=0.5, stat_test="perm")
+        _, clusters_without_chance, _ = perform_stats(y1, y2=y2, chance=0, stat_test="perm")
 
         assert len(clusters_with_chance) == len(clusters_without_chance) == 1
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

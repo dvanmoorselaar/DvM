@@ -13,5 +13,5 @@ Various preprocessing utilities for data handling
 from open_dvm.support.FolderStructure import FolderStructure
 
 __all__ = [
-    'FolderStructure',
+    "FolderStructure",
 ]

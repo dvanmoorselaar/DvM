@@ -2,21 +2,21 @@
 Sample data fixtures for testing open_dvm.analysis.TFR functionality.
 """
 
+import mne
 import numpy as np
 import pandas as pd
-import mne
 
 
 def make_epochs(
-    ch_names=('C3', 'C4'),
+    ch_names=("C3", "C4"),
     n_trials=10,
     n_samples=100,
-    sfreq=200.,
+    sfreq=200.0,
     tmin=-0.2,
     seed=0,
 ):
     """Plain noise epochs with no particular oscillatory content."""
-    info = mne.create_info(list(ch_names), sfreq, ch_types='eeg')
+    info = mne.create_info(list(ch_names), sfreq, ch_types="eeg")
     rng = np.random.default_rng(seed)
     data = rng.normal(0, 1, (n_trials, len(ch_names), n_samples))
     return mne.EpochsArray(data, info, tmin=tmin)
@@ -24,10 +24,10 @@ def make_epochs(
 
 def make_oscillating_epochs(
     freq,
-    ch_names=('C3', 'C4'),
+    ch_names=("C3", "C4"),
     n_trials=10,
     n_samples=200,
-    sfreq=200.,
+    sfreq=200.0,
     tmin=-0.2,
     amplitude=5.0,
     noise_sd=0.1,
@@ -45,7 +45,7 @@ def make_oscillating_epochs(
     power but averages out of the evoked response).
     """
     rng = np.random.default_rng(seed)
-    info = mne.create_info(list(ch_names), sfreq, ch_types='eeg')
+    info = mne.create_info(list(ch_names), sfreq, ch_types="eeg")
     t = np.arange(n_samples) / sfreq
     data = np.zeros((n_trials, len(ch_names), n_samples))
     for i in range(n_trials):

@@ -32,17 +32,17 @@ import numpy as np
 
 def _new_trial():
     return {
-        'x': [],
-        'y': [],
-        'trackertime': [],
-        'events': {'msg': [], 'Eblk': []},
+        "x": [],
+        "y": [],
+        "trackertime": [],
+        "events": {"msg": [], "Eblk": []},
     }
 
 
 def _finalize_trial(trial):
-    trial['x'] = np.array(trial['x'])
-    trial['y'] = np.array(trial['y'])
-    trial['trackertime'] = np.array(trial['trackertime'])
+    trial["x"] = np.array(trial["x"])
+    trial["y"] = np.array(trial["y"])
+    trial["trackertime"] = np.array(trial["trackertime"])
     return trial
 
 
@@ -50,7 +50,7 @@ def _extract_trial_nr(messages, trial_info):
     if trial_info is not None:
         for _, msg in messages:
             if trial_info in msg:
-                match = re.search(r'\d+', msg)
+                match = re.search(r"\d+", msg)
                 if match:
                     return int(match.group())
     return np.nan
@@ -95,7 +95,7 @@ def read_edf(filename, start, stop=None, trial_info=None, missing=0.0):
     if not os.path.isfile(filename):
         raise FileNotFoundError(f"read_edf: file '{filename}' does not exist")
 
-    with open(filename, 'r') as f:
+    with open(filename, "r") as f:
         raw = f.readlines()
 
     data = []
@@ -103,7 +103,7 @@ def read_edf(filename, start, stop=None, trial_info=None, missing=0.0):
     trial = _new_trial()
     starttime = 0
     started = False
-    finalline = raw[-1] if raw else ''
+    finalline = raw[-1] if raw else ""
 
     for line in raw:
         trial_ended = False
@@ -120,28 +120,29 @@ def read_edf(filename, start, stop=None, trial_info=None, missing=0.0):
 
             if trial_ended:
                 data.append(_finalize_trial(trial))
-                trial_nr.append(_extract_trial_nr(trial['events']['msg'],
-                                                   trial_info))
+                trial_nr.append(_extract_trial_nr(trial["events"]["msg"], trial_info))
                 trial = _new_trial()
         else:
             if start in line:
                 started = True
-                starttime = int(line[line.find('\t') + 1:line.find(' ')])
+                starttime = int(line[line.find("\t") + 1 : line.find(" ")])
 
         if started:
-            if line[0:3] == 'MSG':
-                ms = line.find(' ')
+            if line[0:3] == "MSG":
+                ms = line.find(" ")
                 t = int(line[4:ms])
-                trial['events']['msg'].append([t, line[ms + 1:]])
-            elif line[0:6] == 'EBLINK':
-                st, et, dur = (int(v) for v in line[9:].split('\t')[:3])
-                trial['events']['Eblk'].append([st, et, dur])
-            elif (line[0:4] in ('SFIX', 'EFIX')
-                    or line[0:5] in ('SSACC', 'ESACC')
-                    or line[0:6] == 'SBLINK'):
+                trial["events"]["msg"].append([t, line[ms + 1 :]])
+            elif line[0:6] == "EBLINK":
+                st, et, dur = (int(v) for v in line[9:].split("\t")[:3])
+                trial["events"]["Eblk"].append([st, et, dur])
+            elif (
+                line[0:4] in ("SFIX", "EFIX")
+                or line[0:5] in ("SSACC", "ESACC")
+                or line[0:6] == "SBLINK"
+            ):
                 pass  # fixation/saccade events not needed downstream
             else:
-                parts = line.split('\t')
+                parts = line.split("\t")
                 try:
                     int(parts[0])
                 except (ValueError, IndexError):
@@ -149,9 +150,9 @@ def read_edf(filename, start, stop=None, trial_info=None, missing=0.0):
                 x, y = float(parts[1]), float(parts[2])
                 if float(parts[3]) == 0.0:  # pupil size 0.0 == missing
                     x, y = missing, missing
-                trial['x'].append(x)
-                trial['y'].append(y)
-                trial['trackertime'].append(int(parts[0]))
+                trial["x"].append(x)
+                trial["y"].append(y)
+                trial["trackertime"].append(int(parts[0]))
 
     return data, trial_nr
 
@@ -183,54 +184,51 @@ def read_edf_time_overlap(filename, start, stop, missing=0.0):
         Trial number per entry in `data`, taken from the start marker.
     """
     if not os.path.isfile(filename):
-        raise FileNotFoundError(
-            f"read_edf_time_overlap: file '{filename}' does not exist")
+        raise FileNotFoundError(f"read_edf_time_overlap: file '{filename}' does not exist")
 
-    with open(filename, 'r') as f:
+    with open(filename, "r") as f:
         raw = f.readlines()
 
     def _marker_info(line, idx):
         return {
-            'l_idx': idx,
-            'timing': int(line[4:line.find(' ')]),
-            'nr': int(line[line.find(':') + 2:-1]),
+            "l_idx": idx,
+            "timing": int(line[4 : line.find(" ")]),
+            "nr": int(line[line.find(":") + 2 : -1]),
         }
 
-    starts = [_marker_info(line, idx) for idx, line in enumerate(raw)
-              if start in line]
-    stops = [_marker_info(line, idx) for idx, line in enumerate(raw)
-             if stop in line]
+    starts = [_marker_info(line, idx) for idx, line in enumerate(raw) if start in line]
+    stops = [_marker_info(line, idx) for idx, line in enumerate(raw) if stop in line]
 
     data = []
     trial_nr = []
 
     for s, e in zip(starts, stops):
-        if s['nr'] != e['nr']:
-            warnings.warn(
-                f"start_trial_{s['nr']} and stop_trial do not match",
-                UserWarning)
+        if s["nr"] != e["nr"]:
+            warnings.warn(f"start_trial_{s['nr']} and stop_trial do not match", UserWarning)
             continue
 
         trial = _new_trial()
-        starttime = s['timing']
+        starttime = s["timing"]
 
-        for line in raw[s['l_idx']:e['l_idx']]:
-            if line[0:3] == 'MSG':
-                ms = line.find(' ')
+        for line in raw[s["l_idx"] : e["l_idx"]]:
+            if line[0:3] == "MSG":
+                ms = line.find(" ")
                 t = int(line[4:ms])
-                msg = line[ms + 1:]
+                msg = line[ms + 1 :]
                 if start in line and t != starttime:
-                    msg = 'next trl already starts'
-                trial['events']['msg'].append([t, msg])
-            elif line[0:6] == 'EBLINK':
-                st, et, dur = (int(v) for v in line[9:].split('\t')[:3])
-                trial['events']['Eblk'].append([st, et, dur])
-            elif (line[0:4] in ('SFIX', 'EFIX')
-                    or line[0:5] in ('SSACC', 'ESACC')
-                    or line[0:6] == 'SBLINK'):
+                    msg = "next trl already starts"
+                trial["events"]["msg"].append([t, msg])
+            elif line[0:6] == "EBLINK":
+                st, et, dur = (int(v) for v in line[9:].split("\t")[:3])
+                trial["events"]["Eblk"].append([st, et, dur])
+            elif (
+                line[0:4] in ("SFIX", "EFIX")
+                or line[0:5] in ("SSACC", "ESACC")
+                or line[0:6] == "SBLINK"
+            ):
                 pass
             else:
-                parts = line.split('\t')
+                parts = line.split("\t")
                 try:
                     int(parts[0])
                 except (ValueError, IndexError):
@@ -238,12 +236,12 @@ def read_edf_time_overlap(filename, start, stop, missing=0.0):
                 x, y = float(parts[1]), float(parts[2])
                 if float(parts[3]) == 0.0:
                     x, y = missing, missing
-                trial['x'].append(x)
-                trial['y'].append(y)
-                trial['trackertime'].append(int(parts[0]))
+                trial["x"].append(x)
+                trial["y"].append(y)
+                trial["trackertime"].append(int(parts[0]))
 
         data.append(_finalize_trial(trial))
-        trial_nr.append(s['nr'])
+        trial_nr.append(s["nr"])
 
     return data, trial_nr
 
@@ -318,10 +316,9 @@ def read_eyetribe(filename, start, stop=None, missing=0.0):
     stop=None files are split correctly.
     """
     if not os.path.isfile(filename):
-        raise FileNotFoundError(
-            f"read_eyetribe: file '{filename}' does not exist")
+        raise FileNotFoundError(f"read_eyetribe: file '{filename}' does not exist")
 
-    with open(filename, 'r') as f:
+    with open(filename, "r") as f:
         raw = f.readlines()
 
     data = []
@@ -329,39 +326,39 @@ def read_eyetribe(filename, start, stop=None, missing=0.0):
     started = False
 
     for i, raw_line in enumerate(raw):
-        line = raw_line.replace('\n', '').replace('\r', '').split('\t')
-        is_last = (i == len(raw) - 1)
+        line = raw_line.replace("\n", "").replace("\r", "").split("\t")
+        is_last = i == len(raw) - 1
 
         trial_ended = False
         if started:
             if stop is not None:
-                if (line[0] == 'MSG' and stop in line[3]) or is_last:
+                if (line[0] == "MSG" and stop in line[3]) or is_last:
                     started = False
                     trial_ended = True
             else:
-                if (line[0] == 'MSG' and start in line[3]) or is_last:
+                if (line[0] == "MSG" and start in line[3]) or is_last:
                     started = True
                     trial_ended = True
 
             if trial_ended:
                 trial = _finalize_trial(trial)
-                trial['events']['Eblk'] = _detect_blinks(
-                    trial['x'], trial['y'], trial['trackertime'],
-                    missing=missing)
+                trial["events"]["Eblk"] = _detect_blinks(
+                    trial["x"], trial["y"], trial["trackertime"], missing=missing
+                )
                 data.append(trial)
                 trial = _new_trial()
         else:
-            if line[0] == 'MSG' and start in line[3]:
+            if line[0] == "MSG" and start in line[3]:
                 started = True
 
         if started:
-            if line[0] == 'MSG':
-                trial['events']['msg'].append([int(line[2]), line[3]])
+            if line[0] == "MSG":
+                trial["events"]["msg"].append([int(line[2]), line[3]])
             else:
                 try:
-                    trial['x'].append(float(line[6]))
-                    trial['y'].append(float(line[7]))
-                    trial['trackertime'].append(int(line[1]))
+                    trial["x"].append(float(line[6]))
+                    trial["y"].append(float(line[7]))
+                    trial["trackertime"].append(int(line[1]))
                 except (ValueError, IndexError):
                     continue
 

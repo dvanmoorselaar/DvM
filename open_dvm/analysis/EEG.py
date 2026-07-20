@@ -3,13 +3,13 @@ Core EEG Data Classes for the DvM Toolbox.
 
 This module provides the foundational classes for EEG data handling and
 analysis in the DvM toolbox. Built on top of MNE-Python, it extends the
-standard Raw and Epochs classes with domain-specific functionality 
+standard Raw and Epochs classes with domain-specific functionality
 tailoredfor cognitive neuroscience experiments.
 
-The module implements a complete EEG analysis workflow including data 
-loading, preprocessing, epoching, artefact rejection, and quality 
-control reporting. All classes integrate with the FolderStructure system 
-for organized file management and follow modern MNE-Python API 
+The module implements a complete EEG analysis workflow including data
+loading, preprocessing, epoching, artefact rejection, and quality
+control reporting. All classes integrate with the FolderStructure system
+for organized file management and follow modern MNE-Python API
 conventions.
 
 Main Classes
@@ -23,7 +23,7 @@ Epochs : Extended MNE Epochs class
     eye-tracking integration, and flexible trial selection.
 
 ArtefactReject : Automatic artefact detection and repair
-    Implements ICA-based blink removal and autoreject-based epoch 
+    Implements ICA-based blink removal and autoreject-based epoch
     cleaning with comprehensive quality control reporting.
 
 Key Features
@@ -40,84 +40,86 @@ Key Features
 
 See Also
 --------
-eeg_analyses.preprocessing_pipeline.eeg_preprocessing_pipeline : 
-    Complete preprocessing workflow. Standard preprocessing pipeline 
-    that orchestrates RAW, Epochs, and ArtefactReject classes to process 
-    data from raw BDF files to cleaned epochs. Includes comprehensive 
+eeg_analyses.preprocessing_pipeline.eeg_preprocessing_pipeline :
+    Complete preprocessing workflow. Standard preprocessing pipeline
+    that orchestrates RAW, Epochs, and ArtefactReject classes to process
+    data from raw BDF files to cleaned epochs. Includes comprehensive
     example usage.
 
 Created by Dirk van Moorselaar on 10-03-2015.
 Copyright (c) 2015 DvM. All rights reserved.
 """
 
-import mne
-import os
 import copy
 import glob
+import os
+import platform
 import re
 import sys
 import time
 import warnings
-import platform
 from contextlib import redirect_stdout
+from math import ceil, floor, sqrt
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import matplotlib.pyplot as plt
+import mne
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import matplotlib.pyplot as plt
-from scipy.stats import zscore
-from scipy.signal import convolve2d
+from autoreject import AutoReject, Ransac, get_rejection_threshold
 from mne import BaseEpochs
+from mne.filter import filter_data
 from mne.io import BaseRaw
+from mne.preprocessing import ICA, create_eog_epochs
+from scipy.signal import convolve2d
+from scipy.stats import zscore
 
-from typing import Dict, List, Optional, Union, Tuple, Any
-from autoreject import get_rejection_threshold
+from open_dvm.analysis.EYE import *
+from open_dvm.support.FolderStructure import *
 from open_dvm.support.preprocessing_utils import (
     format_subject_id,
     get_time_slice,
     trial_exclusion,
 )
-from open_dvm.analysis.EYE import *
-from math import sqrt, ceil, floor
-from open_dvm.support.FolderStructure import *
-from mne.filter import filter_data
-from mne.preprocessing import ICA
-from mne.preprocessing import create_eog_epochs
-from autoreject import Ransac, AutoReject
+
 
 def flush_input():
     """
     Flush terminal input buffer in a cross-platform way.
-    
-    Clears any pending keyboard input to prevent stale input from 
+
+    Clears any pending keyboard input to prevent stale input from
     interfering with interactive prompts.
     """
     system = platform.system()
-    if system in ['Linux', 'Darwin']:  # Unix-like systems
+    if system in ["Linux", "Darwin"]:  # Unix-like systems
         try:
-            from termios import tcflush, TCIFLUSH
+            from termios import TCIFLUSH, tcflush
+
             tcflush(sys.stdin, TCIFLUSH)
         except Exception:
             pass  # Fallback: do nothing if termios unavailable or not a real terminal
-    elif system == 'Windows':
+    elif system == "Windows":
         try:
             import msvcrt
+
             while msvcrt.kbhit():
                 msvcrt.getch()
         except ImportError:
             pass  # Fallback: do nothing if msvcrt unavailable
 
+
 class RAW(BaseRaw, FolderStructure):
     """
     Extended MNE Raw class with preprocessing functionality.
-    
-    This class wraps MNE's Raw objects and provides custom methods for 
-    electrophysiological data preprocessing, including channel 
-    replacement, re-referencing, montage configuration, and 
-    event selection. While designed primarily for EEG, the class can 
+
+    This class wraps MNE's Raw objects and provides custom methods for
+    electrophysiological data preprocessing, including channel
+    replacement, re-referencing, montage configuration, and
+    event selection. While designed primarily for EEG, the class can
     also handle MEG and other data types supported by MNE.
-    
-    Inherits from MNE's BaseRaw class and FolderStructure for file 
+
+    Inherits from MNE's BaseRaw class and FolderStructure for file
     organization capabilities.
 
     Parameters
@@ -133,7 +135,7 @@ class RAW(BaseRaw, FolderStructure):
             Channel names
         times : ndarray
             Time points
-        
+
     Methods
     -------
     replace_channel(sj, session, replace)
@@ -142,7 +144,7 @@ class RAW(BaseRaw, FolderStructure):
         Re-reference data to specified reference channel(s).
     configure_montage(montage, ch_remove)
         Set electrode montage and rename channels.
-    select_events(event_id, stim_channel, binary, consecutive, 
+    select_events(event_id, stim_channel, binary, consecutive,
                   min_duration)
         Detect and extract trigger events from stimulus channel.
 
@@ -156,16 +158,16 @@ class RAW(BaseRaw, FolderStructure):
     --------
     >>> # Read BDF file
     >>> raw = RAW('data.bdf', preload=True)
-    
+
     >>> # Read FIF file with auto-detection
     >>> raw = RAW('data_raw.fif')
-    
+
     >>> # Read EDF with specific EOG channels
     >>> raw = RAW('data.edf', eog=['EOG1', 'EOG2'])
-    
+
     >>> # Using convenience methods
     >>> raw = RAW.from_bdf('subject01.bdf', preload=True)
-    
+
     >>> # Chain preprocessing methods
     >>> raw.replace_channel(sj=1, session=1, replace=replace_dict)
     >>> raw.rereference('average')
@@ -173,54 +175,56 @@ class RAW(BaseRaw, FolderStructure):
     >>> events = raw.select_events(event_id=[1, 2, 3])
     """
 
-    def __init__(self, 
-                 input_fname: Union[str, os.PathLike],
-                 file_type: Optional[str] = None,
-                 eog: Optional[Union[str, List[str]]] = None,
-                 stim_channel: Union[int, str, List[str], None] = -1,
-                 exclude: Union[List[str], Tuple[str, ...]] = (),
-                 preload: bool = True,
-                 verbose: Optional[Union[bool, str, int]] = None,
-                 **kwargs):
+    def __init__(
+        self,
+        input_fname: Union[str, os.PathLike],
+        file_type: Optional[str] = None,
+        eog: Optional[Union[str, List[str]]] = None,
+        stim_channel: Union[int, str, List[str], None] = -1,
+        exclude: Union[List[str], Tuple[str, ...]] = (),
+        preload: bool = True,
+        verbose: Optional[Union[bool, str, int]] = None,
+        **kwargs,
+    ):
         """
         Initialize RAW by reading data from various file formats.
 
         Parameters
         ----------
         input_fname : str or PathLike
-            Path to the EEG/MEG data file. Can be a string or Path 
+            Path to the EEG/MEG data file. Can be a string or Path
             object.
         file_type : str, optional
             Type of file to read. Supported options:
-            
+
             - 'bdf': BioSemi BDF format (default if .bdf extension)
             - 'edf': European Data Format (default if .edf extension)
             - 'fif': Neuromag/Elekta format (default if .fif extension)
-            - 'brainvision': BrainVision format (default 
+            - 'brainvision': BrainVision format (default
                if .vhdr extension)
             - 'cnt': Neuroscan CNT format
             - 'set': EEGLAB format
-            
-            If None, automatically detects from file extension. 
+
+            If None, automatically detects from file extension.
             Default is None.
         eog : str or list of str, optional
-            Channel name(s) for EOG channels. Can be a single channel 
+            Channel name(s) for EOG channels. Can be a single channel
             name or list of channel names. Default is None.
         stim_channel : int, str, list of str, or None, optional
             Channel name or index for stimulus/trigger channel.
-            Use -1 for last channel (common default). Use None to 
+            Use -1 for last channel (common default). Use None to
             exclude. Default is -1.
         exclude : list of str or tuple of str, optional
-            List of channel names to exclude from reading. 
+            List of channel names to exclude from reading.
             Default is () (no channels excluded).
         preload : bool, optional
-            If True, load data into memory immediately. If False, 
+            If True, load data into memory immediately. If False,
             data is read on-demand. Default is True.
         verbose : bool, str, or int, optional
-            Control verbosity of MNE output. Can be bool, str ('INFO', 
+            Control verbosity of MNE output. Can be bool, str ('INFO',
             'WARNING', 'ERROR'), or int. Default is None.
         **kwargs : dict
-            Additional keyword arguments passed to the specific 
+            Additional keyword arguments passed to the specific
             MNE reader function (e.g., montage, misc for BDF files).
 
         Raises
@@ -234,27 +238,27 @@ class RAW(BaseRaw, FolderStructure):
         --------
         >>> # Auto-detect file type from extension
         >>> raw = RAW('subject01.bdf', preload=True)
-        
+
         >>> # Specify file type explicitly
         >>> raw = RAW('data.fif', file_type='fif')
-        
+
         >>> # Specify EOG channels
         >>> raw = RAW('data.bdf', eog=['EXG1', 'EXG2'])
         """
-        
+
         # Convert to Path object for easier handling
         input_fname = os.path.expanduser(input_fname)
-        
+
         # Auto-detect file type from extension if not specified
         if file_type is None:
             ext = os.path.splitext(input_fname)[1].lower()
             file_type_map = {
-                '.bdf': 'bdf',
-                '.edf': 'edf',
-                '.fif': 'fif',
-                '.vhdr': 'brainvision',
-                '.cnt': 'cnt',
-                '.set': 'set',
+                ".bdf": "bdf",
+                ".edf": "edf",
+                ".fif": "fif",
+                ".vhdr": "brainvision",
+                ".cnt": "cnt",
+                ".set": "set",
             }
             file_type = file_type_map.get(ext)
             if file_type is None:
@@ -263,9 +267,9 @@ class RAW(BaseRaw, FolderStructure):
                     f"Please specify file_type parameter. "
                     f"Supported types: {list(file_type_map.values())}"
                 )
-        
+
         # Read data using appropriate MNE function
-        if file_type == 'bdf':
+        if file_type == "bdf":
             raw = mne.io.read_raw_bdf(
                 input_fname,
                 eog=eog,
@@ -273,9 +277,9 @@ class RAW(BaseRaw, FolderStructure):
                 exclude=exclude,
                 preload=preload,
                 verbose=verbose,
-                **kwargs
+                **kwargs,
             )
-        elif file_type == 'edf':
+        elif file_type == "edf":
             raw = mne.io.read_raw_edf(
                 input_fname,
                 eog=eog,
@@ -283,123 +287,96 @@ class RAW(BaseRaw, FolderStructure):
                 exclude=exclude,
                 preload=preload,
                 verbose=verbose,
-                **kwargs
+                **kwargs,
             )
-        elif file_type == 'fif':
-            raw = mne.io.read_raw_fif(
-                input_fname,
-                preload=preload,
-                verbose=verbose,
-                **kwargs
-            )
-        elif file_type == 'brainvision':
+        elif file_type == "fif":
+            raw = mne.io.read_raw_fif(input_fname, preload=preload, verbose=verbose, **kwargs)
+        elif file_type == "brainvision":
             raw = mne.io.read_raw_brainvision(
-                input_fname,
-                eog=eog,
-                preload=preload,
-                verbose=verbose,
-                **kwargs
+                input_fname, eog=eog, preload=preload, verbose=verbose, **kwargs
             )
-        elif file_type == 'cnt':
+        elif file_type == "cnt":
             raw = mne.io.read_raw_cnt(
-                input_fname,
-                eog=eog,
-                preload=preload,
-                verbose=verbose,
-                **kwargs
+                input_fname, eog=eog, preload=preload, verbose=verbose, **kwargs
             )
-        elif file_type == 'set':
-            raw = mne.io.read_raw_eeglab(
-                input_fname,
-                preload=preload,
-                verbose=verbose,
-                **kwargs
-            )
+        elif file_type == "set":
+            raw = mne.io.read_raw_eeglab(input_fname, preload=preload, verbose=verbose, **kwargs)
         else:
             raise ValueError(
                 f"Unsupported file type: {file_type}. "
                 f"Supported types: bdf, edf, fif, brainvision, cnt, set"
             )
-        
+
         # Copy all attributes from the loaded raw object to self
         self.__dict__.update(raw.__dict__)
-        
-        print(f'Loaded {file_type.upper()} file: {input_fname}')
-        print(f'Channels: {len(self.ch_names)}, '
-              f'Sampling rate: {self.info["sfreq"]} Hz')
-    
+
+        print(f"Loaded {file_type.upper()} file: {input_fname}")
+        print(f"Channels: {len(self.ch_names)}, " f'Sampling rate: {self.info["sfreq"]} Hz')
+
     @classmethod
-    def from_bdf(cls, 
-                 input_fname: Union[str, os.PathLike],
-                 **kwargs) -> 'RAW':
+    def from_bdf(cls, input_fname: Union[str, os.PathLike], **kwargs) -> "RAW":
         """Convenience method to load BioSemi BDF files.
-        
+
         Args:
             input_fname: Path to the BDF file.
             **kwargs: Additional arguments passed to __init__.
-            
+
         Returns:
             RAW instance with loaded BDF data.
-            
+
         Examples:
             >>> raw = RAW.from_bdf('subject01.bdf', preload=True)
         """
-        return cls(input_fname, file_type='bdf', **kwargs)
-    
+        return cls(input_fname, file_type="bdf", **kwargs)
+
     @classmethod
-    def from_edf(cls, 
-                 input_fname: Union[str, os.PathLike],
-                 **kwargs) -> 'RAW':
+    def from_edf(cls, input_fname: Union[str, os.PathLike], **kwargs) -> "RAW":
         """Convenience method to load EDF files.
-        
+
         Args:
             input_fname: Path to the EDF file.
             **kwargs: Additional arguments passed to __init__.
-            
+
         Returns:
             RAW instance with loaded EDF data.
-            
+
         Examples:
             >>> raw = RAW.from_edf('subject01.edf', preload=True)
         """
-        return cls(input_fname, file_type='edf', **kwargs)
-    
+        return cls(input_fname, file_type="edf", **kwargs)
+
     @classmethod
-    def from_fif(cls, 
-                 input_fname: Union[str, os.PathLike],
-                 **kwargs) -> 'RAW':
+    def from_fif(cls, input_fname: Union[str, os.PathLike], **kwargs) -> "RAW":
         """Convenience method to load FIF files.
-        
+
         Args:
             input_fname: Path to the FIF file.
             **kwargs: Additional arguments passed to __init__.
-            
+
         Returns:
             RAW instance with loaded FIF data.
-            
+
         Examples:
             >>> raw = RAW.from_fif('subject01_raw.fif', preload=True)
         """
-        return cls(input_fname, file_type='fif', **kwargs)
-    
+        return cls(input_fname, file_type="fif", **kwargs)
+
     @classmethod
-    def from_brainvision(cls, 
-                         input_fname: Union[str, os.PathLike],
-                         **kwargs) -> 'RAW':
+    def from_brainvision(cls, input_fname: Union[str, os.PathLike], **kwargs) -> "RAW":
         """Convenience method to load BrainVision files.
-        
+
         Args:
             input_fname: Path to the .vhdr file.
             **kwargs: Additional arguments passed to __init__.
-            
+
         Returns:
             RAW instance with loaded BrainVision data.
-            
+
         Examples:
             >>> raw = RAW.from_brainvision('subject01.vhdr', preload=True)
         """
-        return cls(input_fname, file_type='brainvision', **kwargs)
-  
+        return cls(input_fname, file_type="brainvision", **kwargs)
+
     def report_raw(self, report, events, event_id):
         """
         Add raw EEG data and events to MNE report.
@@ -418,36 +395,29 @@ class RAW(BaseRaw, FolderStructure):
         report : mne.Report
             Updated report object.
         """
-        
+
         # Add raw data visualization
-        report.add_raw(self, title='Raw EEG', psd=True)
-        
+        report.add_raw(self, title="Raw EEG", psd=True)
+
         # Add events
         events_filtered = events[np.isin(events[:, 2], event_id)]
-        report.add_events(
-            events_filtered, 
-            title='Detected Events', 
-            sfreq=self.info['sfreq']
-        )
+        report.add_events(events_filtered, title="Detected Events", sfreq=self.info["sfreq"])
 
         return report
 
-    def replace_channel(
-        self,
-        replace: Dict[str, str]
-    ) -> 'RAW':
+    def replace_channel(self, replace: Dict[str, str]) -> "RAW":
         """
         Replace bad electrodes with designated replacement electrodes.
 
-        Replaces bad electrodes with alternative electrodes that were 
-        used during recording. This is useful when electrodes were 
+        Replaces bad electrodes with alternative electrodes that were
+        used during recording. This is useful when electrodes were
         replaced during setup due to high impedance or technical issues.
 
         Parameters
         ----------
         replace : dict of str
-            Dictionary mapping original electrode names to replacement 
-            electrode names. 
+            Dictionary mapping original electrode names to replacement
+            electrode names.
             Keys: Original electrode names to replace
             Values: Replacement electrode names containing the data
 
@@ -459,13 +429,13 @@ class RAW(BaseRaw, FolderStructure):
         Notes
         -----
         - Modifications are performed in-place.
-        - Only data from the replacement electrode is copied; the 
+        - Only data from the replacement electrode is copied; the
           channel name remains the original electrode name.
-        - Replacement electrodes are removed from the data after 
+        - Replacement electrodes are removed from the data after
           copying.
-        - Prints a warning if either the original or replacement 
+        - Prints a warning if either the original or replacement
           electrode is not found in the data.
-        - If an empty dictionary is passed, returns immediately without 
+        - If an empty dictionary is passed, returns immediately without
           modification.
 
         Examples
@@ -476,7 +446,7 @@ class RAW(BaseRaw, FolderStructure):
         Electrode F1 replaced by EXG7
         Electrode P3 replaced by EXG8
         Removed replacement channels: ['EXG7', 'EXG8']
-        
+
         >>> # Single electrode replacement
         >>> raw.replace_channel(replace={'Fp1': 'EXG7'})
         Electrode Fp1 replaced by EXG7
@@ -485,10 +455,10 @@ class RAW(BaseRaw, FolderStructure):
         # Return early if no replacements specified
         if not replace:
             return self
-        
+
         # Collect channels to remove after replacement
         channels_to_remove = []
-        
+
         # Replace each electrode's data
         for orig_elec, repl_elec in replace.items():
             try:
@@ -496,15 +466,17 @@ class RAW(BaseRaw, FolderStructure):
                 repl_idx = self.ch_names.index(repl_elec)
                 self._data[orig_idx] = self._data[repl_idx].copy()
                 channels_to_remove.append(repl_elec)
-                print(f'Electrode {orig_elec} replaced by {repl_elec}')
+                print(f"Electrode {orig_elec} replaced by {repl_elec}")
             except ValueError:
-                print(f'Warning: Could not replace {orig_elec} with '
-                      f'{repl_elec}. Channel not found in data.')
-        
+                print(
+                    f"Warning: Could not replace {orig_elec} with "
+                    f"{repl_elec}. Channel not found in data."
+                )
+
         # Remove replacement channels
         if channels_to_remove:
             self.drop_channels(channels_to_remove)
-            print(f'Removed replacement channels: {channels_to_remove}')
+            print(f"Removed replacement channels: {channels_to_remove}")
 
         return self
 
@@ -512,27 +484,27 @@ class RAW(BaseRaw, FolderStructure):
         self,
         ref_channels: Union[str, List[str]],
         change_voltage: bool = True,
-        to_remove: Optional[List[str]] = None
-    ) -> 'RAW':
+        to_remove: Optional[List[str]] = None,
+    ) -> "RAW":
         """
         Re-reference EEG data to specified reference channel(s).
 
         Re-references the raw EEG data to specified reference channels
-        or average reference. Optionally converts voltage units from 
-        Volts to microVolts and removes specified channels after 
+        or average reference. Optionally converts voltage units from
+        Volts to microVolts and removes specified channels after
         re-referencing.
 
         Parameters
         ----------
         ref_channels : str or list of str
             Channel(s) to use as reference. Use 'average' for average
-            reference across all EEG channels, or provide a list of 
+            reference across all EEG channels, or provide a list of
             channel names for specific reference electrode(s).
         change_voltage : bool, optional
-            Whether to convert voltage from Volts to microVolts. 
+            Whether to convert voltage from Volts to microVolts.
             Default is True.
         to_remove : list of str, optional
-            Additional channels to remove after re-referencing. 
+            Additional channels to remove after re-referencing.
             Default is None (no additional channels removed).
 
         Returns
@@ -543,21 +515,21 @@ class RAW(BaseRaw, FolderStructure):
         Notes
         -----
         - Modifications are performed in-place.
-        - If change_voltage=True, converts EEG and EOG channel data from 
+        - If change_voltage=True, converts EEG and EOG channel data from
           V to μV (×1e6).
-        - Reference channels are automatically removed from the data 
+        - Reference channels are automatically removed from the data
           unless 'average' reference is used.
-        - Only channels present in the data will be removed; missing 
+        - Only channels present in the data will be removed; missing
           channels are silently skipped.
 
         Examples
         --------
         >>> # Average reference
         >>> raw.rereference('average')
-        
+
         >>> # Single channel reference
         >>> raw.rereference(['Cz'])
-        
+
         >>> # Linked mastoids reference with additional channel removal
         >>> raw.rereference(['M1', 'M2'], to_remove=['EXG7', 'EXG8'])
         """
@@ -565,23 +537,22 @@ class RAW(BaseRaw, FolderStructure):
         if to_remove is None:
             to_remove = []
         else:
-            to_remove = to_remove.copy()  
+            to_remove = to_remove.copy()
 
         # Convert voltage units if requested
         if change_voltage:
             # Get EEG and EOG channel indices
-            picks = self.copy().pick(['eeg', 'eog'], exclude=[]).ch_names
+            picks = self.copy().pick(["eeg", "eog"], exclude=[]).ch_names
             picks_idx = [self.ch_names.index(ch) for ch in picks]
             self._data[picks_idx, :] *= 1e6
-            print('Converted voltage units from V to μV for'
-            ' EEG and EOG channels')
+            print("Converted voltage units from V to μV for" " EEG and EOG channels")
 
         # Re-reference EEG channels
         self.set_eeg_reference(ref_channels=ref_channels)
-        print(f'Re-referenced EEG data to: {ref_channels}')
+        print(f"Re-referenced EEG data to: {ref_channels}")
 
         # Add reference channels to removal list if not using average reference
-        if ref_channels != 'average':
+        if ref_channels != "average":
             if isinstance(ref_channels, str):
                 to_remove.append(ref_channels)
             else:
@@ -591,60 +562,60 @@ class RAW(BaseRaw, FolderStructure):
         to_remove = [ch for ch in to_remove if ch in self.ch_names]
         if to_remove:
             self.drop_channels(to_remove)
-            print(f'Removed channels: {to_remove}')
+            print(f"Removed channels: {to_remove}")
 
         return self
 
     def configure_montage(
         self,
-        montage: Union[str, mne.channels.montage.DigMontage] = 'biosemi64',
-        ch_remove: Optional[List[str]] = None
-    ) -> 'RAW':
+        montage: Union[str, mne.channels.montage.DigMontage] = "biosemi64",
+        ch_remove: Optional[List[str]] = None,
+    ) -> "RAW":
         """
-        Set electrode montage and rename channels to standard 
+        Set electrode montage and rename channels to standard
         nomenclature.
 
-        Applies a standard electrode montage and optionally renames 
-        channels from BioSemi A/B naming scheme (A1-A32, B1-B32) to 
-        standard 10-20 system nomenclature. Channels can be removed 
+        Applies a standard electrode montage and optionally renames
+        channels from BioSemi A/B naming scheme (A1-A32, B1-B32) to
+        standard 10-20 system nomenclature. Channels can be removed
         prior to montage application.
 
         Parameters
         ----------
         montage : str or mne.channels.montage.DigMontage, optional
             Montage to apply. Can be either:
-            - String name of a standard montage (e.g., 'biosemi64', 
+            - String name of a standard montage (e.g., 'biosemi64',
               'biosemi128', 'standard_1020')
             - An MNE DigMontage object with custom electrode positions
             Default is 'biosemi64'.
         ch_remove : list of str, optional
-            Channel names to remove before applying the montage. 
+            Channel names to remove before applying the montage.
             Default is None (no channels removed).
 
         Returns
         -------
         self : RAW
-            Returns the instance itself with updated montage and 
+            Returns the instance itself with updated montage and
             channel names.
 
         Notes
         -----
         - Modifications are performed in-place.
-        - If channels use BioSemi naming (A1-A32, B1-B32), they are 
+        - If channels use BioSemi naming (A1-A32, B1-B32), they are
           automatically renamed to match the montage's standard names.
         - Channel removal is performed before montage application.
-        - Missing channels in the montage trigger a warning but do not 
+        - Missing channels in the montage trigger a warning but do not
           raise an error.
 
         Examples
         --------
         >>> # Apply standard biosemi64 montage
         >>> raw.configure_montage('biosemi64')
-        
+
         >>> # Apply montage and remove external channels
-        >>> raw.configure_montage('biosemi64', 
+        >>> raw.configure_montage('biosemi64',
         ...     ch_remove=['EXG7', 'EXG8'])
-        
+
         >>> # Use custom montage
         >>> custom_montage = mne.channels.make_dig_montage(...)
         >>> raw.configure_montage(custom_montage)
@@ -660,7 +631,7 @@ class RAW(BaseRaw, FolderStructure):
             ch_to_remove = [ch for ch in ch_remove if ch in self.ch_names]
             if ch_to_remove:
                 self.drop_channels(ch_to_remove)
-                print(f'Removed {len(ch_to_remove)} channels: {ch_to_remove}')
+                print(f"Removed {len(ch_to_remove)} channels: {ch_to_remove}")
 
         # Get montage object if string was passed
         if isinstance(montage, str):
@@ -670,33 +641,31 @@ class RAW(BaseRaw, FolderStructure):
 
         # Create mapping dictionary for renaming BioSemi channels
         ch_mapping = {}
-        if len(self.ch_names) > 0 and self.ch_names[0].startswith('A'):
+        if len(self.ch_names) > 0 and self.ch_names[0].startswith("A"):
             # Check if using BioSemi naming convention
             biosemi_pattern = all(
-                ch.startswith(('A', 'B')) and ch[1:].isdigit() 
-                for ch in self.ch_names[:min(10, len(self.ch_names))]
-                if not ch.startswith('EXG')
+                ch.startswith(("A", "B")) and ch[1:].isdigit()
+                for ch in self.ch_names[: min(10, len(self.ch_names))]
+                if not ch.startswith("EXG")
             )
-            
-            if biosemi_pattern and hasattr(montage_obj, 'ch_names'):
+
+            if biosemi_pattern and hasattr(montage_obj, "ch_names"):
                 idx = 0
-                for hemi in ['A', 'B', 'C', 'D']:
+                for hemi in ["A", "B", "C", "D"]:
                     for elec in range(1, 33):
-                        ch_name = f'{hemi}{elec}'
-                        if ch_name in self.ch_names and \
-                            idx < len(montage_obj.ch_names):
+                        ch_name = f"{hemi}{elec}"
+                        if ch_name in self.ch_names and idx < len(montage_obj.ch_names):
                             ch_mapping[ch_name] = montage_obj.ch_names[idx]
                             idx += 1
-                
+
                 if ch_mapping:
                     self.rename_channels(ch_mapping)
-                    print(f'Renamed {len(ch_mapping)} channels from BioSemi '
-                          f'to 10-20 system')
+                    print(f"Renamed {len(ch_mapping)} channels from BioSemi " f"to 10-20 system")
 
         # Apply montage
-        self.set_montage(montage=montage_obj, on_missing='warn')
+        self.set_montage(montage=montage_obj, on_missing="warn")
         montage_name = montage if isinstance(montage, str) else "custom"
-        print(f'Montage {montage_name} applied')
+        print(f"Montage {montage_name} applied")
 
         return self
 
@@ -706,84 +675,83 @@ class RAW(BaseRaw, FolderStructure):
         stim_channel: Optional[str] = None,
         binary: int = 0,
         consecutive: bool = False,
-        min_duration: float = 0.003
+        min_duration: float = 0.003,
     ) -> np.ndarray:
         """
         Detect and extract trigger events from stimulus channel.
 
-        Finds trigger events in the raw EEG data using MNE's event 
-        detection. Optionally corrects for binary offsets in the trigger 
+        Finds trigger events in the raw EEG data using MNE's event
+        detection. Optionally corrects for binary offsets in the trigger
         channel and removes consecutive duplicate events.
 
         Parameters
         ----------
         event_id : list of int, optional
-            List of trigger values to retain in the output. If None, 
+            List of trigger values to retain in the output. If None,
             all detected events are returned. Default is None.
         stim_channel : str, optional
-            Name of the stimulus/trigger channel. If None, uses the 
-            default stim channel specified during data loading. 
+            Name of the stimulus/trigger channel. If None, uses the
+            default stim channel specified during data loading.
             Default is None.
         binary : int, optional
-            Binary offset to subtract from the stimulus channel before 
-            event detection. Used to correct for spoke triggers or other 
+            Binary offset to subtract from the stimulus channel before
+            event detection. Used to correct for spoke triggers or other
             systematic offsets. Default is 0 (no correction).
         consecutive : bool, optional
-            If False, only report events where the trigger channel value 
-            changes from/to zero. If True, report all trigger value 
+            If False, only report events where the trigger channel value
+            changes from/to zero. If True, report all trigger value
             changes. Default is False.
         min_duration : float, optional
-            Minimum duration (in seconds) required for a trigger value 
+            Minimum duration (in seconds) required for a trigger value
             change to be considered a valid event. Default is 0.003.
 
         Returns
         -------
         events : ndarray, shape (n_events, 3)
             Array of events with columns:
-            - Column 0: Event sample number (including first_samp 
+            - Column 0: Event sample number (including first_samp
               offset)
             - Column 1: Previous trigger value (for MNE compatibility)
             - Column 2: Current trigger/event ID
 
         Notes
         -----
-        - Binary offset correction is applied temporarily and does not 
+        - Binary offset correction is applied temporarily and does not
           modify the underlying data.
-        - Consecutive duplicate events (same trigger appearing twice in 
+        - Consecutive duplicate events (same trigger appearing twice in
           a row) are removed unless consecutive=True.
-        - If event_id is specified, only matching events are included 
+        - If event_id is specified, only matching events are included
           in duplicate removal logic.
 
         Examples
         --------
         >>> # Detect all events
         >>> events = raw.select_events()
-        
+
         >>> # Detect specific trigger values
         >>> events = raw.select_events(event_id=[1, 2, 3])
-        
+
         >>> # Correct for binary offset and detect events
         >>> events = raw.select_events(event_id=[10, 20], binary=3840)
-        
+
         >>> # Include consecutive events
-        >>> events = raw.select_events(event_id=[1, 2], 
+        >>> events = raw.select_events(event_id=[1, 2],
         ...             consecutive=True)
         """
 
         # Get stim channel data (make a copy to avoid modifying original)
         if stim_channel is None:
             # Find the stim channel
-            stim_picks = self.copy().pick('stim', exclude=[]).ch_names
+            stim_picks = self.copy().pick("stim", exclude=[]).ch_names
             if len(stim_picks) == 0:
-                raise ValueError('No stim channel found in data')
+                raise ValueError("No stim channel found in data")
             stim_idx = self.ch_names.index(stim_picks[0])
         else:
             try:
                 stim_idx = self.ch_names.index(stim_channel)
             except ValueError as exc:
-                raise ValueError(f'Stimulus channel {stim_channel} not '
-                                 f'found in data') from exc
-        
+                raise ValueError(f"Stimulus channel {stim_channel} not " f"found in data") from exc
+
         # Apply binary offset correction temporarily
         original_data = None
         if binary != 0:
@@ -793,10 +761,7 @@ class RAW(BaseRaw, FolderStructure):
         try:
             # Find events using MNE
             events = mne.find_events(
-                self,
-                stim_channel=stim_channel,
-                consecutive=consecutive,
-                min_duration=min_duration
+                self, stim_channel=stim_channel, consecutive=consecutive, min_duration=min_duration
             )
 
             # Remove consecutive identical events if needed
@@ -804,22 +769,21 @@ class RAW(BaseRaw, FolderStructure):
                 # Find consecutive duplicates for events in event_id
                 is_duplicate = np.zeros(len(events), dtype=bool)
                 for i in range(len(events) - 1):
-                    if (events[i, 2] == events[i + 1, 2] and 
-                        events[i, 2] in event_id):
+                    if events[i, 2] == events[i + 1, 2] and events[i, 2] in event_id:
                         is_duplicate[i] = True
-                
+
                 if np.any(is_duplicate):
                     events = events[~is_duplicate]
                     nr_removed = np.sum(is_duplicate)
-                    print(f'{nr_removed} consecutive duplicate events removed')
+                    print(f"{nr_removed} consecutive duplicate events removed")
 
             # Filter events by event_id if specified
             if event_id is not None:
                 mask = np.isin(events[:, 2], event_id)
                 events = events[mask]
-                print(f'{len(events)} events detected matching event_id')
+                print(f"{len(events)} events detected matching event_id")
             else:
-                print(f'{len(events)} events detected')
+                print(f"{len(events)} events detected")
 
         finally:
             # Restore original data if binary offset was applied
@@ -828,13 +792,14 @@ class RAW(BaseRaw, FolderStructure):
 
         return events
 
+
 class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
     """
-    Extended MNE Epochs class with behavioral data integration and 
+    Extended MNE Epochs class with behavioral data integration and
     filtering.
 
-    Extends `mne.Epochs` to add experimental workflow functionality 
-    includingfilter padding, behavioral data alignment, eye-tracking 
+    Extends `mne.Epochs` to add experimental workflow functionality
+    includingfilter padding, behavioral data alignment, eye-tracking
     integration, and trial exclusion based on experimental factors.
 
     Parameters
@@ -846,7 +811,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
     raw : mne.io.Raw
         Continuous data from which to extract epochs.
     events : np.ndarray
-        Event array with shape (n_events, 3) containing sample indices 
+        Event array with shape (n_events, 3) containing sample indices
         and event IDs.
     event_id : int, list, or dict
         Event identifier(s) to extract epochs for.
@@ -855,9 +820,9 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
     tmax : float, optional
         End time after event (in seconds). Default is 0.5.
     flt_pad : float or tuple, optional
-        Filter padding to add before tmin and after tmax. If tuple, 
-        specifies(pad_before, pad_after). If float, same padding is 
-        used for both sides. Padding is removed after filtering to avoid 
+        Filter padding to add before tmin and after tmax. If tuple,
+        specifies(pad_before, pad_after). If float, same padding is
+        used for both sides. Padding is removed after filtering to avoid
         edge artifacts.
     baseline : tuple, optional
         Baseline correction interval (start, end) in seconds.
@@ -867,7 +832,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
     preload : bool, optional
         Whether to load data into memory. Default is True.
     reject : dict, optional
-        Rejection parameters based on peak-to-peak amplitude 
+        Rejection parameters based on peak-to-peak amplitude
         (e.g., {'eeg': 100e-6}).
     flat : dict, optional
         Rejection parameters based on flatness (e.g., {'eeg': 1e-6}).
@@ -880,7 +845,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
     reject_tmax : float, optional
         End time for rejection window (relative to epoch start).
     detrend : int, optional
-        Detrending order (0 for constant, 1 for linear). 
+        Detrending order (0 for constant, 1 for linear).
         Default is None.
     on_missing : str, optional
         How to handle missing events. Default is 'raise'.
@@ -953,10 +918,10 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         reject_tmin: float = None,
         reject_tmax: float = None,
         detrend: int = None,
-        on_missing: str = 'raise',
+        on_missing: str = "raise",
         reject_by_annotation: bool = False,
         metadata: pd.DataFrame = None,
-        event_repeated: str = 'error',
+        event_repeated: str = "error",
         verbose: Union[bool, str, int] = None,
     ):
         """
@@ -972,20 +937,20 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         raw : mne.io.Raw
             Continuous data from which to extract epochs.
         events : np.ndarray
-            Event array with shape (n_events, 3) containing sample 
+            Event array with shape (n_events, 3) containing sample
             indices and event IDs.
         event_id : int, list, or dict
-            Event identifier(s) to extract epochs for. Can be single 
+            Event identifier(s) to extract epochs for. Can be single
             event ID, list of IDs, or dictionary mapping names to IDs.
         tmin : float, default=-0.2
             Start time before event (in seconds).
         tmax : float, default=0.5
             End time after event (in seconds).
         flt_pad : float or tuple, optional
-            Filter padding to add before tmin and after tmax to avoid 
-            edge artifacts during filtering. If tuple, specifies 
-            (pad_before, pad_after). If float, same padding is used 
-            for both sides. Padding is removed after filtering. 
+            Filter padding to add before tmin and after tmax to avoid
+            edge artifacts during filtering. If tuple, specifies
+            (pad_before, pad_after). If float, same padding is used
+            for both sides. Padding is removed after filtering.
             Default is None.
         baseline : tuple, default=(None, None)
             Baseline correction interval (start, end) in seconds.
@@ -994,10 +959,10 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         preload : bool, default=True
             Whether to load data into memory.
         reject : dict, optional
-            Rejection parameters based on peak-to-peak amplitude 
+            Rejection parameters based on peak-to-peak amplitude
             (e.g., {'eeg': 100e-6}).
         flat : dict, optional
-            Rejection parameters based on flatness (e.g., 
+            Rejection parameters based on flatness (e.g.,
             {'eeg': 1e-6}).
         proj : bool, default=False
             Whether to apply SSP projection vectors.
@@ -1008,7 +973,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         reject_tmax : float, optional
             End time for rejection window (relative to epoch start).
         detrend : int, optional
-            Detrending order (0 for constant, 1 for linear). 
+            Detrending order (0 for constant, 1 for linear).
             Default is None.
         on_missing : str, default='raise'
             How to handle missing events ('raise', 'warn', or 'ignore').
@@ -1039,12 +1004,12 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         ...     flt_pad=(0.3, 0.5)
         ... )
         """
-        
+
         # Set child class specific info with zero-padded formatting
         self.sj = format_subject_id(sj)
         self.session = format_subject_id(session)
         self.flt_pad = flt_pad
-        
+
         # Apply filter padding to time window if specified
         if flt_pad is not None:
             if isinstance(flt_pad, (tuple, list)):
@@ -1053,7 +1018,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             else:
                 tmin -= flt_pad
                 tmax += flt_pad
-  
+
         # Initialize parent MNE Epochs class
         super(Epochs, self).__init__(
             raw=raw,
@@ -1081,82 +1046,82 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
     def align_meta_data(
         self,
         events: np.ndarray,
-        trigger_header: str = 'trigger',
+        trigger_header: str = "trigger",
         beh_oi: Optional[List[str]] = None,
         idx_remove: Optional[np.ndarray] = None,
         eye_inf: Optional[dict] = None,
-        del_practice: bool = True, 
+        del_practice: bool = True,
         excl_factor: Optional[dict] = None,
     ) -> Tuple[np.ndarray, str]:
         """
         Align epoched EEG data with behavioral data from CSV file.
 
-        Matches EEG epochs with behavioral trial data by comparing 
-        trigger values. Handles mismatches by removing trials from 
-        behavioral data or epochs from EEG data. Optionally integrates 
+        Matches EEG epochs with behavioral trial data by comparing
+        trigger values. Handles mismatches by removing trials from
+        behavioral data or epochs from EEG data. Optionally integrates
         eye-tracking data and removes practice trials.
 
         Parameters
         ----------
         events : np.ndarray
-            Event array as returned by RAW.select_events, 
+            Event array as returned by RAW.select_events,
             shape (n_events, 3). Column 2 contains trigger values.
         trigger_header : str, optional
-            Column name in behavioral CSV containing trigger values used 
+            Column name in behavioral CSV containing trigger values used
             for epoching. Default is 'trigger'.
         beh_oi : list of str, optional
             List of column names from behavioral data to link to epochs.
             If None, all columns are used. Default is None.
         idx_remove : np.ndarray, optional
-            Indices of trigger events to remove before alignment. Useful 
+            Indices of trigger events to remove before alignment. Useful
             for removing spurious triggers. Default is None.
         eye_inf : dict, optional
-            Dictionary with eye tracking parameters. If None, no eye 
-            tracking data is processed. Expected keys: 'eog' (list of 4 
-            channel names), 'tracker_ext', 'sfreq', 'viewing_dist', 
-            'screen_res', 'screen_h', 'start', 'window_oi', 
+            Dictionary with eye tracking parameters. If None, no eye
+            tracking data is processed. Expected keys: 'eog' (list of 4
+            channel names), 'tracker_ext', 'sfreq', 'viewing_dist',
+            'screen_res', 'screen_h', 'start', 'window_oi',
             'trigger_msg', 'drift_correct'. Default is None.
         del_practice : bool, optional
-            If True, removes practice trials from behavioral data before 
-            alignment. Requires 'practice' column with 'yes'/'no' 
+            If True, removes practice trials from behavioral data before
+            alignment. Requires 'practice' column with 'yes'/'no'
             values. Default is True.
         excl_factor : dict, optional
-            Dictionary specifying factors for trial exclusion. Passed to 
+            Dictionary specifying factors for trial exclusion. Passed to
             trial_exclusion function. Default is None.
 
         Returns
         -------
         missing : np.ndarray
-            Array of trial numbers removed from behavioral data due to 
+            Array of trial numbers removed from behavioral data due to
             missing EEG triggers.
         report_str : str
-            Detailed report of the alignment process including number of 
+            Detailed report of the alignment process including number of
             matches, removed trials, and eye tracking status.
 
         Raises
         ------
         ValueError
-            If behavioral file has more trials than EEG epochs and 
-            'nr_trials' column is missing, preventing informed 
-            alignment. If too many EEG triggers exist and automatic 
+            If behavioral file has more trials than EEG epochs and
+            'nr_trials' column is missing, preventing informed
+            alignment. If too many EEG triggers exist and automatic
             alignment fails.
 
         Notes
         -----
-        - Requires behavioral CSV file with columns: trigger values 
-          column (specified by trigger_header) and 'nr_trials' 
+        - Requires behavioral CSV file with columns: trigger values
+          column (specified by trigger_header) and 'nr_trials'
           (trial counter).
-        - self.selection attribute (inherited from mne.Epochs) contains 
+        - self.selection attribute (inherited from mne.Epochs) contains
           indices of non-dropped epochs.
-        - Modifies self.metadata in-place to store aligned behavioral 
+        - Modifies self.metadata in-place to store aligned behavioral
           data.
-        - Eye tracking data alignment is performed if eye_inf is 
+        - Eye tracking data alignment is performed if eye_inf is
           provided.
         - **Recommended trigger scheme**: Use ascending numerical
-          triggers (1, 2, 3, etc.) rather than condition-specific 
-          values (e.g., 10 for left target, 20 for right target). After 
-          alignment, all behavioral variables are accessible via 
-          self.metadata, making trigger-condition coupling redundant and 
+          triggers (1, 2, 3, etc.) rather than condition-specific
+          values (e.g., 10 for left target, 20 for right target). After
+          alignment, all behavioral variables are accessible via
+          self.metadata, making trigger-condition coupling redundant and
           error-prone.
 
         Examples
@@ -1166,7 +1131,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         ...     events=events,
         ...     beh_oi=['trigger', 'condition', 'RT', 'accuracy']
         ... )
-        
+
         >>> # With eye tracking and practice trial removal
         >>> missing, report = epochs.align_meta_data(
         ...     events=events,
@@ -1175,31 +1140,31 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         ...     del_practice=True
         ... )
         """
-        
+
         if beh_oi is None:
             beh_oi = []
 
-        print('Linking behavior to epochs')
-        report_str = ''
+        print("Linking behavior to epochs")
+        report_str = ""
 
         # read in data file and select param of interest
         df = self.read_raw_beh(self.sj, self.session)
         if len(df) == 0:
             # Debug: print what's being searched for
-            beh_folder = self.folder_tracker(ext=['behavioral', 'raw'], fname='')
+            beh_folder = self.folder_tracker(ext=["behavioral", "raw"], fname="")
             print(f"DEBUG: No behavioral files found")
             print(f"DEBUG: Searched in folder: {beh_folder}")
             print(f"DEBUG: Looking for subject {self.sj}, session {self.session}")
             print(f"DEBUG: Pattern: sub_{self.sj}_ses_{self.session}*.csv")
-            return np.array([]), 'No behavior file found'
-        
+            return np.array([]), "No behavior file found"
+
         # Validate required columns
         if trigger_header not in df.columns:
             raise ValueError(
                 f"Trigger column '{trigger_header}' not found in behavioral "
                 f"data. Available columns: {list(df.columns)}"
             )
-        
+
         # Select columns of interest
         if beh_oi:
             missing_cols = [col for col in beh_oi if col not in df.columns]
@@ -1216,21 +1181,25 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         eeg_triggers = events[self.selection, 2]
 
         # remove practice trials
-        if del_practice and 'practice' in beh_oi:
-            nr_remove = df[df.practice == 'yes'].shape[0]
-            nr_exp = df[df.practice == 'no'].shape[0]
+        if del_practice and "practice" in beh_oi:
+            nr_remove = df[df.practice == "yes"].shape[0]
+            nr_exp = df[df.practice == "no"].shape[0]
             # check whether EEG and practice triggers overlap
             practice_triggers = df[trigger_header].values[:nr_remove]
-            if all(practice_triggers == eeg_triggers[:nr_remove]) and \
-                nr_exp -  eeg_triggers.size < 0:
-                self.drop(np.arange(nr_remove))    
-                report_str += (f'{nr_remove} practice events removed '
-                           'from eeg based on automatic detection. '
-                           'Please inspect data carefully')
+            if (
+                all(practice_triggers == eeg_triggers[:nr_remove])
+                and nr_exp - eeg_triggers.size < 0
+            ):
+                self.drop(np.arange(nr_remove))
+                report_str += (
+                    f"{nr_remove} practice events removed "
+                    "from eeg based on automatic detection. "
+                    "Please inspect data carefully"
+                )
                 eeg_triggers = np.delete(eeg_triggers, np.arange(nr_remove))
-            print(f'{nr_remove} practice trials removed from behavior')
-            df = df[df.practice == 'no']
-            df = df.drop(['practice'], axis=1)
+            print(f"{nr_remove} practice trials removed from behavior")
+            df = df[df.practice == "no"]
+            df = df.drop(["practice"], axis=1)
             df.reset_index(inplace=True, drop=True)
         beh_triggers = df[trigger_header].values
 
@@ -1238,38 +1207,43 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         if idx_remove is not None:
             self.drop(idx_remove)
             nr_remove = idx_remove.size
-            report_str += (f'{nr_remove} trigger events removed '
-                           'as specified by the user\n')
+            report_str += f"{nr_remove} trigger events removed " "as specified by the user\n"
             eeg_triggers = np.delete(eeg_triggers, idx_remove)
 
         # check alignment
         session_switch = np.diff(df.nr_trials) < 1
         if sum(session_switch) > 0:
-            idx = np.where(session_switch)[0]+1
-            trial_split = np.array_split(df.nr_trials.values,idx)
+            idx = np.where(session_switch)[0] + 1
+            trial_split = np.array_split(df.nr_trials.values, idx)
             # Convert to writeable copies (array_split returns read-only views)
             trial_split = [np.array(chunk, copy=True) for chunk in trial_split]
-            for i in range(1,len(trial_split)):
-                trial_split[i] += trial_split[i-1][-1]
+            for i in range(1, len(trial_split)):
+                trial_split[i] += trial_split[i - 1][-1]
             df.nr_trials = np.hstack(trial_split)
-            
+
         missing_trials = []
         nr_miss = beh_triggers.size - eeg_triggers.size
- 
-        if nr_miss > 0:
-            report_str += (f'<br><br><b>⚠ ALIGNMENT:</b> Behavioral file '
-                          f'has {nr_miss} more trial(s) than EEG. '
-                          f'Removing excess trials...<br>')
 
-            if 'nr_trials' not in df.columns:
-                raise ValueError('Behavior file does not contain a column '
-                                'with trial info named nr_trials. Please '
-                                'adjust for automatic alignment')
+        if nr_miss > 0:
+            report_str += (
+                f"<br><br><b>⚠ ALIGNMENT:</b> Behavioral file "
+                f"has {nr_miss} more trial(s) than EEG. "
+                f"Removing excess trials...<br>"
+            )
+
+            if "nr_trials" not in df.columns:
+                raise ValueError(
+                    "Behavior file does not contain a column "
+                    "with trial info named nr_trials. Please "
+                    "adjust for automatic alignment"
+                )
         elif nr_miss < 0:
-            report_str += ('EEG has more events than behavioral trials. '
-                          'Removing excess EEG epochs to align data. '
-                          'Please inspect your data carefully!\n')
-            
+            report_str += (
+                "EEG has more events than behavioral trials. "
+                "Removing excess EEG epochs to align data. "
+                "Please inspect your data carefully!\n"
+            )
+
             if all(beh_triggers == eeg_triggers[:nr_miss]):
                 idx_remove = np.arange(eeg_triggers.size)[nr_miss:]
                 nr_miss = 0
@@ -1301,23 +1275,23 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             # check file sizes
             if sum(beh_triggers == eeg_triggers) < eeg_triggers.size:
                 raise ValueError(
-                    'Behavior and EEG cannot be linked: too many EEG triggers.'
-                    ' Please pass indices of trials to be removed via ' 
-                    'idx_remove parameter.'
+                    "Behavior and EEG cannot be linked: too many EEG triggers."
+                    " Please pass indices of trials to be removed via "
+                    "idx_remove parameter."
                 )
-            
+
         add_info = False if nr_miss > 10 else True
         while nr_miss > 0:
             stop = True
             # continue to remove beh trials until data files are lined up
             for i, tr in enumerate(eeg_triggers):
-                if tr != beh_triggers[i]: # remove trigger from beh_file
-                    miss = df['nr_trials'].iloc[i]
+                if tr != beh_triggers[i]:  # remove trigger from beh_file
+                    miss = df["nr_trials"].iloc[i]
                     missing_trials.append(miss)
                     if add_info:
-                        report_str += f'{miss}, '
-                    else: 
-                        print(f'removed trial {miss}')
+                        report_str += f"{miss}, "
+                    else:
+                        print(f"removed trial {miss}")
                     df.drop(df.index[i], inplace=True)
                     beh_triggers = np.delete(beh_triggers, i, axis=0)
                     nr_miss -= 1
@@ -1327,16 +1301,19 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             # check whether there are missing trials at end of beh file
             if beh_triggers.size > eeg_triggers.size and stop:
                 # drop the last items from the beh file
-                new_miss = df.loc[df.index[-nr_miss:].values, 'nr_trials']
-                missing_trials = np.hstack((missing_trials,
-                                           new_miss.values))
+                new_miss = df.loc[df.index[-nr_miss:].values, "nr_trials"]
+                missing_trials = np.hstack((missing_trials, new_miss.values))
                 df.drop(df.index[-nr_miss:], inplace=True)
-                report_str += (f'&nbsp;&nbsp;&nbsp;✓ Removed final '
-                              f'{nr_miss} trial(s) from behavioral '
-                              f'data<br>')
-                report_str += (f'&nbsp;&nbsp;&nbsp;⚠ See terminal '
-                              f'output and HTML report (eeg/reports/) '
-                              f'for details<br>')
+                report_str += (
+                    f"&nbsp;&nbsp;&nbsp;✓ Removed final "
+                    f"{nr_miss} trial(s) from behavioral "
+                    f"data<br>"
+                )
+                report_str += (
+                    f"&nbsp;&nbsp;&nbsp;⚠ See terminal "
+                    f"output and HTML report (eeg/reports/) "
+                    f"for details<br>"
+                )
                 nr_miss = 0
 
         # keep track of missing trials to align eye tracking data (if any)
@@ -1346,47 +1323,62 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         # log number of matches between beh and EEG
         nr_matches = sum(df[trigger_header].values == eeg_triggers)
         nr_epochs = eeg_triggers.size
-        report_str += (f'<br><br><b>✓ VERIFICATION:</b> '
-                      f'{nr_matches}/{nr_epochs} behavioral triggers '
-                      f'matched to EEG events<br>')
+        report_str += (
+            f"<br><br><b>✓ VERIFICATION:</b> "
+            f"{nr_matches}/{nr_epochs} behavioral triggers "
+            f"matched to EEG events<br>"
+        )
         if nr_matches == nr_epochs:
-            report_str += ('&nbsp;&nbsp;&nbsp;✓ Perfect match! All '
-                          'triggers aligned successfully<br>')
+            report_str += (
+                "&nbsp;&nbsp;&nbsp;✓ Perfect match! All " "triggers aligned successfully<br>"
+            )
         elif nr_matches >= nr_epochs * 0.99:
-            report_str += ('&nbsp;&nbsp;&nbsp;✓ Excellent alignment '
-                          '(>99%)<br>')
+            report_str += "&nbsp;&nbsp;&nbsp;✓ Excellent alignment " "(>99%)<br>"
         else:
             pct = 100 * nr_matches / nr_epochs
-            report_str += (f'&nbsp;&nbsp;&nbsp;⚠ Check alignment '
-                          f'quality ({pct:.1f}% matched)<br>')
+            report_str += (
+                f"&nbsp;&nbsp;&nbsp;⚠ Check alignment " f"quality ({pct:.1f}% matched)<br>"
+            )
 
         # link eye(tracker) data if parameters provided
         if eye_inf is not None:
             tracker, eye_report = self.align_eye_data(
-                eye_inf, missing, nr_epochs,
-                vEOG=eye_inf.get('eog', [None]*4)[:2],
-                hEOG=eye_inf.get('eog', [None]*4)[2:]
+                eye_inf,
+                missing,
+                nr_epochs,
+                vEOG=eye_inf.get("eog", [None] * 4)[:2],
+                hEOG=eye_inf.get("eog", [None] * 4)[2:],
             )
         else:
-            tracker, eye_report = False, 'No eye tracker data linked'
+            tracker, eye_report = False, "No eye tracker data linked"
 
         # add behavior to epochs object
         if excl_factor is not None:
             df, self, idx = trial_exclusion(df, self, excl_factor)
             if tracker:
-                eye = np.load(self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz'))
-                eye_x, eye_y = eye['x'], eye['y']
+                eye = np.load(
+                    self.folder_tracker(
+                        ext=["eye", "processed"],
+                        fname=f"sub_{self.sj}_ses_{self.session}_xy_eye.npz",
+                    )
+                )
+                eye_x, eye_y = eye["x"], eye["y"]
                 eye_x = np.delete(eye_x, idx, axis=0)
                 eye_y = np.delete(eye_y, idx, axis=0)
-                np.savez(self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz'),
-                        times = eye['times'], x = eye_x, y = eye_y, 
-                        sfreq = eye['sfreq'])       
+                np.savez(
+                    self.folder_tracker(
+                        ext=["eye", "processed"],
+                        fname=f"sub_{self.sj}_ses_{self.session}_xy_eye.npz",
+                    ),
+                    times=eye["times"],
+                    x=eye_x,
+                    y=eye_y,
+                    sfreq=eye["sfreq"],
+                )
 
-            report_str += '\n✓ EXCLUSION: Trials excluded based on '
-            report_str += 'specified factors\n'
-            report_str += f'  • Final dataset contains {df.shape[0]} trials\n'
+            report_str += "\n✓ EXCLUSION: Trials excluded based on "
+            report_str += "specified factors\n"
+            report_str += f"  • Final dataset contains {df.shape[0]} trials\n"
         report_str += eye_report
         self.metadata = df
 
@@ -1398,67 +1390,67 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         missing: np.ndarray,
         nr_epochs: int,
         vEOG: Optional[List[str]] = None,
-        hEOG: Optional[List[str]] = None
+        hEOG: Optional[List[str]] = None,
     ) -> Tuple[bool, str]:
         """
-        Process EOG rereferencing and align eye tracker data with EEG 
+        Process EOG rereferencing and align eye tracker data with EEG
         epochs.
 
         This method performs two independent operations:
-        1. Optionally rereferences EOG electrodes via bipolar montage 
+        1. Optionally rereferences EOG electrodes via bipolar montage
            (subtraction)
-        2. Links eye tracker data files to EEG epochs and saves aligned 
+        2. Links eye tracker data files to EEG epochs and saves aligned
            gaze data
 
         Parameters
         ----------
         eye_info : dict, optional
-            Dictionary with eye tracking parameters. If None, only EOG 
+            Dictionary with eye tracking parameters. If None, only EOG
             processing is performed. Expected keys:
             - 'tracker_ext': str, file extension (e.g., 'asc', 'tsv')
             - 'sfreq': float, eye tracker sampling rate in Hz
             - 'viewing_dist': float, viewing distance in cm
-            - 'screen_res': tuple, screen resolution (width, height) in 
+            - 'screen_res': tuple, screen resolution (width, height) in
                pixels
             - 'screen_h': float, screen height in cm
             - 'start': str, event marker for trial start
             - 'stop': str, optional event marker for trial end
             - 'window_oi': tuple, time window of interest in ms
-            - 'trigger_msg': str, trigger message pattern in eye tracker 
+            - 'trigger_msg': str, trigger message pattern in eye tracker
                file
-            - 'drift_correct': tuple, time window for drift correction 
+            - 'drift_correct': tuple, time window for drift correction
                in ms
         missing : np.ndarray
-            Array of trial numbers that were removed from behavioral 
+            Array of trial numbers that were removed from behavioral
             data during alignment in align_meta_data.
         nr_epochs : int
             Expected number of EEG epochs after behavioral alignment.
         vEOG : list of str, optional
-            List of 2 channel names for vertical EOG 
-            (e.g., ['FP1', 'VEOG_lower']). If provided, VEOG channel is 
+            List of 2 channel names for vertical EOG
+            (e.g., ['FP1', 'VEOG_lower']). If provided, VEOG channel is
             created via subtraction. Default is None.
         hEOG : list of str, optional
-            List of 2 channel names for horizontal EOG 
-            (e.g., ['HEOG_left', 'HEOG_right']). If provided, HEOG 
+            List of 2 channel names for horizontal EOG
+            (e.g., ['HEOG_left', 'HEOG_right']). If provided, HEOG
             channel is created via subtraction. Default is None.
 
         Returns
         -------
         tracker_data : bool
-            True if eye tracker data was found and linked, False 
+            True if eye tracker data was found and linked, False
             otherwise.
         report_str : str
-            Report describing the processing outcome, including number 
+            Report describing the processing outcome, including number
             of linked eye tracking files and epochs.
 
         Notes
         -----
-        - EOG rereferencing creates bipolar montages: VEOG = ch1 - ch2, 
+        - EOG rereferencing creates bipolar montages: VEOG = ch1 - ch2,
           HEOG = ch1 - ch2.
         - Only channels that exist in self.ch_names are used for EOG.
-        - Eye tracker data is saved to npz file in 'eye/processed' 
+        - Eye tracker data is saved to npz file in 'eye/processed'
           folder.
-        - Trial alignment accounts for missing behavioral trials and 
+        - Trial alignment accounts for missing behavioral trials and
           session boundaries.
         - Gaze data (x, y coordinates) is aligned to EEG epoch timing.
 
@@ -1472,7 +1464,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         ...     vEOG=['Fp1', 'VEOG'],
         ...     hEOG=['HEOG_L', 'HEOG_R']
         ... )
-        
+
         >>> # Process eye tracker data only
         >>> tracker, report = epochs.align_eye_data(
         ...     eye_info=eye_params,
@@ -1483,102 +1475,108 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         ... )
         """
 
-        report_str = ('<br><br><b>✓ EYE TRACKING:</b> No eye tracker '
-                      'data linked<br>&nbsp;&nbsp;&nbsp;• To add eye '
-                      'tracking, provide eye_info parameter with eye '
-                      'tracker files')
+        report_str = (
+            "<br><br><b>✓ EYE TRACKING:</b> No eye tracker "
+            "data linked<br>&nbsp;&nbsp;&nbsp;• To add eye "
+            "tracking, provide eye_info parameter with eye "
+            "tracker files"
+        )
 
         # Optional: rereference external EOG electrodes via subtraction
         if vEOG is not None or hEOG is not None:
             # Filter to only channels that exist in the data
             vEOG = [ch for ch in vEOG if ch in self.ch_names] if vEOG else []
             hEOG = [ch for ch in hEOG if ch in self.ch_names] if hEOG else []
-            
+
             if len(vEOG) > 0 or len(hEOG) > 0:
-                eog = self.copy().pick(['eeg', 'eog'])
+                eog = self.copy().pick(["eeg", "eog"])
                 ch_names = eog.ch_names
-                
+
                 # Get indices for vertical and horizontal EOG channels
                 idx_v = [ch_names.index(v) for v in vEOG] if vEOG else []
                 idx_h = [ch_names.index(h) for h in hEOG] if hEOG else []
 
                 eog_data, eog_ch = [], []
                 if len(idx_v) == 2:
-                    VEOG = eog._data[:,idx_v[0]] - eog._data[:,idx_v[1]]
+                    VEOG = eog._data[:, idx_v[0]] - eog._data[:, idx_v[1]]
                     eog_data.append(VEOG)
-                    eog_ch.append('VEOG')
+                    eog_ch.append("VEOG")
                 if len(idx_h) == 2:
-                    HEOG = eog._data[:,idx_h[0]] - eog._data[:,idx_h[1]]
+                    HEOG = eog._data[:, idx_h[0]] - eog._data[:, idx_h[1]]
                     eog_data.append(HEOG)
-                    eog_ch.append('HEOG')
-                
+                    eog_ch.append("HEOG")
+
                 if len(eog_data) > 0:
-                    eog_data =  np.stack(eog_data).swapaxes(0,1)   
-                    self.add_channel_data(eog_data, eog_ch, self.info['sfreq'],
-                                        'eog', self.tmin)
-                    print('EOG data (VEOG, HEOG) rereferenced with subtraction'
-                          ' and renamed EOG channels')
-            
+                    eog_data = np.stack(eog_data).swapaxes(0, 1)
+                    self.add_channel_data(eog_data, eog_ch, self.info["sfreq"], "eog", self.tmin)
+                    print(
+                        "EOG data (VEOG, HEOG) rereferenced with subtraction"
+                        " and renamed EOG channels"
+                    )
+
         # Process eye tracker data if available
         if eye_info is not None:
-            ext = eye_info['tracker_ext']
+            ext = eye_info["tracker_ext"]
         else:
-            ext = '.asc'
-        
+            ext = ".asc"
+
         # Extract numeric values from sj and session (they're already formatted strings like '02')
         sj_num = int(self.sj) if isinstance(self.sj, str) else self.sj
         ses_num = int(self.session) if isinstance(self.session, str) else self.session
-        
-        eye_folder = self.folder_tracker(ext=['eye','raw'], fname='')
-        beh_folder = self.folder_tracker(ext=['behavioral', 'raw'], fname='')
-        
+
+        eye_folder = self.folder_tracker(ext=["eye", "raw"], fname="")
+        beh_folder = self.folder_tracker(ext=["behavioral", "raw"], fname="")
+
         # Use flexible glob pattern that matches any digit padding
         # Extract numeric values from filename and compare
         eye_files = []
-        for f in glob.glob(os.path.join(eye_folder, f'sub_*_ses_*.{ext}')):
-            match = re.search(r'sub_(\d+)_ses_(\d+)', os.path.basename(f))
+        for f in glob.glob(os.path.join(eye_folder, f"sub_*_ses_*.{ext}")):
+            match = re.search(r"sub_(\d+)_ses_(\d+)", os.path.basename(f))
             if match and int(match.group(1)) == sj_num and int(match.group(2)) == ses_num:
                 eye_files.append(f)
         eye_files = sorted(eye_files)
-        
+
         beh_files = []
-        for f in glob.glob(os.path.join(beh_folder, 'sub_*_ses_*.csv')):
-            match = re.search(r'sub_(\d+)_ses_(\d+)', os.path.basename(f))
+        for f in glob.glob(os.path.join(beh_folder, "sub_*_ses_*.csv")):
+            match = re.search(r"sub_(\d+)_ses_(\d+)", os.path.basename(f))
             if match and int(match.group(1)) == sj_num and int(match.group(2)) == ses_num:
                 beh_files.append(f)
         beh_files = sorted(beh_files)
 
         tracker_data = False
         if len(eye_files) > 0:
-            report_str = (f'<br><br><b>✓ EYE TRACKING:</b> Found '
-                         f'{len(eye_files)} eye tracking '
-                         f'file(s)<br>')
+            report_str = (
+                f"<br><br><b>✓ EYE TRACKING:</b> Found "
+                f"{len(eye_files)} eye tracking "
+                f"file(s)<br>"
+            )
             tracker_data = True
-            if 'stop' not in eye_info:
-                eye_info['stop'] = None
-            EO = EYE(sfreq = eye_info['sfreq'],
-                    viewing_dist = eye_info['viewing_dist'],
-                    screen_res = eye_info['screen_res'],
-                    screen_h = eye_info['screen_h'])
-            
-            (x,
-            y,
-            times,
-            bins,
-            angles,
-            trial_inf) =EO.link_eye_to_eeg(eye_files,beh_files,
-                            eye_info['start'],
-                            eye_info['stop'],eye_info['window_oi'], 
-                            eye_info['trigger_msg'],
-                            eye_info['drift_correct'])
+            if "stop" not in eye_info:
+                eye_info["stop"] = None
+            EO = EYE(
+                sfreq=eye_info["sfreq"],
+                viewing_dist=eye_info["viewing_dist"],
+                screen_res=eye_info["screen_res"],
+                screen_h=eye_info["screen_h"],
+            )
+
+            x, y, times, bins, angles, trial_inf = EO.link_eye_to_eeg(
+                eye_files,
+                beh_files,
+                eye_info["start"],
+                eye_info["stop"],
+                eye_info["window_oi"],
+                eye_info["trigger_msg"],
+                eye_info["drift_correct"],
+            )
 
             # check alignment
             session_switch = np.diff(trial_inf) < 1
             if sum(session_switch) > 0:
-                idx = np.where(session_switch)[0]+1
-                trial_split = np.array_split(trial_inf,idx)
-                for i in range(1,len(trial_split)):
-                    trial_split[i] += trial_split[i-1][-1]
+                idx = np.where(session_switch)[0] + 1
+                trial_split = np.array_split(trial_inf, idx)
+                for i in range(1, len(trial_split)):
+                    trial_split[i] += trial_split[i - 1][-1]
                 trial_inf = np.hstack(trial_split)
 
             # check whether missing trials in trial_info
@@ -1587,69 +1585,68 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             idx = []
             # check whether additional trials need to be removed
             if remove.size > 0:
-                _,_,idx = np.intersect1d(remove,trial_inf,return_indices=True) 
+                _, _, idx = np.intersect1d(remove, trial_inf, return_indices=True)
             if nr_epochs < trial_inf.size:
                 if len(idx) > 0:
-                    trial_inf = np.delete(trial_inf,idx)
+                    trial_inf = np.delete(trial_inf, idx)
                 to_remove = trial_inf.size - nr_epochs
                 if to_remove > 0:
-                    idx = np.hstack((idx, 
-                                    np.arange(trial_inf.size)[-to_remove:]))
-                    idx = np.array(idx,dtype = int)
+                    idx = np.hstack((idx, np.arange(trial_inf.size)[-to_remove:]))
+                    idx = np.array(idx, dtype=int)
 
-            bins = np.delete(bins,idx,axis = 0)
-            angles = np.delete(angles, idx,axis = 0)
-            x = np.delete(x, idx, axis =0)
-            y = np.delete(y, idx, axis = 0)  
+            bins = np.delete(bins, idx, axis=0)
+            angles = np.delete(angles, idx, axis=0)
+            x = np.delete(x, idx, axis=0)
+            y = np.delete(y, idx, axis=0)
             # TODO: add timing check
-            times /= 1000 # change to seconds
+            times /= 1000  # change to seconds
 
-            # save eye data 
-            report_str += (f'&nbsp;&nbsp;&nbsp;✓ Linked {bins.size} '
-                          f'eye epochs to EEG<br>')
-            report_str += f'&nbsp;&nbsp;&nbsp;• Eye data saved to: eye/processed/<br>'
-            np.savez(self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz'),
-                        times = times,x = x,y = y, sfreq = eye_info['sfreq'])
- 
+            # save eye data
+            report_str += f"&nbsp;&nbsp;&nbsp;✓ Linked {bins.size} " f"eye epochs to EEG<br>"
+            report_str += f"&nbsp;&nbsp;&nbsp;• Eye data saved to: eye/processed/<br>"
+            np.savez(
+                self.folder_tracker(
+                    ext=["eye", "processed"], fname=f"sub_{self.sj}_ses_{self.session}_xy_eye.npz"
+                ),
+                times=times,
+                x=x,
+                y=y,
+                sfreq=eye_info["sfreq"],
+            )
+
         return tracker_data, report_str
-            
+
     def add_channel_data(
-        self,
-        data: np.ndarray,
-        ch_names: List[str],
-        sfreq: float,
-        ch_type: str,
-        t_min: float
+        self, data: np.ndarray, ch_names: List[str], sfreq: float, ch_type: str, t_min: float
     ) -> None:
         """
-        Add new channels to epochs with automatic resampling and 
+        Add new channels to epochs with automatic resampling and
         alignment.
 
-        Creates new channels in the epochs object and fills them with 
-        provided data. Handles resampling if the data sampling rate 
-        differs from the EEG sampling rate. Useful for adding EOG 
-        channels, eye tracker gaze data, or other auxiliary signals to 
+        Creates new channels in the epochs object and fills them with
+        provided data. Handles resampling if the data sampling rate
+        differs from the EEG sampling rate. Useful for adding EOG
+        channels, eye tracker gaze data, or other auxiliary signals to
         existing epochs.
 
         Parameters
         ----------
         data : np.ndarray
-            Channel data to add, 
-            shape (n_epochs, n_channels, n_samples). Must have same 
+            Channel data to add,
+            shape (n_epochs, n_channels, n_samples). Must have same
             number of epochs as self.
         ch_names : list of str
             Names for the new channels to add.
         sfreq : float
-            Sampling rate of the input data in Hz. Data will be 
+            Sampling rate of the input data in Hz. Data will be
             resampled to match self.info['sfreq'] if different.
         ch_type : str
-            Channel type designation for all new channels. 
+            Channel type designation for all new channels.
             Common values: 'eeg', 'eog', 'ecg', 'emg', 'misc'.
             Determines how MNE processes and displays the channels.
         t_min : float
-            Start time of the data relative to epoch time-locking event, 
-            in seconds. Used to align data temporally with existing 
+            Start time of the data relative to epoch time-locking event,
+            in seconds. Used to align data temporally with existing
             epochs.
 
         Returns
@@ -1660,19 +1657,19 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         Notes
         -----
         - New channels are appended to the end of the channel list.
-        - Data is resampled using MNE's resample method if sfreq differs 
+        - Data is resampled using MNE's resample method if sfreq differs
           from self.info['sfreq'].
         - The method assumes data has the same number of epochs as self.
-        - Time alignment is performed using the t_min parameter to 
-          determine where to place the data within the epoch time 
+        - Time alignment is performed using the t_min parameter to
+          determine where to place the data within the epoch time
           window.
-        - Channel names must be unique and not already exist in 
+        - Channel names must be unique and not already exist in
           self.ch_names.
 
         Examples
         --------
         >>> # Add VEOG and HEOG channels sampled at 512 Hz
-        >>> eog_data = np.random.randn(100, 2, 256)  # 100 epochs, 
+        >>> eog_data = np.random.randn(100, 2, 256)  # 100 epochs,
         ...         2 channels, 256 samples
         >>> epochs.add_channel_data(
         ...     data=eog_data,
@@ -1681,7 +1678,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         ...     ch_type='eog',
         ...     t_min=-0.2
         ... )
-        
+
         >>> # Add eye tracker x/y coordinates sampled at 1000 Hz
         >>> gaze_data = np.random.randn(100, 2, 500)
         >>> epochs.add_channel_data(
@@ -1697,7 +1694,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         info = mne.create_info(ch_names=ch_names, sfreq=sfreq)
         temp_epochs = mne.EpochsArray(data, info)
         # downsample to align to eeg
-        temp_epochs.resample(self.info['sfreq'])
+        temp_epochs.resample(self.info["sfreq"])
 
         # now add the channels
         self.add_reference_channels(ch_names)
@@ -1708,41 +1705,37 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         nr_samples = temp_epochs._data.shape[-1]
         time_idx = get_time_slice(self.times, t_min, 0)
         s, e = time_idx.start, time_idx.start + nr_samples
-        self._data[:,-len(ch_names):,s:e] = temp_epochs._data
+        self._data[:, -len(ch_names) :, s:e] = temp_epochs._data
 
-    def report_epochs(self, report, title, missing = None):
+    def report_epochs(self, report, title, missing=None):
 
         if missing is not None:
-            report.add_html(missing, title = 'missing trials in beh')
+            report.add_html(missing, title="missing trials in beh")
 
-        report.add_epochs(self, title=title, psd = True)
+        report.add_epochs(self, title=title, psd=True)
 
         return report
-    
-    def save_preprocessed(
-        self,
-        preproc_name: str,
-        combine_sessions: bool = True
-    ) -> None:
+
+    def save_preprocessed(self, preproc_name: str, combine_sessions: bool = True) -> None:
         """
-        Save preprocessed epochs and optionally combines multiple 
+        Save preprocessed epochs and optionally combines multiple
         sessions.
 
-        Saves the current epochs object to disk in FIF format with a 
-        preprocessing identifier. If matching eye tracking data exists, 
-        it is renamed to match the preprocessing name. Optionally 
-        combines all sessions up to the current session into a single 
+        Saves the current epochs object to disk in FIF format with a
+        preprocessing identifier. If matching eye tracking data exists,
+        it is renamed to match the preprocessing name. Optionally
+        combines all sessions up to the current session into a single
         concatenated epochs file.
 
         Parameters
         ----------
         preproc_name : str
-            Preprocessing pipeline identifier to append to filename 
-            (e.g., 'clean', 'ica', 'filtered'). Used to distinguish 
+            Preprocessing pipeline identifier to append to filename
+            (e.g., 'clean', 'ica', 'filtered'). Used to distinguish
             different preprocessing stages.
         combine_sessions : bool, optional
-            If True and current session is not 1, combines all sessions 
-            from 1 to current session into a single epochs file with 
+            If True and current session is not 1, combines all sessions
+            from 1 to current session into a single epochs file with
             '_all' suffix. Default is True.
 
         Returns
@@ -1752,51 +1745,54 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
 
         Notes
         -----
-        - Individual session files are saved as: 
+        - Individual session files are saved as:
           'sub_{sj}_ses_{session}_{preproc_name}-epo.fif'
-        - Combined session file is saved as: 
+        - Combined session file is saved as:
           'sub_{sj}_all_{preproc_name}-epo.fif'
-        - Eye tracking data (if exists) is renamed from 
-          'sub_{sj}_ses_{session}_xy_eye.npz' to 
+        - Eye tracking data (if exists) is renamed from
+          'sub_{sj}_ses_{session}_xy_eye.npz' to
           'sub_{sj}_ses_{session}_{preproc_name}.npz'
-        - Files are split into 2GB chunks automatically to handle large 
+        - Files are split into 2GB chunks automatically to handle large
           datasets.
-        - All files are saved to the 'eeg/processed' folder managed by 
+        - All files are saved to the 'eeg/processed' folder managed by
           folder_tracker.
-        - Session combining uses self.session as the upper bound, so if 
+        - Session combining uses self.session as the upper bound, so if
           self.session=3, it will combine sessions 1, 2, and 3.
 
         Examples
         --------
         >>> # Save single session
         >>> epochs.save_preprocessed('clean')
-        
+
         >>> # Save without combining sessions
         >>> epochs.save_preprocessed('ica', combine_sessions=False)
-        
+
         >>> # Save session 3 and combine all sessions 1-3
         >>> epochs.session = '3'
-        >>> epochs.save_preprocessed('filtered')  # Creates individual 
+        >>> epochs.save_preprocessed('filtered')  # Creates individual
         ...         and combined files
         """
 
         # save eeg
         self.save(
             self.folder_tracker(
-                ext=['eeg', 'processed'],
-                fname=f'sub_{self.sj}_ses_{self.session}_{preproc_name}-epo.fif'
+                ext=["eeg", "processed"],
+                fname=f"sub_{self.sj}_ses_{self.session}_{preproc_name}-epo.fif",
             ),
-            split_size='2GB',
-            overwrite=True
+            split_size="2GB",
+            overwrite=True,
         )
 
         # check whether matching eye file exists and adjust name
-        eye_file = self.folder_tracker(ext=['eye','processed'],
-                        fname=f'sub_{self.sj}_ses_{self.session}_xy_eye.npz')
+        eye_file = self.folder_tracker(
+            ext=["eye", "processed"], fname=f"sub_{self.sj}_ses_{self.session}_xy_eye.npz"
+        )
         if os.path.exists(eye_file):
             old_name = eye_file
-            new_name = self.folder_tracker(ext=['eye','processed'],
-                fname=f'sub_{self.sj}_ses_{self.session}_{preproc_name}.npz')
+            new_name = self.folder_tracker(
+                ext=["eye", "processed"],
+                fname=f"sub_{self.sj}_ses_{self.session}_{preproc_name}.npz",
+            )
             os.rename(old_name, new_name)
 
         # check whether individual sessions need to be combined
@@ -1807,36 +1803,33 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             all_eye_times = None
             all_eye_sfreq = None
             eye_data_exists = True
-            
+
             for i in range(int(self.session)):
                 session = i + 1
                 session_str = format_subject_id(session)
-                
+
                 # Load EEG data
                 all_eeg.append(
                     mne.read_epochs(
                         self.folder_tracker(
-                            ext=['eeg', 'processed'],
-                            fname=(
-                                f'sub_{self.sj}_ses_{session_str}_'
-                                f'{preproc_name}-epo.fif'
-                            )
+                            ext=["eeg", "processed"],
+                            fname=(f"sub_{self.sj}_ses_{session_str}_" f"{preproc_name}-epo.fif"),
                         )
                     )
                 )
-                
+
                 # Try to load eye tracking data
                 eye_file = self.folder_tracker(
-                    ext=['eye', 'processed'],
-                    fname=f'sub_{self.sj}_ses_{session_str}_{preproc_name}.npz'
+                    ext=["eye", "processed"],
+                    fname=f"sub_{self.sj}_ses_{session_str}_{preproc_name}.npz",
                 )
                 if os.path.isfile(eye_file):
                     eye_data = np.load(eye_file)
-                    all_eye_x.append(eye_data['x'])
-                    all_eye_y.append(eye_data['y'])
+                    all_eye_x.append(eye_data["x"])
+                    all_eye_y.append(eye_data["y"])
                     if all_eye_times is None:
-                        all_eye_times = eye_data['times']
-                        all_eye_sfreq = eye_data['sfreq']
+                        all_eye_times = eye_data["times"]
+                        all_eye_sfreq = eye_data["sfreq"]
                 else:
                     eye_data_exists = False
 
@@ -1844,28 +1837,25 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
             all_eeg = mne.concatenate_epochs(all_eeg)
             all_eeg.save(
                 self.folder_tracker(
-                    ext=['eeg', 'processed'],
-                    fname=f'sub_{self.sj}_all_{preproc_name}-epo.fif'
+                    ext=["eeg", "processed"], fname=f"sub_{self.sj}_all_{preproc_name}-epo.fif"
                 ),
-                split_size='2GB',
-                overwrite=True
+                split_size="2GB",
+                overwrite=True,
             )
-            
+
             # Combine and save eye tracking data if it exists
             if eye_data_exists and len(all_eye_x) > 0:
                 combined_eye_x = np.vstack(all_eye_x)
                 combined_eye_y = np.vstack(all_eye_y)
                 np.savez(
                     self.folder_tracker(
-                        ext=['eye', 'processed'],
-                        fname=f'sub_{self.sj}_all_{preproc_name}.npz'
+                        ext=["eye", "processed"], fname=f"sub_{self.sj}_all_{preproc_name}.npz"
                     ),
                     times=all_eye_times,
                     x=combined_eye_x,
                     y=combined_eye_y,
-                    sfreq=all_eye_sfreq
+                    sfreq=all_eye_sfreq,
                 )
-
 
     def baseline_by_condition(
         self,
@@ -1873,8 +1863,8 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         cnds: list,
         cnd_header: str,
         base_period: tuple = (-0.1, 0),
-        nr_elec: int = 64
-    ) -> 'Epochs':
+        nr_elec: int = 64,
+    ) -> "Epochs":
         """
         Apply baseline correction separately for each condition.
 
@@ -1894,7 +1884,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         base_period : tuple, default=(-0.1, 0)
             Baseline time window in seconds (start, end).
         nr_elec : int, default=64
-            Number of EEG electrodes to baseline correct. Non-EEG 
+            Number of EEG electrodes to baseline correct. Non-EEG
             channels (EOG, etc.) after this index are not corrected.
 
         Returns
@@ -1907,7 +1897,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         Modifies EEG data in-place! Cannot be undone without reloading.
 
         This is an advanced function. Standard baseline correction via
-        mne.Epochs(..., baseline=(-0.1, 0)) is recommended for most 
+        mne.Epochs(..., baseline=(-0.1, 0)) is recommended for most
         cases.
 
         Notes
@@ -1958,12 +1948,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
 
         return self
 
-    def shift_by_condition(
-        self,
-        df: pd.DataFrame,
-        cnd_info: dict,
-        cnd_header: str
-    ) -> 'Epochs':
+    def shift_by_condition(self, df: pd.DataFrame, cnd_info: dict, cnd_header: str) -> "Epochs":
         """
         Shift epoch timings by condition to align events of interest.
 
@@ -1991,7 +1976,7 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         Warnings
         --------
         **DATA IS ARTIFICIALLY MANIPULATED!**
-        
+
         - Modifies EEG data in-place
         - Shifts are circular (uses np.roll) - edge effects occur!
         - Cannot be undone without reloading
@@ -2003,14 +1988,14 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         The function prints warnings about data manipulation and shows
         original timing range.
 
-        Shifting is done via np.roll which wraps around 
+        Shifting is done via np.roll which wraps around
         (circular shift):
-        
+
         - Forward shift: early samples wrap to end
         - Backward shift: late samples wrap to beginning
 
         Consider alternatives:
-        
+
         - Re-epoch data with condition-specific time windows
         - Use different event codes for analysis
         - Align on different events during preprocessing
@@ -2033,23 +2018,22 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
         baseline_by_condition : Condition-specific baseline correction
         """
 
-        print('Data will be artificially shifted. Be careful in selecting '
-              'the window of interest for further analysis')
-        print(f'Original timings range from {self.tmin} to {self.tmax}')
-        
+        print(
+            "Data will be artificially shifted. Be careful in selecting "
+            "the window of interest for further analysis"
+        )
+        print(f"Original timings range from {self.tmin} to {self.tmax}")
+
         # Loop over all conditions
         for cnd in cnd_info.keys():
             # Set how much data needs to be shifted
             to_shift = cnd_info[cnd]
-            to_shift = int(np.diff([np.argmin(abs(self.times - t))
-                                   for t in (0, to_shift)])[0])
-            
+            to_shift = int(np.diff([np.argmin(abs(self.times - t)) for t in (0, to_shift)])[0])
+
             if to_shift < 0:
-                print(f'EEG data is shifted backward in time for all '
-                      f'{cnd} trials')
+                print(f"EEG data is shifted backward in time for all " f"{cnd} trials")
             elif to_shift > 0:
-                print(f'EEG data is shifted forward in time for all '
-                      f'{cnd} trials')
+                print(f"EEG data is shifted forward in time for all " f"{cnd} trials")
 
             # Find indices of epochs to shift
             mask = (df[cnd_header] == cnd).values
@@ -2059,14 +2043,19 @@ class Epochs(mne.Epochs, BaseEpochs, FolderStructure):
 
         return self
 
+
 class ArtefactReject(object):
-    """ Multiple (automatic artefact rejection procedures)
+    """Multiple (automatic artefact rejection procedures)
     Work in progress
     """
 
-    def __init__(self,
-                z_thresh: float = 4.0, max_bad: int = 5,
-                flt_pad:Union[float,tuple,list]=0.0,filter_z: bool = True):
+    def __init__(
+        self,
+        z_thresh: float = 4.0,
+        max_bad: int = 5,
+        flt_pad: Union[float, tuple, list] = 0.0,
+        filter_z: bool = True,
+    ):
 
         self.flt_pad = flt_pad
         self.filter_z = filter_z
@@ -2080,72 +2069,72 @@ class ArtefactReject(object):
         ica_inst: Union[mne.Epochs, mne.io.Raw],
         sj: int,
         session: int,
-        method: str = 'picard',
+        method: str = "picard",
         threshold: float = 0.9,
         report: Optional[mne.Report] = None,
-        report_path: Optional[str] = None
+        report_path: Optional[str] = None,
     ) -> Union[mne.Epochs, mne.io.Raw]:
         """
         Semi-automated ICA correction to remove blink and other artifacts.
 
-        Fits ICA on clean epochs, automatically detects blink components 
-        using EOG correlation, allows manual verification/override, and 
-        applies ICA to remove artifacts. While designed primarily for 
-        blink detection, manual verification allows exclusion of other 
-        artifact components (e.g., heartbeat, muscle activity, electrode 
-        noise) identified through visual inspection of the ICA report. 
-        Fitting and application can use independent data instances 
+        Fits ICA on clean epochs, automatically detects blink components
+        using EOG correlation, allows manual verification/override, and
+        applies ICA to remove artifacts. While designed primarily for
+        blink detection, manual verification allows exclusion of other
+        artifact components (e.g., heartbeat, muscle activity, electrode
+        noise) identified through visual inspection of the ICA report.
+        Fitting and application can use independent data instances
         (e.g., fit on subset, apply to all).
 
         Parameters
         ----------
         fit_inst : mne.Epochs or mne.io.Raw
-            Data instance to fit ICA model on. If Epochs, noisy trials 
+            Data instance to fit ICA model on. If Epochs, noisy trials
             are automatically dropped using autoreject before fitting.
         raw : mne.io.Raw
-            Raw data instance for EOG-based blink detection. Must 
+            Raw data instance for EOG-based blink detection. Must
             contain EOG channels.
         ica_inst : mne.Epochs or mne.io.Raw
-            Data instance to apply ICA cleaning to. Can be same as or 
+            Data instance to apply ICA cleaning to. Can be same as or
             different from fit_inst.
         sj : int
             Subject number for user prompts and identification.
         session : int
             Session number for user prompts and identification.
         method : str, optional
-            ICA decomposition algorithm. Options: 'picard' (default, 
-            fastest), 'fastica', 'extended_infomax'. Default is 
+            ICA decomposition algorithm. Options: 'picard' (default,
+            fastest), 'fastica', 'extended_infomax'. Default is
             'picard'.
         threshold : float, optional
-            Correlation threshold for automatic blink component 
-            detection (0-1). Higher values require stronger EOG 
+            Correlation threshold for automatic blink component
+            detection (0-1). Higher values require stronger EOG
             correlation. Default is 0.9.
         report : mne.Report, optional
-            MNE report object to add ICA visualizations to. If None, no 
+            MNE report object to add ICA visualizations to. If None, no
             report is generated. Default is None.
         report_path : str, optional
-            File path to save report. Required if report is provided. 
+            File path to save report. Required if report is provided.
             Default is None.
 
         Returns
         Notes
         -----
-        - Interactive workflow: automatically suggests components, user 
+        - Interactive workflow: automatically suggests components, user
           can verify/override via terminal prompts
-        - If Epochs provided for fitting, uses autoreject to drop noisy 
+        - If Epochs provided for fitting, uses autoreject to drop noisy
           trials before ICA fit
-        - Reports show component topographies, time courses, and EOG 
+        - Reports show component topographies, time courses, and EOG
           correlations for all components (not just blink-related)
         - Manual override loop continues until user confirms selection
-        - Typical workflow: fit on clean subset of trials, apply to all 
+        - Typical workflow: fit on clean subset of trials, apply to all
           trials
-        - Users can manually select additional components beyond 
-          automatically detected blink artifacts (e.g., heartbeat, 
-          muscle artifacts) by inspecting component topographies and 
+        - Users can manually select additional components beyond
+          automatically detected blink artifacts (e.g., heartbeat,
+          muscle artifacts) by inspecting component topographies and
           time courses in the report
 
         Examples override loop continues until user confirms selection
-        - Typical workflow: fit on clean subset of trials, apply to all 
+        - Typical workflow: fit on clean subset of trials, apply to all
           trials
 
         Examples
@@ -2159,7 +2148,7 @@ class ArtefactReject(object):
         ...     sj=1,
         ...     session=1
         ... )
-        
+
         >>> # With report generation
         >>> report = mne.Report()
         >>> epochs_clean = ar.run_blink_ICA(
@@ -2174,16 +2163,14 @@ class ArtefactReject(object):
         """
         # step 1: fit the data (after dropping noise trials if Epochs)
         if isinstance(fit_inst, mne.Epochs):
-            with open(os.devnull, 'w', encoding='utf-8') as f:
+            with open(os.devnull, "w", encoding="utf-8") as f:
                 with redirect_stdout(f):
-                    reject = get_rejection_threshold(fit_inst, ch_types='eeg')
+                    reject = get_rejection_threshold(fit_inst, ch_types="eeg")
                     fit_inst.drop_bad(reject)
         ica = self.fit_ICA(fit_inst, method=method)
 
         # step 2: select the blink component
-        (eog_epochs,
-        eog_inds,
-        eog_scores) = self.automated_ica_blink_selection(ica, raw, threshold)
+        eog_epochs, eog_inds, eog_scores = self.automated_ica_blink_selection(ica, raw, threshold)
         ica.exclude = [eog_inds[0]] if len(eog_inds) > 0 else []
         ica_added = False  # Track whether ICA has been added to report
 
@@ -2196,7 +2183,7 @@ class ArtefactReject(object):
                     eog_evoked = None
                 report.add_ica(
                     ica=ica,
-                    title='ICA blink cleaning',
+                    title="ICA blink cleaning",
                     picks=range(15),
                     inst=fit_inst,
                     eog_evoked=eog_evoked,
@@ -2204,44 +2191,40 @@ class ArtefactReject(object):
                 )
                 report.save(report_path, overwrite=True, open_browser=False)
                 ica_added = True
-            
+
             # Ask user if they agree with the components
             time.sleep(5)
             flush_input()
-            print(f'You are preprocessing subject {sj}, session {session}')
+            print(f"You are preprocessing subject {sj}, session {session}")
             excl_list = [int(x) for x in ica.exclude] if ica.exclude else []
             conf = input(
-                f'Advanced detection selected component(s) {excl_list} '
-                '(see report). Do you agree (y/n)? '
+                f"Advanced detection selected component(s) {excl_list} "
+                "(see report). Do you agree (y/n)? "
             )
-            
-            if conf == 'y':
+
+            if conf == "y":
                 # User is satisfied, break out of loop
                 break
             else:
                 # User wants to manually select components
                 eog_inds = []
-                nr_comp = input(
-                    'How many components do you want to select (<10)? '
-                )
+                nr_comp = input("How many components do you want to select (<10)? ")
                 for i in range(int(nr_comp)):
-                    eog_inds.append(
-                        int(input(f'What is component nr {i + 1}? '))
-                    )
+                    eog_inds.append(int(input(f"What is component nr {i + 1}? ")))
                 ica.exclude = eog_inds
-                
+
                 # Update report with new components
                 if report is not None:
                     try:
-                        report.remove(title='ICA blink cleaning')
-                        print('Removed previous ICA section from report.')
+                        report.remove(title="ICA blink cleaning")
+                        print("Removed previous ICA section from report.")
                     except:
-                        print('No previous ICA section to remove from report.')
+                        print("No previous ICA section to remove from report.")
                         pass
-                    
+
                     # Save after removing to ensure clean state
                     report.save(report_path, overwrite=True, open_browser=False)
-                    
+
                     if eog_epochs is not None:
                         eog_evoked = eog_epochs.average()
                     else:
@@ -2249,35 +2232,31 @@ class ArtefactReject(object):
                     # Add updated ICA section
                     report.add_ica(
                         ica=ica,
-                        title='ICA blink cleaning',
+                        title="ICA blink cleaning",
                         picks=range(15),
                         inst=fit_inst,
                         eog_evoked=eog_evoked,
                         eog_scores=eog_scores,
                     )
                     report.save(report_path, overwrite=True, open_browser=False)
-                    print('Updated ICA components in report. Please review.')
+                    print("Updated ICA components in report. Please review.")
 
         # step 3: apply ica
         ica_inst = self.apply_ICA(ica, ica_inst)
 
         return ica_inst
 
-    def fit_ICA(
-        self,
-        fit_inst: Union[mne.Epochs, mne.io.Raw],
-        method: str = 'picard'
-    ) -> ICA:
+    def fit_ICA(self, fit_inst: Union[mne.Epochs, mne.io.Raw], method: str = "picard") -> ICA:
         """
         Fit ICA decomposition model on EEG data.
 
-        Decomposes EEG data into independent components using specified 
+        Decomposes EEG data into independent components using specified
         ICA algorithm. Excludes bad channels from decomposition.
 
         Parameters
         ----------
         fit_inst : mne.Epochs or mne.io.Raw
-            Data to fit ICA on. Should be adequately preprocessed 
+            Data to fit ICA on. Should be adequately preprocessed
             (filtered, bad channels marked).
         method : str, optional
             ICA algorithm to use:
@@ -2304,11 +2283,11 @@ class ArtefactReject(object):
         >>> ica = ar.fit_ICA(epochs, method='picard')
         >>> print(f'Fitted {ica.n_components_} components')
         """
-        if method == 'picard':
+        if method == "picard":
             fit_params = dict(fastica_it=5)
-        elif method == 'extended_infomax':
+        elif method == "extended_infomax":
             fit_params = dict(extended=True)
-        elif method == 'fastica':
+        elif method == "fastica":
             fit_params = None
         else:
             raise ValueError(
@@ -2316,28 +2295,22 @@ class ArtefactReject(object):
                 "Choose from 'picard', 'fastica', or 'extended_infomax'."
             )
 
-        picks = fit_inst.copy().pick('eeg', exclude='bads').ch_names
+        picks = fit_inst.copy().pick("eeg", exclude="bads").ch_names
         ica = ICA(
-            n_components=len(picks) - 1,
-            method=method,
-            fit_params=fit_params,
-            random_state=97
+            n_components=len(picks) - 1, method=method, fit_params=fit_params, random_state=97
         )
         ica.fit(fit_inst, picks=picks)
 
         return ica
 
     def automated_ica_blink_selection(
-        self,
-        ica: ICA,
-        raw: mne.io.Raw,
-        threshold: float = 0.9
+        self, ica: ICA, raw: mne.io.Raw, threshold: float = 0.9
     ) -> Tuple[Optional[mne.Epochs], List[int], Optional[np.ndarray]]:
         """
         Automatically detect ICA components correlated with blinks.
 
-        Identifies ICA components that correlate with EOG channels above 
-        a threshold, indicating blink artifacts. Creates blink-locked 
+        Identifies ICA components that correlate with EOG channels above
+        a threshold, indicating blink artifacts. Creates blink-locked
         epochs from EOG and correlates with ICA components.
 
         Parameters
@@ -2347,26 +2320,26 @@ class ArtefactReject(object):
         raw : mne.io.Raw
             Raw data containing EOG channels for blink detection.
         threshold : float, optional
-            Absolute correlation threshold (0-1) for component 
-            selection. Components with |correlation| > threshold are 
+            Absolute correlation threshold (0-1) for component
+            selection. Components with |correlation| > threshold are
             flagged. Default is 0.9.
 
         Returns
         -------
         eog_epochs : mne.Epochs or None
-            Blink-locked epochs created from EOG channel, or None if no 
+            Blink-locked epochs created from EOG channel, or None if no
             EOG channels found.
         eog_inds : list of int
             Indices of ICA components exceeding correlation threshold.
         eog_scores : ndarray or None
-            Correlation scores for each component, or None if no EOG 
+            Correlation scores for each component, or None if no EOG
             channels found.
 
         Notes
         -----
         - Requires at least one EOG channel in raw.info['chs']
         - Blink epochs: -0.5 to 0.5 s, baseline -0.5 to -0.2 s
-        - Returns empty list for eog_inds if no components exceed 
+        - Returns empty list for eog_inds if no components exceed
           threshold
         - Prints warning if no EOG channels are available
 
@@ -2385,45 +2358,33 @@ class ArtefactReject(object):
         if pick_eog.size > 0:
             # create blink epochs
             eog_epochs = create_eog_epochs(
-                raw,
-                ch_name=ch_names,
-                baseline=(None, -0.2),
-                tmin=-0.5,
-                tmax=0.5
+                raw, ch_name=ch_names, baseline=(None, -0.2), tmin=-0.5, tmax=0.5
             )
-            eog_inds, eog_scores = ica.find_bads_eog(
-                eog_epochs,
-                threshold=threshold
-            )
+            eog_inds, eog_scores = ica.find_bads_eog(eog_epochs, threshold=threshold)
         else:
             eog_epochs = None
             eog_inds = []
             eog_scores = None
-            print(
-                'No EOG channel is present. Cannot automate IC detection '
-                'for EOG'
-            )
+            print("No EOG channel is present. Cannot automate IC detection " "for EOG")
 
         return eog_epochs, eog_inds, eog_scores
 
     def apply_ICA(
-        self,
-        ica: ICA,
-        ica_inst: Union[mne.Epochs, mne.io.Raw]
+        self, ica: ICA, ica_inst: Union[mne.Epochs, mne.io.Raw]
     ) -> Union[mne.Epochs, mne.io.Raw]:
         """
         Apply ICA to remove selected artifact components from data.
 
-        Removes ICA components specified in ica.exclude from the data 
+        Removes ICA components specified in ica.exclude from the data
         by reconstructing the signal without those components.
 
         Parameters
         ----------
         ica : mne.preprocessing.ICA
-            Fitted ICA object with components to exclude specified in 
+            Fitted ICA object with components to exclude specified in
             ica.exclude.
         ica_inst : mne.Epochs or mne.io.Raw
-            Data to apply ICA cleaning to. Must have same channel 
+            Data to apply ICA cleaning to. Must have same channel
             configuration as data used to fit ICA.
 
         Returns
@@ -2455,18 +2416,18 @@ class ArtefactReject(object):
         drop_bads: bool,
         z_thresh: float = 4.0,
         band_pass: Optional[List[int]] = None,
-        report: Optional[mne.Report] = None
+        report: Optional[mne.Report] = None,
     ) -> Tuple[mne.Epochs, float, Optional[mne.Report]]:
         """
-        Detect and repair high-frequency noise artifacts using iterative 
+        Detect and repair high-frequency noise artifacts using iterative
         channel interpolation.
 
-        Implements FieldTrip's artifact detection procedure with an 
-        intelligent repair strategy. Detects muscle/noise artifacts by 
-        filtering in high-frequency band (110-140 Hz), applying Hilbert 
-        transform, and z-scoring across channels. Epochs with artifacts 
-        are iteratively cleaned by interpolating the noisiest channels 
-        (up to max_bad). Epochs that cannot be cleaned are either 
+        Implements FieldTrip's artifact detection procedure with an
+        intelligent repair strategy. Detects muscle/noise artifacts by
+        filtering in high-frequency band (110-140 Hz), applying Hilbert
+        transform, and z-scoring across channels. Epochs with artifacts
+        are iteratively cleaned by interpolating the noisiest channels
+        (up to max_bad). Epochs that cannot be cleaned are either
         dropped or marked in metadata.
 
         Parameters
@@ -2478,30 +2439,30 @@ class ArtefactReject(object):
         session : int
             Session number for eye tracking file synchronization.
         drop_bads : bool
-            If True, drop epochs that cannot be cleaned. If False, mark 
-            them in epochs.metadata['bad_epochs'] column (0=good, 
+            If True, drop epochs that cannot be cleaned. If False, mark
+            them in epochs.metadata['bad_epochs'] column (0=good,
             1=bad).
         z_thresh : float, optional
-            Starting z-value threshold for artifact detection. Final 
-            threshold is data-driven: 
-            z_thresh + median(Z) + |min(Z) - median(Z)|. 
+            Starting z-value threshold for artifact detection. Final
+            threshold is data-driven:
+            z_thresh + median(Z) + |min(Z) - median(Z)|.
             Default is 4.0.
         band_pass : list of int, optional
-            [lower, upper] frequency bounds in Hz for bandpass filter. 
+            [lower, upper] frequency bounds in Hz for bandpass filter.
             Default is [110, 140] for muscle artifact detection.
         report : mne.Report, optional
-            MNE report object to add visualization figures to. If None, 
+            MNE report object to add visualization figures to. If None,
             no figures are generated. Default is None.
 
         Returns
         -------
         epochs : mne.Epochs
-            Cleaned epochs with artifacts removed via interpolation or 
+            Cleaned epochs with artifacts removed via interpolation or
             epoch dropping.
         z_thresh : float
             Final data-driven z-threshold used for detection.
         report : mne.Report or None
-            Updated report with artifact detection figures, or None if 
+            Updated report with artifact detection figures, or None if
             no report provided.
 
         Notes
@@ -2510,12 +2471,12 @@ class ArtefactReject(object):
           1. Bandpass filter → Hilbert envelope → box smoothing (0.2s)
           2. Z-score across channels, normalize by √(n_channels)
           3. Data-driven threshold adjustment
-        - Cleaning strategy: For each flagged epoch, iteratively 
-          interpolate noisiest channels (up to self.max_bad), 
+        - Cleaning strategy: For each flagged epoch, iteratively
+          interpolate noisiest channels (up to self.max_bad),
           re-checking after each interpolation
-        - Eye tracking synchronization: If drop_bads=True and eye 
+        - Eye tracking synchronization: If drop_bads=True and eye
           tracking data exists, corresponding eye epochs are deleted
-        - Visualizations in report: z-score time series, channel 
+        - Visualizations in report: z-score time series, channel
           interpolation heatmap, interpolation histograms
         - Based on FieldTrip tutorial:
           https://www.fieldtriptoolbox.org/tutorial/
@@ -2529,7 +2490,7 @@ class ArtefactReject(object):
         >>> epochs_clean, thresh, report = ar.auto_repair_noise(
         ...     epochs, sj=1, session=1, drop_bads=True, report=report
         ... )
-        
+
         >>> # Mark bad epochs in metadata without dropping
         >>> epochs_clean, thresh, _ = ar.auto_repair_noise(
         ...     epochs, sj=1, session=1, drop_bads=False
@@ -2540,68 +2501,64 @@ class ArtefactReject(object):
             band_pass = [110, 140]
 
         # z score data (after hilbert transform)
-        (Z, elecs_z,
-        z_thresh, times) = self.preprocess_epochs(epochs, band_pass, z_thresh)
+        Z, elecs_z, z_thresh, times = self.preprocess_epochs(epochs, band_pass, z_thresh)
 
         # mark noise epochs
-        noise_inf = self.mark_bads(Z,z_thresh,times)
+        noise_inf = self.mark_bads(Z, z_thresh, times)
 
         # clean epochs
         nr_bad = len(noise_inf)
-        prc_bad = nr_bad/len(epochs)*100
-        print(f'start iterative cleaning procedure. {nr_bad} epochs marked\
-            ({prc_bad:.1f} %)')
-        (epochs,
-        bad_epochs,
-        cleaned_epochs) = self.iterative_interpolation(epochs, elecs_z,
-                          noise_inf, z_thresh, band_pass)
-        picks = epochs.copy().pick('eeg', exclude='bads').ch_names
+        prc_bad = nr_bad / len(epochs) * 100
+        print(f"start iterative cleaning procedure. {nr_bad} epochs marked\
+            ({prc_bad:.1f} %)")
+        epochs, bad_epochs, cleaned_epochs = self.iterative_interpolation(
+            epochs, elecs_z, noise_inf, z_thresh, band_pass
+        )
+        picks = epochs.copy().pick("eeg", exclude="bads").ch_names
         picks = [epochs.ch_names.index(ch) for ch in picks]
 
         # drop bad epochs
         if drop_bads:
-            epochs.drop(np.array(bad_epochs), reason='Artefact reject')
+            epochs.drop(np.array(bad_epochs), reason="Artefact reject")
             # Format subject and session IDs with zero-padding
             sj_fmt = format_subject_id(sj)
             session_fmt = format_subject_id(session)
-            file = FolderStructure().folder_tracker(ext=['eye','processed'],
-                        fname=f'sub_{sj_fmt}_ses_{session_fmt}_xy_eye.npz')
+            file = FolderStructure().folder_tracker(
+                ext=["eye", "processed"], fname=f"sub_{sj_fmt}_ses_{session_fmt}_xy_eye.npz"
+            )
 
             if os.path.isfile(file) and len(bad_epochs) > 0:
                 eye = np.load(file)
-                eye_x, eye_y = eye['x'], eye['y']
+                eye_x, eye_y = eye["x"], eye["y"]
                 eye_x = np.delete(eye_x, np.array(bad_epochs), axis=0)
                 eye_y = np.delete(eye_y, np.array(bad_epochs), axis=0)
-                np.savez(file,times = eye['times'], x = eye_x, y = eye_y, 
-                        sfreq = eye['sfreq'])   
+                np.savez(file, times=eye["times"], x=eye_x, y=eye_y, sfreq=eye["sfreq"])
         else:
             if epochs.metadata is None:
                 epochs.metadata = pd.DataFrame(index=range(len(epochs)))
             epochs.metadata.reset_index(inplace=True)
-            epochs.metadata['bad_epochs'] = 0
-            epochs.metadata.loc[
-                epochs.metadata.index.isin(bad_epochs), 'bad_epochs'
-            ] = 1
-
+            epochs.metadata["bad_epochs"] = 0
+            epochs.metadata.loc[epochs.metadata.index.isin(bad_epochs), "bad_epochs"] = 1
 
         if report is not None:
-            channels = np.array(epochs.info['ch_names'])[picks]
-            report.add_figure(self.plot_auto_repair(channels, Z, z_thresh),
-                                title = 'Iterative z cleaning procedure')
+            channels = np.array(epochs.info["ch_names"])[picks]
+            report.add_figure(
+                self.plot_auto_repair(channels, Z, z_thresh), title="Iterative z cleaning procedure"
+            )
 
         return epochs, z_thresh, report
-    
+
     def preprocess_epochs(
         self,
         epochs: mne.Epochs,
         band_pass: Optional[List[int]] = None,
-        z_thresh: Optional[float] = None
+        z_thresh: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray]:
         """
         Preprocess epochs for artifact detection using FieldTrip method.
 
-        Applies bandpass filtering, Hilbert transform with envelope 
-        extraction, box smoothing, and z-scoring across channels. 
+        Applies bandpass filtering, Hilbert transform with envelope
+        extraction, box smoothing, and z-scoring across channels.
         Handles filter padding to exclude edge artifacts from analysis.
 
         Parameters
@@ -2620,17 +2577,17 @@ class ArtefactReject(object):
         Returns
         -------
         Z : np.ndarray
-            2D array of normalized z-scores across channels, 
+            2D array of normalized z-scores across channels,
             shape (n_epochs, n_times). Excludes filter padding samples.
         elecs_z : np.ndarray
-            3D array of z-scores per electrode, 
-            shape (n_epochs, n_channels, n_times). Excludes filter 
+            3D array of z-scores per electrode,
+            shape (n_epochs, n_channels, n_times). Excludes filter
             padding samples.
         z_thresh : float
-            Data-driven z-score threshold calculated as: 
+            Data-driven z-score threshold calculated as:
             self.z_thresh + median(Z) + |min(Z) - median(Z)|.
         times : np.ndarray
-            Time points in seconds corresponding to returned data, 
+            Time points in seconds corresponding to returned data,
             excluding filter padding.
 
         Notes
@@ -2641,11 +2598,11 @@ class ArtefactReject(object):
           3. Box smoothing with 0.2s window
           4. Z-score across channels, normalize by √(n_channels)
           5. Data-driven threshold adjustment
-        - Filter padding (self.flt_pad) is excluded from z-scoring and 
+        - Filter padding (self.flt_pad) is excluded from z-scoring and
           returned data to avoid edge artifacts
-        - If band_pass upper bound exceeds Nyquist frequency 
+        - If band_pass upper bound exceeds Nyquist frequency
           (sfreq/2), it's automatically reduced to Nyquist - 1 Hz
-        - Bad channels (in epochs.info['bads']) are excluded from 
+        - Bad channels (in epochs.info['bads']) are excluded from
           processing
 
         Examples
@@ -2665,38 +2622,26 @@ class ArtefactReject(object):
         flt_pad = self.flt_pad
         times = epochs.times
         tmin, tmax = epochs.tmin, epochs.tmax
-        sfreq = epochs.info['sfreq']
+        sfreq = epochs.info["sfreq"]
 
         # filter, apply hilbert, and smooth the data
         if band_pass[1] > sfreq / 2:
             band_pass[1] = sfreq / 2 - 1
             warnings.warn(
-                'High cutoff frequency is greater than Nyquist '
-                'frequency. Setting to Nyquist frequency.'
+                "High cutoff frequency is greater than Nyquist "
+                "frequency. Setting to Nyquist frequency."
             )
         X = self.apply_hilbert(epochs, band_pass[0], band_pass[1])
         X = self.box_smoothing(X, sfreq)
 
         # z score data (while ignoring flt_pad samples)
         if isinstance(self.flt_pad, (float, int)):
-            mask = np.logical_and(
-                tmin + self.flt_pad <= times,
-                times <= tmax - self.flt_pad
-            )
-            time_idx = epochs.time_as_index(
-                [tmin + flt_pad, tmax - flt_pad]
-            )
+            mask = np.logical_and(tmin + self.flt_pad <= times, times <= tmax - self.flt_pad)
+            time_idx = epochs.time_as_index([tmin + flt_pad, tmax - flt_pad])
         else:
-            mask = np.logical_and(
-                tmin + self.flt_pad[0] <= times,
-                times <= tmax - self.flt_pad[1]
-            )
-            time_idx = epochs.time_as_index(
-                [tmin + flt_pad[0], tmax - flt_pad[1]]
-            )
-        Z, elecs_z, z_thresh = self.z_score_data(
-            X, z_thresh, mask, (self.filter_z, sfreq)
-        )
+            mask = np.logical_and(tmin + self.flt_pad[0] <= times, times <= tmax - self.flt_pad[1])
+            time_idx = epochs.time_as_index([tmin + flt_pad[0], tmax - flt_pad[1]])
+        Z, elecs_z, z_thresh = self.z_score_data(X, z_thresh, mask, (self.filter_z, sfreq))
 
         # control for filter padding
         Z = Z[:, slice(*time_idx)]
@@ -2706,49 +2651,46 @@ class ArtefactReject(object):
         return Z, elecs_z, z_thresh, times
 
     def apply_hilbert(
-        self, 
-        epochs: mne.Epochs, 
-        lower_band: int = 110, 
-        upper_band: int = 140
+        self, epochs: mne.Epochs, lower_band: int = 110, upper_band: int = 140
     ) -> np.ndarray:
         """
-        Apply Hilbert transform to extract signal envelope in specified 
+        Apply Hilbert transform to extract signal envelope in specified
         frequency band.
 
-        This method filters epochs to the specified frequency band, 
-        applies the Hilbert transform, and extracts the envelope 
-        (amplitude) of the analytic signal. Used primarily for muscle 
+        This method filters epochs to the specified frequency band,
+        applies the Hilbert transform, and extracts the envelope
+        (amplitude) of the analytic signal. Used primarily for muscle
         artifact detection in high-frequency bands (e.g., 110-140 Hz).
 
         Parameters
         ----------
         epochs : mne.Epochs
-            MNE epochs object containing EEG data. Channels marked as 
+            MNE epochs object containing EEG data. Channels marked as
             'bads' will be excluded from processing.
         lower_band : int, optional
-            Lower cutoff frequency of bandpass filter in Hz. 
+            Lower cutoff frequency of bandpass filter in Hz.
             Default is 110.
         upper_band : int, optional
-            Upper cutoff frequency of bandpass filter in Hz. 
+            Upper cutoff frequency of bandpass filter in Hz.
             Default is 140.
 
         Returns
         -------
         X : np.ndarray
-            Envelope data after Hilbert transform, 
-            shape (n_epochs, n_channels, n_times). Contains amplitude 
-            values representing signal envelope in the specified 
+            Envelope data after Hilbert transform,
+            shape (n_epochs, n_channels, n_times). Contains amplitude
+            values representing signal envelope in the specified
             frequency band.
 
         Notes
         -----
         - Processing steps:
           1. Copy epochs and exclude bad channels
-          2. Bandpass filter to specified frequency range (FIR filter 
+          2. Bandpass filter to specified frequency range (FIR filter
              with 'firwin' design)
           3. Apply Hilbert transform with envelope extraction
           4. Extract and return data array
-        - The filter uses 'reflect_limited' padding to minimize edge 
+        - The filter uses 'reflect_limited' padding to minimize edge
            artifacts.
         - Original epochs object is not modified.
 
@@ -2757,22 +2699,17 @@ class ArtefactReject(object):
         >>> # Extract muscle artifact envelope (110-140 Hz)
         >>> envelope_data = self.apply_hilbert(epochs, 110, 140)
         >>> print(f'Envelope shape: {envelope_data.shape}')
-        
+
         >>> # Use custom frequency band
         >>> envelope_data = self.apply_hilbert(epochs, 50, 70)
         """
 
         # exclude channels that are marked as overall bad
         epochs_ = epochs.copy()
-        epochs_.pick('eeg', exclude='bads')
+        epochs_.pick("eeg", exclude="bads")
 
         # filter data and apply Hilbert
-        epochs_.filter(
-            lower_band, 
-            upper_band, 
-            fir_design='firwin', 
-            pad='reflect_limited'
-        )
+        epochs_.filter(lower_band, upper_band, fir_design="firwin", pad="reflect_limited")
         epochs_.apply_hilbert(envelope=True)
 
         # get data
@@ -2780,36 +2717,36 @@ class ArtefactReject(object):
         del epochs_
 
         return X
-    
+
     def filt_pad(self, X: np.ndarray, pad_length: int) -> np.ndarray:
         """
-        Pad data using local mean method for filtering edge artifact 
+        Pad data using local mean method for filtering edge artifact
         reduction.
 
-        Adds samples before and after the data by computing the mean of 
-        edge regions and replicating those means. This prevents edge 
-        artifacts when applying filters. Based on FieldTrip's 
+        Adds samples before and after the data by computing the mean of
+        edge regions and replicating those means. This prevents edge
+        artifacts when applying filters. Based on FieldTrip's
         ft_preproc_padding.
 
         Parameters
         ----------
         X : np.ndarray
-            2D array of shape (n_channels, n_times) containing signal 
+            2D array of shape (n_channels, n_times) containing signal
             data.
         pad_length : int
-            Number of samples to pad on each edge. Actual padding will 
-            be limited to half the signal length if pad_length is too 
+            Number of samples to pad on each edge. Actual padding will
+            be limited to half the signal length if pad_length is too
             large.
 
         Returns
         -------
         X_padded : np.ndarray
-            2D array of shape (n_channels, n_times + 2*pre_pad) with 
+            2D array of shape (n_channels, n_times + 2*pre_pad) with
             padded data.
 
         Notes
         -----
-        - Padding length is limited to floor(n_times / 2) to prevent 
+        - Padding length is limited to floor(n_times / 2) to prevent
           excessive padding relative to signal length.
         - Left edge: padded with mean of first pre_pad samples
         - Right edge: padded with mean of last pre_pad samples
@@ -2834,56 +2771,53 @@ class ArtefactReject(object):
 
         # pad data
         X = np.concatenate(
-            (np.tile(edge_left.reshape(X.shape[0], 1), pre_pad), 
-             X, 
-             np.tile(edge_right.reshape(X.shape[0], 1), pre_pad)), 
-            axis=1
+            (
+                np.tile(edge_left.reshape(X.shape[0], 1), pre_pad),
+                X,
+                np.tile(edge_right.reshape(X.shape[0], 1), pre_pad),
+            ),
+            axis=1,
         )
 
         return X
 
-    def box_smoothing(
-        self, 
-        X: np.ndarray, 
-        sfreq: float, 
-        boxcar: float = 0.2
-    ) -> np.ndarray:
+    def box_smoothing(self, X: np.ndarray, sfreq: float, boxcar: float = 0.2) -> np.ndarray:
         """
         Apply boxcar (moving average) smoothing to epoched data.
 
-        Smooths data using a uniform kernel of specified length. Each 
-        epoch is padded before smoothing to reduce edge artifacts, then 
-        trimmed back to original length. Based on FieldTrip's 
+        Smooths data using a uniform kernel of specified length. Each
+        epoch is padded before smoothing to reduce edge artifacts, then
+        trimmed back to original length. Based on FieldTrip's
         ft_preproc_smooth.
 
         Parameters
         ----------
         X : np.ndarray
-            3D array of shape (n_epochs, n_channels, n_times) containing 
+            3D array of shape (n_epochs, n_channels, n_times) containing
             data to be smoothed.
         sfreq : float
-            Sampling frequency in Hz, used to convert boxcar duration to 
+            Sampling frequency in Hz, used to convert boxcar duration to
             samples.
         boxcar : float, optional
-            Duration of smoothing kernel in seconds. Default is 0.2 
-            seconds (optimal according to FieldTrip documentation for 
+            Duration of smoothing kernel in seconds. Default is 0.2
+            seconds (optimal according to FieldTrip documentation for
             muscle artifact detection).
 
         Returns
         -------
         X_smoothed : np.ndarray
-            3D array of shape (n_epochs, n_channels, n_times) with 
+            3D array of shape (n_epochs, n_channels, n_times) with
             smoothed data.
 
         Notes
         -----
-        - Kernel length is computed as round(boxcar * sfreq) and forced 
+        - Kernel length is computed as round(boxcar * sfreq) and forced
           to be odd.
         - Each epoch is independently:
           1. Padded using local mean method (via filt_pad)
           2. Convolved with uniform kernel
           3. Trimmed to remove padding
-        - Based on FieldTrip implementation: 
+        - Based on FieldTrip implementation:
           https://www.fieldtriptoolbox.org
 
         Examples
@@ -2908,59 +2842,50 @@ class ArtefactReject(object):
             x = self.filt_pad(x, pad_length=pad_length)
 
             # smooth the data
-            x_smooth = convolve2d(
-                x, 
-                kernel.reshape(1, kernel.shape[0]), 
-                'same'
-            )
-            X[i] = x_smooth[:, pad_length:(x_smooth.shape[1] - pad_length)]
+            x_smooth = convolve2d(x, kernel.reshape(1, kernel.shape[0]), "same")
+            X[i] = x_smooth[:, pad_length : (x_smooth.shape[1] - pad_length)]
 
         return X
-    
-    def mark_bads(
-        self, 
-        Z: np.ndarray, 
-        z_thresh: float, 
-        times: np.ndarray
-    ) -> List[list]:
+
+    def mark_bads(self, Z: np.ndarray, z_thresh: float, times: np.ndarray) -> List[list]:
         """
         Identify epochs containing samples exceeding z-score threshold.
 
-        Detects continuous segments of artifacts in z-scored data and 
-        returns detailed information about each artifact event including 
-        timing and duration. Used for marking epochs with muscle 
+        Detects continuous segments of artifacts in z-scored data and
+        returns detailed information about each artifact event including
+        timing and duration. Used for marking epochs with muscle
         artifacts or other high-amplitude noise.
 
         Parameters
         ----------
         Z : np.ndarray
-            2D array of shape (n_epochs, n_times) containing normalized 
-            z-scores accumulated across channels. Output from 
+            2D array of shape (n_epochs, n_times) containing normalized
+            z-scores accumulated across channels. Output from
             z_score_data method.
         z_thresh : float
-            Z-score threshold for artifact detection. 
-            Samples with |z| > z_thresh are marked as artifacts. 
+            Z-score threshold for artifact detection.
+            Samples with |z| > z_thresh are marked as artifacts.
             Typical values: 4.0-6.0.
         times : np.ndarray
-            1D array of time points in seconds corresponding to samples 
+            1D array of time points in seconds corresponding to samples
             in Z.
 
         Returns
         -------
         noise_events : List[list]
-            List of epochs containing artifacts. Each element is a list 
+            List of epochs containing artifacts. Each element is a list
             with:
             - First element: epoch index (int)
-            - Subsequent elements: tuples for each artifact segment 
+            - Subsequent elements: tuples for each artifact segment
               containing:
-              (slice_obj, start_time, end_time, duration) where 
+              (slice_obj, start_time, end_time, duration) where
               slice_obj is slice(start_idx, end_idx)
 
         Notes
         -----
-        - Only epochs with at least one artifact segment are included in 
+        - Only epochs with at least one artifact segment are included in
           output.
-        - Continuous artifact segments are identified using threshold 
+        - Continuous artifact segments are identified using threshold
           crossings.
         - Edge cases handled:
           - Artifact at epoch start: included from index 0
@@ -2973,7 +2898,7 @@ class ArtefactReject(object):
         >>> Z = np.random.randn(30, 1000)  # 30 epochs, 1000 time points
         >>> times = np.linspace(-0.5, 1.5, 1000)
         >>> noise_events = self.mark_bads(Z, z_thresh=4.0, times=times)
-        >>> 
+        >>>
         >>> # Inspect first bad epoch
         >>> if noise_events:
         ...     ep_idx, *artifacts = noise_events[0]
@@ -3009,29 +2934,33 @@ class ArtefactReject(object):
                 else:
                     ends = np.hstack(ends)
                 ep_noise = [ep] + [
-                    (slice(s, e), times[s], times[min(e, times.size - 1)],
-                     abs(times[min(e, times.size - 1)] - times[s]))
+                    (
+                        slice(s, e),
+                        times[s],
+                        times[min(e, times.size - 1)],
+                        abs(times[min(e, times.size - 1)] - times[s]),
+                    )
                     for s, e in zip(starts, ends)
                 ]
                 noise_events.append(ep_noise)
 
         return noise_events
-    
+
     def z_score_data(
-        self, 
-        X: np.ndarray, 
-        z_thresh: float = 4.0, 
-        mask: Optional[np.ndarray] = None, 
-        filter_z: Tuple[bool, float] = (False, 512)
+        self,
+        X: np.ndarray,
+        z_thresh: float = 4.0,
+        mask: Optional[np.ndarray] = None,
+        filter_z: Tuple[bool, float] = (False, 512),
     ) -> Tuple[np.ndarray, np.ndarray, float]:
         """
-        Compute z-scores across channels with data-driven threshold 
+        Compute z-scores across channels with data-driven threshold
         adjustment.
 
-        Z-scores data across the channel dimension (axis=1), accumulates 
-        z-scores across channels, and calculates a data-driven threshold 
-        based on the distribution of z-scores. Optionally applies 
-        temporal masking and low-pass filtering to reduce false 
+        Z-scores data across the channel dimension (axis=1), accumulates
+        z-scores across channels, and calculates a data-driven threshold
+        based on the distribution of z-scores. Optionally applies
+        temporal masking and low-pass filtering to reduce false
         positives.
 
         Parameters
@@ -3040,32 +2969,32 @@ class ArtefactReject(object):
             3D array of shape (n_epochs, n_channels, n_times) containing
             envelope or filtered data.
         z_thresh : float, optional
-            Starting z-value threshold for artifact detection. Will be 
+            Starting z-value threshold for artifact detection. Will be
             adjusted upward based on data distribution. Default is 4.0.
         mask : np.ndarray, optional
-            Boolean array of shape (n_times,) indicating time points to 
-            include in z-score calculation. Masked-out points are still 
-            returned in output but excluded from statistics. Used to 
-            ignore filter padding. Default is None (all time points 
+            Boolean array of shape (n_times,) indicating time points to
+            include in z-score calculation. Masked-out points are still
+            returned in output but excluded from statistics. Used to
+            ignore filter padding. Default is None (all time points
             included).
         filter_z : tuple of (bool, float), optional
-            If first element is True, applies 4 Hz low-pass filter to 
-            z-score time series to reduce transient false positives. 
-            Second element is sampling frequency in Hz. Should only be 
+            If first element is True, applies 4 Hz low-pass filter to
+            z-score time series to reduce transient false positives.
+            Second element is sampling frequency in Hz. Should only be
             used with filter-padded data. Default is (False, 512).
 
         Returns
         -------
         Z_n : np.ndarray
-            2D array of shape (n_epochs, n_times) containing normalized 
+            2D array of shape (n_epochs, n_times) containing normalized
             z-scores accumulated across channels.
         elecs_z : np.ndarray
-            3D array of shape (n_epochs, n_channels, n_times) 
-            containing z-scores per channel. Used for identifying 
+            3D array of shape (n_epochs, n_channels, n_times)
+            containing z-scores per channel. Used for identifying
             noisiest channels during iterative interpolation.
         z_thresh : float
-            Data-driven z-score threshold calculated as: 
-            z_thresh + median(Z) + |min(Z) - median(Z)|. 
+            Data-driven z-score threshold calculated as:
+            z_thresh + median(Z) + |min(Z) - median(Z)|.
             Adjusts for baseline noise level in the data.
 
         Notes
@@ -3073,15 +3002,15 @@ class ArtefactReject(object):
         - Processing steps:
           1. Reshape data to (n_channels, n_epochs * n_times)
           2. Z-score along time dimension (axis=1) for each channel
-          3. Accumulate z-scores across channels, normalize 
+          3. Accumulate z-scores across channels, normalize
              by √(n_channels)
           4. Optionally low-pass filter at 4 Hz
           5. Calculate data-driven threshold adjustment
-        - The normalization by √(n_channels) accounts for accumulation 
+        - The normalization by √(n_channels) accounts for accumulation
           across independent observations
         - Data-driven threshold prevents over-sensitivity in low-noise
           data and under-sensitivity in high-noise data
-        - If mask is provided, z-scoring is recomputed only on masked 
+        - If mask is provided, z-scoring is recomputed only on masked
           time points to ensure accurate statistics
 
         Examples
@@ -3091,14 +3020,14 @@ class ArtefactReject(object):
         >>> X = np.random.randn(30, 64, 1000)  # 30 epochs, 64 channels
         >>> Z, elecs_z, thresh = ar.z_score_data(X, z_thresh=4.0)
         >>> print(f'Adjusted threshold: {thresh:.2f}')
-        
+
         >>> # With temporal masking for filter padding
         >>> mask = np.ones(1000, dtype=bool)
         >>> mask[:50] = False  # Exclude first 50 samples
         >>> mask[-50:] = False  # Exclude last 50 samples
         >>> Z, elecs_z, thresh = ar.z_score_data(X, z_thresh=4.0,
         ...                                      mask=mask)
-        
+
         >>> # With low-pass filtering
         >>> Z, elecs_z, thresh = ar.z_score_data(
         ...     X, z_thresh=4.0, filter_z=(True, 500.0)
@@ -3123,39 +3052,34 @@ class ArtefactReject(object):
         if mask is not None:
             Z_n[mask] = X_z[:, mask].sum(axis=0) / sqrt(nr_elec)
         if filter_z[0]:
-            Z_n = filter_data(
-                Z_n, filter_z[1], None, 4, pad='reflect_limited'
-            )
+            Z_n = filter_data(Z_n, filter_z[1], None, 4, pad="reflect_limited")
 
         # adjust threshold (data driven)
         if mask is None:
             mask = np.ones(Z_n.size, dtype=bool)
-        z_thresh += (
-            np.median(Z_n[mask]) + 
-            abs(Z_n[mask].min() - np.median(Z_n[mask]))
-        )
+        z_thresh += np.median(Z_n[mask]) + abs(Z_n[mask].min() - np.median(Z_n[mask]))
 
         # transform back into epochs
         Z_n = Z_n.reshape(nr_epoch, -1)
 
         return Z_n, elecs_z, z_thresh
-    
+
     def iterative_interpolation(
-        self, 
-        epochs: mne.Epochs, 
-        elecs_z: np.ndarray, 
-        noise_inf: List[list], 
-        z_thresh: float, 
-        band_pass: List[int]
+        self,
+        epochs: mne.Epochs,
+        elecs_z: np.ndarray,
+        noise_inf: List[list],
+        z_thresh: float,
+        band_pass: List[int],
     ) -> Tuple[mne.Epochs, List[int], List[int]]:
         """
-        Iteratively interpolate bad channels to salvage 
+        Iteratively interpolate bad channels to salvage
         artifact-contaminated epochs.
 
-        For each epoch marked as containing artifacts, attempts to clean 
-        it by iteratively interpolating the noisiest channels 
-        (up to self.max_bad). After each interpolation, re-checks if the 
-        epoch still exceeds the z-score threshold. Epochs that cannot be 
+        For each epoch marked as containing artifacts, attempts to clean
+        it by iteratively interpolating the noisiest channels
+        (up to self.max_bad). After each interpolation, re-checks if the
+        epoch still exceeds the z-score threshold. Epochs that cannot be
         cleaned are marked as bad.
 
         Parameters
@@ -3163,49 +3087,49 @@ class ArtefactReject(object):
         epochs : mne.Epochs
             Epoched data to clean. Modified in-place.
         elecs_z : np.ndarray
-            3D array of z-scores per electrode, 
-            shape (n_epochs, n_channels, n_times). Output from 
+            3D array of z-scores per electrode,
+            shape (n_epochs, n_channels, n_times). Output from
             preprocess_epochs method.
         noise_inf : List[list]
-            List of noise events from mark_bads. Each element is a list 
+            List of noise events from mark_bads. Each element is a list
             with:
             [epoch_idx, (slice_obj, start_time, end_time, duration),...]
         z_thresh : float
-            Z-score threshold for artifact detection. Used to determine 
+            Z-score threshold for artifact detection. Used to determine
             if interpolation successfully cleaned the epoch.
         band_pass : List[int]
-            [lower, upper] frequency bounds in Hz for bandpass filter. 
-            Passed to preprocess_epochs for re-checking after 
+            [lower, upper] frequency bounds in Hz for bandpass filter.
+            Passed to preprocess_epochs for re-checking after
             interpolation.
 
         Returns
         -------
         epochs : mne.Epochs
-            Cleaned epochs with bad channels interpolated 
+            Cleaned epochs with bad channels interpolated
             where possible.
         bad_epochs : List[int]
-            Indices of epochs that could not be cleaned even after 
+            Indices of epochs that could not be cleaned even after
             interpolating self.max_bad channels.
         cleaned_epochs : List[int]
-            Indices of epochs successfully cleaned via channel 
+            Indices of epochs successfully cleaned via channel
             interpolation.
 
         Notes
         -----
         - Cleaning strategy:
           1. Extract artifact segments for the epoch from noise_inf
-          2. Compute mean z-score for each channel during artifact 
+          2. Compute mean z-score for each channel during artifact
             periods
           3. Sort channels by z-score, interpolate noisiest first
           4. After each interpolation, re-run preprocess_epochs
-          5. Stop if epoch is clean or self.max_bad channels 
+          5. Stop if epoch is clean or self.max_bad channels
              interpolated
         - Updates internal tracking for visualization:
-          - self.heat_map: 2D array tracking interpolated channels per 
+          - self.heat_map: 2D array tracking interpolated channels per
             epoch
-          - self.cleaned_info: dict counting interpolations per channel 
+          - self.cleaned_info: dict counting interpolations per channel
             (cleaned)
-          - self.not_cleaned_info: dict counting interpolations per 
+          - self.not_cleaned_info: dict counting interpolations per
             channel (bad)
         - Decorated with @blockPrinting to suppress MNE interpolation
           messages
@@ -3223,7 +3147,7 @@ class ArtefactReject(object):
         """
 
         # keep track of channel info for plotting purposes
-        channels = np.array(epochs.copy().pick('eeg', exclude='bads').ch_names)
+        channels = np.array(epochs.copy().pick("eeg", exclude="bads").ch_names)
         self.heat_map = np.zeros((len(noise_inf), channels.size))
         self.cleaned_info = dict.fromkeys(channels, 0)
         self.not_cleaned_info = dict.fromkeys(channels, 0)
@@ -3232,61 +3156,52 @@ class ArtefactReject(object):
         bad_epochs, cleaned_epochs = [], []
         for i, event in enumerate(noise_inf):
             if (i + 1) % 100 == 0:
-                print(f'Processing artifact epoch {i + 1}/{len(noise_inf)}...')
-            
+                print(f"Processing artifact epoch {i + 1}/{len(noise_inf)}...")
+
             bad_epoch = epochs[event[0]]
             # search for bad channels in detected artefact periods
-            z = np.concatenate(
-                [elecs_z[event[0]][:,slice_[0]] for slice_ in event[1:]], 
-                axis=1
-            )
+            z = np.concatenate([elecs_z[event[0]][:, slice_[0]] for slice_ in event[1:]], axis=1)
             # limit interpolation to 'max_bad' noisiest channels
-            ch_idx = np.argsort(z.mean(axis=1))[-self.max_bad:][::-1]
+            ch_idx = np.argsort(z.mean(axis=1))[-self.max_bad :][::-1]
             interp_chs = channels[ch_idx]
 
             cleaned = False
             for c, ch in enumerate(interp_chs):
                 # update heat map
-                bad_epoch.info['bads'] += [ch]
+                bad_epoch.info["bads"] += [ch]
                 # suppress MNE interpolation messages but keep progress output
-                with open(os.devnull, 'w', encoding='utf-8') as f:
+                with open(os.devnull, "w", encoding="utf-8") as f:
                     with redirect_stdout(f):
-                        bad_epoch.interpolate_bads(exclude=epochs.info['bads'])
+                        bad_epoch.interpolate_bads(exclude=epochs.info["bads"])
                 epochs._data[event[0]] = bad_epoch._data
-                # repeat preprocesing after interpolation to check whether 
+                # repeat preprocesing after interpolation to check whether
                 # epoch is now 'clean' (also suppress filter output)
-                with open(os.devnull, 'w', encoding='utf-8') as f:
+                with open(os.devnull, "w", encoding="utf-8") as f:
                     with redirect_stdout(f):
-                        Z_, _, _, _ = self.preprocess_epochs(
-                            epochs[event[0]], 
-                            band_pass=band_pass
-                        )
+                        Z_, _, _, _ = self.preprocess_epochs(epochs[event[0]], band_pass=band_pass)
 
                 if not np.any(abs(Z_) > z_thresh):
                     # epoch no longer marked as bad
                     cleaned = True
-                    self.update_heat_map(channels, ch_idx[:c+1], i, 1)
+                    self.update_heat_map(channels, ch_idx[: c + 1], i, 1)
                     cleaned_epochs.append(event[0])
                     break
 
             if not cleaned:
-                self.update_heat_map(channels, ch_idx[:c+1], i, -1)
+                self.update_heat_map(channels, ch_idx[: c + 1], i, -1)
                 bad_epochs.append(event[0])
 
         return epochs, bad_epochs, cleaned_epochs
-    
+
     def plot_auto_repair(
-        self, 
-        channels: np.ndarray, 
-        z_score: np.ndarray, 
-        z_thresh: float
+        self, channels: np.ndarray, z_score: np.ndarray, z_thresh: float
     ) -> List[plt.Figure]:
         """
-        Generate all visualization figures for auto_repair_noise 
+        Generate all visualization figures for auto_repair_noise
         results.
 
-        Creates comprehensive set of plots showing artifact detection 
-        and repair results: z-score time series, channel interpolation 
+        Creates comprehensive set of plots showing artifact detection
+        and repair results: z-score time series, channel interpolation
         heatmap, and histograms of interpolation counts.
 
         Parameters
@@ -3301,7 +3216,7 @@ class ArtefactReject(object):
         Returns
         -------
         figs : List[matplotlib.figure.Figure]
-            List of figures: [z-score plot, heatmap, bad histogram 
+            List of figures: [z-score plot, heatmap, bad histogram
             (if any), cleaned histogram (if any)].
         """
 
@@ -3314,20 +3229,20 @@ class ArtefactReject(object):
         figs.append(self.plot_heat_map(channels))
 
         # plot histograms
-        for plot in ['bad', 'cleaned']:
+        for plot in ["bad", "cleaned"]:
             fig = self.plot_hist_auto_repair(plot)
             if fig:
                 figs.append(fig)
 
         return figs
-    
+
     def plot_heat_map(self, channels: np.ndarray) -> plt.Figure:
         """
-        Create heatmap showing which channels were interpolated per 
+        Create heatmap showing which channels were interpolated per
         epoch.
 
-        Visualizes the pattern of channel interpolations across flagged 
-        epochs. Blue indicates epochs that remained bad after 
+        Visualizes the pattern of channel interpolations across flagged
+        epochs. Blue indicates epochs that remained bad after
         interpolation, red indicates successfully cleaned epochs.
 
         Parameters
@@ -3338,8 +3253,8 @@ class ArtefactReject(object):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            Figure containing heatmap with channels on x-axis, epochs on 
-            y-axis, and interpolation status color-coded (blue=-1: bad, 
+            Figure containing heatmap with channels on x-axis, epochs on
+            y-axis, and interpolation status color-coded (blue=-1: bad,
             white=0: not interpolated, red=1: cleaned).
         """
 
@@ -3349,37 +3264,28 @@ class ArtefactReject(object):
         fig, ax = plt.subplots(1)
         sns.despine(offset=10)
         plt.title(
-            f'Interpolated electrodes per marked epoch \n'
-            f'(blue is bad epochs (N={bad}), red is cleaned epoch '
-            f'(N={cleaned}))'
+            f"Interpolated electrodes per marked epoch \n"
+            f"(blue is bad epochs (N={bad}), red is cleaned epoch "
+            f"(N={cleaned}))"
         )
         ax.imshow(
-            self.heat_map, 
-            aspect='auto', 
-            cmap='bwr',
-            interpolation='nearest', 
-            vmin=-1, 
-            vmax=1
+            self.heat_map, aspect="auto", cmap="bwr", interpolation="nearest", vmin=-1, vmax=1
         )
-        ax.set(xlabel='channel', ylabel='bad epochs')
+        ax.set(xlabel="channel", ylabel="bad epochs")
         ax.set_xticks(np.arange(channels.size))
         ax.set_xticklabels(channels, fontsize=6, rotation=90)
 
         return fig
 
     def update_heat_map(
-        self, 
-        channels: np.ndarray, 
-        ch_idx: np.ndarray, 
-        tr_idx: int, 
-        upd_value: int
+        self, channels: np.ndarray, ch_idx: np.ndarray, tr_idx: int, upd_value: int
     ) -> None:
         """
-        Update heatmap and tracking dictionaries for interpolated 
+        Update heatmap and tracking dictionaries for interpolated
         channels.
 
-        Records which channels were interpolated for a specific epoch 
-        and updates counters tracking successful vs unsuccessful 
+        Records which channels were interpolated for a specific epoch
+        and updates counters tracking successful vs unsuccessful
         interpolations per channel.
 
         Parameters
@@ -3387,18 +3293,18 @@ class ArtefactReject(object):
         channels : np.ndarray
             1D array of all channel names (strings).
         ch_idx : np.ndarray
-            1D array of indices indicating which channels were 
+            1D array of indices indicating which channels were
             interpolated for this epoch.
         tr_idx : int
             Index of the epoch in the heatmap (row index).
         upd_value : int
-            Status value: -1 for bad epoch (could not be cleaned), 
+            Status value: -1 for bad epoch (could not be cleaned),
             1 for cleaned epoch (successfully repaired).
 
         Returns
         -------
         None
-            Modifies self.heat_map, self.not_cleaned_info, and 
+            Modifies self.heat_map, self.not_cleaned_info, and
             self.cleaned_info in-place.
         """
 
@@ -3411,41 +3317,38 @@ class ArtefactReject(object):
             for ch in channels[ch_idx]:
                 self.cleaned_info[ch] += 1
 
-    def plot_hist_auto_repair(
-        self, 
-        plot_type: str
-    ) -> Union[plt.Figure, bool]:
+    def plot_hist_auto_repair(self, plot_type: str) -> Union[plt.Figure, bool]:
         """
         Create histogram of channel interpolation counts.
 
-        Shows how many times each channel was interpolated across either 
+        Shows how many times each channel was interpolated across either
         bad or cleaned epochs.
 
         Parameters
         ----------
         plot_type : str
-            Type of epochs to plot: 'cleaned' (successfully repaired) or 
+            Type of epochs to plot: 'cleaned' (successfully repaired) or
             'bad' (could not be cleaned).
 
         Returns
         -------
         fig : matplotlib.figure.Figure or bool
-            Horizontal bar plot showing interpolation counts per 
+            Horizontal bar plot showing interpolation counts per
             channel, or False if no epochs of the specified type exist.
         """
 
-        if plot_type == 'cleaned':
+        if plot_type == "cleaned":
             info = self.cleaned_info
         else:
             info = self.not_cleaned_info
 
-        df = pd.DataFrame.from_dict(info, orient='index', columns=['count'])
+        df = pd.DataFrame.from_dict(info, orient="index", columns=["count"])
         df = df.loc[(df != 0).any(axis=1)]
 
         if df.size > 0:  # marked at least one bad/cleaned epoch
             fig, ax = plt.subplots(1)
             sns.despine(offset=10)
-            plt.title(f'Electrode count per {plot_type} epoch')
+            plt.title(f"Electrode count per {plot_type} epoch")
             ax.barh(np.arange(df.values.size), np.hstack(df.values))
             ax.set_yticks(np.arange(df.values.size))
             ax.set_yticklabels(df.index, fontsize=5)
@@ -3454,15 +3357,11 @@ class ArtefactReject(object):
 
         return fig
 
-    def plot_z_score_epochs(
-        self, 
-        z_score: np.ndarray, 
-        z_thresh: float
-    ) -> plt.Figure:
+    def plot_z_score_epochs(self, z_score: np.ndarray, z_thresh: float) -> plt.Figure:
         """
         Plot z-score time series with threshold overlay.
 
-        Visualizes accumulated z-scores across all epochs, highlighting 
+        Visualizes accumulated z-scores across all epochs, highlighting
         samples exceeding the threshold in red.
 
         Parameters
@@ -3475,33 +3374,17 @@ class ArtefactReject(object):
         Returns
         -------
         fig : matplotlib.figure.Figure
-            Line plot with z-scores in blue, threshold-exceeding samples 
+            Line plot with z-scores in blue, threshold-exceeding samples
             in red, and threshold line as red dashed.
         """
 
         fig, ax = plt.subplots(1)
-        plt.ylabel('accumulated Z')
-        plt.xlabel('sample')
-        plt.plot(np.arange(0, z_score.size), z_score.flatten(), color='b')
+        plt.ylabel("accumulated Z")
+        plt.xlabel("sample")
+        plt.plot(np.arange(0, z_score.size), z_score.flatten(), color="b")
         plt.plot(
-            np.arange(0, z_score.size),
-            np.ma.masked_less(z_score.flatten(), z_thresh), 
-            color='r'
+            np.arange(0, z_score.size), np.ma.masked_less(z_score.flatten(), z_thresh), color="r"
         )
-        plt.axhline(z_thresh, color='r', ls='--')
+        plt.axhline(z_thresh, color="r", ls="--")
 
         return fig
-
-
-
-
-
-
-
-
-
-
-
-
-
-

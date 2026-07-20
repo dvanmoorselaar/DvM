@@ -18,23 +18,23 @@ Functions
 eeg_preprocessing_pipeline : Complete preprocessing workflow
 """
 
-from open_dvm.analysis.EEG import RAW, Epochs, ArtefactReject
-from open_dvm.analysis.ERP import ERP
-from open_dvm.analysis.TFR import TFR
 from open_dvm.analysis.BDM import BDM
 from open_dvm.analysis.CTF import CTF
+from open_dvm.analysis.EEG import RAW, ArtefactReject, Epochs
+from open_dvm.analysis.ERP import ERP
 from open_dvm.analysis.EYE import EYE, SaccadeDetector
 from open_dvm.analysis.preprocessing_pipeline import eeg_preprocessing_pipeline
+from open_dvm.analysis.TFR import TFR
 
 __all__ = [
-    'RAW',
-    'Epochs',
-    'ArtefactReject',
-    'ERP',
-    'TFR',
-    'BDM',
-    'CTF',
-    'EYE',
-    'SaccadeDetector',
-    'eeg_preprocessing_pipeline',
+    "RAW",
+    "Epochs",
+    "ArtefactReject",
+    "ERP",
+    "TFR",
+    "BDM",
+    "CTF",
+    "EYE",
+    "SaccadeDetector",
+    "eeg_preprocessing_pipeline",
 ]

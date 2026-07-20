@@ -41,9 +41,9 @@ def _ramp_envelope(window_len: int, ramp_fraction: float = 0.5) -> np.ndarray:
 
 
 def make_condition_evokeds(
-    ch_names: Union[list, tuple] = ('C3', 'C5', 'C4', 'C6'),
-    contra_ch: Union[list, tuple] = ('C3', 'C5'),
-    ipsi_ch: Union[list, tuple] = ('C4', 'C6'),
+    ch_names: Union[list, tuple] = ("C3", "C5", "C4", "C6"),
+    contra_ch: Union[list, tuple] = ("C3", "C5"),
+    ipsi_ch: Union[list, tuple] = ("C4", "C6"),
     contra_amp: float = 6e-6,
     ipsi_amp: float = 1e-6,
     effect_window: Tuple[int, int] = (20, 35),
@@ -106,7 +106,7 @@ def make_condition_evokeds(
     """
     rng = np.random.default_rng(seed)
     ch_names = list(ch_names)
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
     start, stop = effect_window
     start, stop = max(0, start), min(n_samples, stop)
     envelope = _ramp_envelope(stop - start, ramp_fraction)
@@ -114,12 +114,10 @@ def make_condition_evokeds(
     base = np.full((len(ch_names), n_samples), baseline, dtype=float)
     for ch in contra_ch:
         if ch in ch_names:
-            base[ch_names.index(ch), start:stop] = \
-                baseline + (contra_amp - baseline) * envelope
+            base[ch_names.index(ch), start:stop] = baseline + (contra_amp - baseline) * envelope
     for ch in ipsi_ch:
         if ch in ch_names:
-            base[ch_names.index(ch), start:stop] = \
-                baseline + (ipsi_amp - baseline) * envelope
+            base[ch_names.index(ch), start:stop] = baseline + (ipsi_amp - baseline) * envelope
 
     evokeds = []
     for _ in range(n_subjects):
@@ -129,9 +127,9 @@ def make_condition_evokeds(
 
 
 def make_average_tfr(
-    ch_names: Union[list, tuple] = ('C3', 'C5', 'C4', 'C6'),
-    contra_ch: Union[list, tuple] = ('C3', 'C5'),
-    ipsi_ch: Union[list, tuple] = ('C4', 'C6'),
+    ch_names: Union[list, tuple] = ("C3", "C5", "C4", "C6"),
+    contra_ch: Union[list, tuple] = ("C3", "C5"),
+    ipsi_ch: Union[list, tuple] = ("C4", "C6"),
     freqs: Optional[np.ndarray] = None,
     contra_amp: float = 3.0,
     ipsi_amp: float = 0.3,
@@ -194,7 +192,7 @@ def make_average_tfr(
     if freqs is None:
         freqs = np.linspace(4, 30, 20)
     ch_names = list(ch_names)
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
     times = tmin + np.arange(n_samples) / sfreq
     start, stop = effect_window
     start, stop = max(0, start), min(n_samples, stop)
@@ -205,19 +203,20 @@ def make_average_tfr(
     for ch in contra_ch:
         if ch in ch_names:
             idx = ch_names.index(ch)
-            base[idx, freq_mask, start:stop] = \
-                baseline + (contra_amp - baseline) * envelope
+            base[idx, freq_mask, start:stop] = baseline + (contra_amp - baseline) * envelope
     for ch in ipsi_ch:
         if ch in ch_names:
             idx = ch_names.index(ch)
-            base[idx, freq_mask, start:stop] = \
-                baseline + (ipsi_amp - baseline) * envelope
+            base[idx, freq_mask, start:stop] = baseline + (ipsi_amp - baseline) * envelope
 
     out = []
     for _ in range(n_subjects):
         data = base + rng.normal(0, noise_sd, base.shape)
-        out.append(mne.time_frequency.AverageTFRArray(
-            info=info, data=data, times=times, freqs=freqs, nave=1))
+        out.append(
+            mne.time_frequency.AverageTFRArray(
+                info=info, data=data, times=times, freqs=freqs, nave=1
+            )
+        )
     return out
 
 
@@ -230,10 +229,10 @@ def make_bdm_result(
     n_subjects: int = 20,
     times: Optional[np.ndarray] = None,
     n_samples: int = 60,
-    shape: str = '1d',
+    shape: str = "1d",
     freqs: Optional[np.ndarray] = None,
     effect_freq_idx: Optional[int] = None,
-    cnd: str = 'A',
+    cnd: str = "A",
     seed: int = 0,
 ) -> list:
     """Build synthetic per-subject BDM decoding results with a
@@ -300,17 +299,17 @@ def make_bdm_result(
     indicator = np.zeros(n_samples)
     indicator[start:stop] = _ramp_envelope(stop - start, ramp_fraction)
 
-    info = {'times': times}
+    info = {"times": times}
 
-    if shape == '1d':
+    if shape == "1d":
         base = chance_level + indicator * (peak_auc - chance_level)
-    elif shape == 'gat':
+    elif shape == "gat":
         base = chance_level + np.outer(indicator, indicator) * (peak_auc - chance_level)
-        info['test_times'] = times
-    elif shape == 'tfr':
+        info["test_times"] = times
+    elif shape == "tfr":
         if freqs is None:
             freqs = np.linspace(4, 30, 15)
-        info['freqs'] = freqs
+        info["freqs"] = freqs
         if effect_freq_idx is None:
             effect_freq_idx = len(freqs) // 2
         freq_effect = np.zeros(len(freqs))
@@ -322,7 +321,7 @@ def make_bdm_result(
     bdms = []
     for _ in range(n_subjects):
         scores = base + rng.normal(0, noise_sd, base.shape)
-        bdms.append({cnd: {'dec_scores': scores}, 'info': dict(info)})
+        bdms.append({cnd: {"dec_scores": scores}, "info": dict(info)})
     return bdms
 
 
@@ -336,9 +335,9 @@ def make_ctf_result(
     times: Optional[np.ndarray] = None,
     n_samples: int = 60,
     bands: Optional[list] = None,
-    shape: str = '1d',
+    shape: str = "1d",
     effect_band_idx: Optional[int] = None,
-    cnd: str = 'A',
+    cnd: str = "A",
     seed: int = 0,
 ) -> list:
     """Build synthetic per-subject CTF reconstruction results with a
@@ -406,31 +405,31 @@ def make_ctf_result(
     indicator = np.zeros(n_samples)
     indicator[start:stop] = _ramp_envelope(stop - start, ramp_fraction)
 
-    if shape == '1d':
-        bands = bands or ['all']
+    if shape == "1d":
+        bands = bands or ["all"]
         base_1band = baseline_slope + indicator * (peak_slope - baseline_slope)
         base = np.tile(base_1band, (len(bands), 1))
-        info = {'times': times, 'bands': bands}
-    elif shape == 'gat':
-        bands = bands or ['all']
+        info = {"times": times, "bands": bands}
+    elif shape == "gat":
+        bands = bands or ["all"]
         if len(bands) != 1:
             raise ValueError("shape='gat' requires a single band")
         gat_2d = baseline_slope + np.outer(indicator, indicator) * (peak_slope - baseline_slope)
         base = gat_2d[np.newaxis]
-        info = {'times': times, 'bands': bands}
-    elif shape == 'tfr':
+        info = {"times": times, "bands": bands}
+    elif shape == "tfr":
         bands = bands or [[4, 8], [8, 12], [12, 20], [20, 30]]
         if effect_band_idx is None:
             effect_band_idx = min(1, len(bands) - 1)
         base_bands = np.full((len(bands), n_samples), baseline_slope, dtype=float)
         base_bands[effect_band_idx] = baseline_slope + indicator * (peak_slope - baseline_slope)
         base = base_bands  # (n_bands, n_times)
-        info = {'times': times, 'bands': bands, 'freqs': bands}
+        info = {"times": times, "bands": bands, "freqs": bands}
     else:
         raise ValueError(f"shape must be '1d', 'gat', or 'tfr', got {shape!r}")
 
     ctfs = []
     for _ in range(n_subjects):
         slopes = base + rng.normal(0, noise_sd, base.shape)
-        ctfs.append({cnd: {'raw_slopes': slopes}, 'info': dict(info)})
+        ctfs.append({cnd: {"raw_slopes": slopes}, "info": dict(info)})
     return ctfs

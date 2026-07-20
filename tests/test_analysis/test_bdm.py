@@ -18,29 +18,35 @@ Organization
 """
 
 import warnings
+from unittest.mock import patch
 
-import pytest
+import mne
 import numpy as np
 import pandas as pd
-import mne
-from unittest.mock import patch
+import pytest
 from sklearn.decomposition import PCA
 from sklearn.naive_bayes import GaussianNB
 
 from open_dvm.analysis.BDM import BDM
 from tests.fixtures.bdm_sample_data import (
-    make_separable_epochs,
-    make_localizer_epoch_pair,
     make_cross_condition_priming_epochs,
+    make_localizer_epoch_pair,
+    make_separable_epochs,
 )
 
-mne.set_log_level('ERROR')
+mne.set_log_level("ERROR")
 
 
 def make_bdm(epochs, df, **kwargs):
     defaults = dict(
-        sj=1, to_decode='label', baseline=None, nr_folds=5,
-        elec_oi='all', data_type='raw', downsample=100, avg_trials=1,
+        sj=1,
+        to_decode="label",
+        baseline=None,
+        nr_folds=5,
+        elec_oi="all",
+        data_type="raw",
+        downsample=100,
+        avg_trials=1,
     )
     defaults.update(kwargs)
     return BDM(epochs=epochs, df=df, **defaults)
@@ -50,28 +56,33 @@ def make_bdm(epochs, df, **kwargs):
 # data_type property
 # ============================================================================
 
+
 class TestDataTypeProperty:
     @pytest.mark.unit
     def test_data_type_is_immutable(self):
         epochs, df = make_separable_epochs(n_trials=10)
         bdm = make_bdm(epochs, df)
 
-        assert bdm.data_type == 'raw'
+        assert bdm.data_type == "raw"
         with pytest.raises(AttributeError):
-            bdm.data_type = 'tfr'
+            bdm.data_type = "tfr"
 
 
 # ============================================================================
 # select_classifier / get_classifier_weights
 # ============================================================================
 
+
 class TestSelectClassifier:
     @pytest.mark.unit
-    @pytest.mark.parametrize('name,expected_type_name', [
-        ('LDA', 'LinearDiscriminantAnalysis'),
-        ('GNB', 'GaussianNB'),
-        ('svm', 'CalibratedClassifierCV'),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected_type_name",
+        [
+            ("LDA", "LinearDiscriminantAnalysis"),
+            ("GNB", "GaussianNB"),
+            ("svm", "CalibratedClassifierCV"),
+        ],
+    )
     def test_returns_expected_classifier_type(self, name, expected_type_name):
         bdm = BDM.__new__(BDM)
         bdm.classifier = name
@@ -85,7 +96,7 @@ class TestSelectClassifier:
     @pytest.mark.unit
     def test_unknown_classifier_raises(self):
         bdm = BDM.__new__(BDM)
-        bdm.classifier = 'bogus'
+        bdm.classifier = "bogus"
         bdm.scale = True
         bdm.seed = 42213
 
@@ -95,7 +106,7 @@ class TestSelectClassifier:
     @pytest.mark.unit
     def test_svm_without_scale_warns(self):
         bdm = BDM.__new__(BDM)
-        bdm.classifier = 'svm'
+        bdm.classifier = "svm"
         bdm.scale = False
         bdm.seed = 42213
 
@@ -107,14 +118,16 @@ class TestGetClassifierWeights:
     @pytest.mark.unit
     def test_lda_weights_shape(self):
         bdm = BDM.__new__(BDM)
-        bdm.classifier = 'LDA'
+        bdm.classifier = "LDA"
         bdm.scale = True
         bdm.seed = 42213
         rng = np.random.default_rng(0)
-        X = np.vstack([
-            rng.normal(0, 1, (20, 3)) + [3, 0, 0],
-            rng.normal(0, 1, (20, 3)),
-        ])
+        X = np.vstack(
+            [
+                rng.normal(0, 1, (20, 3)) + [3, 0, 0],
+                rng.normal(0, 1, (20, 3)),
+            ]
+        )
         y = np.array([1] * 20 + [0] * 20)
         clf = bdm.select_classifier()
         clf.fit(X, y)
@@ -141,6 +154,7 @@ class TestGetClassifierWeights:
 # ============================================================================
 # score_auc
 # ============================================================================
+
 
 class TestScoreAuc:
     @pytest.mark.unit
@@ -182,6 +196,7 @@ class TestScoreAuc:
     @pytest.mark.unit
     def test_agrees_with_sklearn_on_random_data(self):
         from sklearn.metrics import roc_auc_score
+
         bdm = BDM.__new__(BDM)
         rng = np.random.default_rng(1)
         labels = rng.integers(0, 2, size=200).astype(bool)
@@ -203,28 +218,29 @@ class TestScoreAuc:
 # compute_class_perf
 # ============================================================================
 
+
 class TestComputeClassPerf:
     @pytest.mark.unit
     def test_binary_auc_perfect_separation(self):
         bdm = BDM.__new__(BDM)
-        bdm.metric = 'auc'
+        bdm.metric = "auc"
         scores = np.array([[0.9, 0.1], [0.8, 0.2], [0.1, 0.9], [0.2, 0.8]])
-        true_labels = np.array(['A', 'A', 'B', 'B'])
-        predict = np.array(['A', 'A', 'B', 'B'])
+        true_labels = np.array(["A", "A", "B", "B"])
+        predict = np.array(["A", "A", "B", "B"])
 
-        perf = bdm.compute_class_perf(scores, true_labels, ['A', 'B'], predict)
+        perf = bdm.compute_class_perf(scores, true_labels, ["A", "B"], predict)
 
         assert perf == pytest.approx(1.0)
 
     @pytest.mark.unit
     def test_binary_acc_balanced_accuracy(self):
         bdm = BDM.__new__(BDM)
-        bdm.metric = 'acc'
+        bdm.metric = "acc"
         scores = np.array([[0.9, 0.1], [0.4, 0.6], [0.1, 0.9], [0.9, 0.1]])
-        true_labels = np.array(['A', 'A', 'B', 'B'])
-        predict = np.array(['A', 'B', 'B', 'A'])  # 1/2 correct per class
+        true_labels = np.array(["A", "A", "B", "B"])
+        predict = np.array(["A", "B", "B", "A"])  # 1/2 correct per class
 
-        perf = bdm.compute_class_perf(scores, true_labels, ['A', 'B'], predict)
+        perf = bdm.compute_class_perf(scores, true_labels, ["A", "B"], predict)
 
         assert perf == pytest.approx(0.5)
 
@@ -233,31 +249,34 @@ class TestComputeClassPerf:
 # select_max_trials
 # ============================================================================
 
+
 class TestSelectMaxTrials:
     @pytest.mark.unit
     def test_floors_to_multiple_of_nr_folds_per_condition(self):
         bdm = BDM.__new__(BDM)
-        bdm.to_decode = 'label'
+        bdm.to_decode = "label"
         bdm.nr_folds = 2
         # cnd a: 4 per label (left/right) -> floor(4/2)*2=4
         # cnd b: 2 per label -> floor(2/2)*2=2
-        df = pd.DataFrame({
-            'cnd': ['a'] * 8 + ['b'] * 4,
-            'label': (['left'] * 4 + ['right'] * 4) + (['left'] * 2 + ['right'] * 2),
-        })
+        df = pd.DataFrame(
+            {
+                "cnd": ["a"] * 8 + ["b"] * 4,
+                "label": (["left"] * 4 + ["right"] * 4) + (["left"] * 2 + ["right"] * 2),
+            }
+        )
 
-        max_trials = bdm.select_max_trials(df, ['a', 'b'], ['left', 'right'], 'cnd')
+        max_trials = bdm.select_max_trials(df, ["a", "b"], ["left", "right"], "cnd")
 
         assert max_trials == 2  # min across conditions
 
     @pytest.mark.unit
     def test_all_data_uses_full_dataframe(self):
         bdm = BDM.__new__(BDM)
-        bdm.to_decode = 'label'
+        bdm.to_decode = "label"
         bdm.nr_folds = 3
-        df = pd.DataFrame({'label': ['x'] * 9 + ['y'] * 6})
+        df = pd.DataFrame({"label": ["x"] * 9 + ["y"] * 6})
 
-        max_trials = bdm.select_max_trials(df, ['all_data'])
+        max_trials = bdm.select_max_trials(df, ["all_data"])
 
         # min class count = 6, floor(6/3)*3 = 6
         assert max_trials == 6
@@ -265,36 +284,37 @@ class TestSelectMaxTrials:
     @pytest.mark.unit
     def test_prints_warning_when_zero(self, capsys):
         bdm = BDM.__new__(BDM)
-        bdm.to_decode = 'label'
+        bdm.to_decode = "label"
         bdm.nr_folds = 5
-        df = pd.DataFrame({'cnd': ['a'] * 3, 'label': ['x', 'x', 'y']})
+        df = pd.DataFrame({"cnd": ["a"] * 3, "label": ["x", "x", "y"]})
 
-        max_trials = bdm.select_max_trials(df, ['a'], ['x', 'y'], 'cnd')
+        max_trials = bdm.select_max_trials(df, ["a"], ["x", "y"], "cnd")
 
         assert max_trials == 0
-        assert 'not contain sufficient' in capsys.readouterr().out
+        assert "not contain sufficient" in capsys.readouterr().out
 
 
 # ============================================================================
 # set_bdm_param
 # ============================================================================
 
+
 class TestSetBdmParam:
     @pytest.mark.unit
     def test_within_condition_setup(self):
         bdm = BDM.__new__(BDM)
         bdm.nr_folds = 2
-        bdm.to_decode = 'label'
-        df = pd.DataFrame({'cnd': ['a'] * 8 + ['b'] * 8, 'label': (['x'] * 4 + ['y'] * 4) * 2})
-        y = df['label'].values
+        bdm.to_decode = "label"
+        df = pd.DataFrame({"cnd": ["a"] * 8 + ["b"] * 8, "label": (["x"] * 4 + ["y"] * 4) * 2})
+        y = df["label"].values
 
         nr_labels, tr_max, tr_cnds, te_cnds = bdm.set_bdm_param(
-            y, df, ['a', 'b'], 'cnd', 'all', downscale=False
+            y, df, ["a", "b"], "cnd", "all", downscale=False
         )
 
         assert nr_labels == 2
         assert tr_max == [4]
-        assert tr_cnds == ['a', 'b']
+        assert tr_cnds == ["a", "b"]
         assert te_cnds is None
         assert bdm.cross is False
 
@@ -302,11 +322,11 @@ class TestSetBdmParam:
     def test_downscale_produces_descending_step_list(self):
         bdm = BDM.__new__(BDM)
         bdm.nr_folds = 2
-        bdm.to_decode = 'label'
-        df = pd.DataFrame({'cnd': ['a'] * 8 + ['b'] * 8, 'label': (['x'] * 4 + ['y'] * 4) * 2})
-        y = df['label'].values
+        bdm.to_decode = "label"
+        df = pd.DataFrame({"cnd": ["a"] * 8 + ["b"] * 8, "label": (["x"] * 4 + ["y"] * 4) * 2})
+        y = df["label"].values
 
-        _, tr_max, _, _ = bdm.set_bdm_param(y, df, ['a', 'b'], 'cnd', 'all', downscale=True)
+        _, tr_max, _, _ = bdm.set_bdm_param(y, df, ["a", "b"], "cnd", "all", downscale=True)
 
         assert tr_max == [4, 2]
 
@@ -314,29 +334,29 @@ class TestSetBdmParam:
     def test_cross_condition_setup(self):
         bdm = BDM.__new__(BDM)
         bdm.nr_folds = 5
-        bdm.to_decode = 'label'
-        df = pd.DataFrame({'cnd': ['a'] * 8 + ['b'] * 8, 'label': (['x'] * 4 + ['y'] * 4) * 2})
-        y = df['label'].values
+        bdm.to_decode = "label"
+        df = pd.DataFrame({"cnd": ["a"] * 8 + ["b"] * 8, "label": (["x"] * 4 + ["y"] * 4) * 2})
+        y = df["label"].values
 
         _, tr_max, tr_cnds, te_cnds = bdm.set_bdm_param(
-            y, df, [['a'], ['b']], 'cnd', 'all', downscale=False
+            y, df, [["a"], ["b"]], "cnd", "all", downscale=False
         )
 
         assert bdm.cross is True
         assert bdm.nr_folds == 1
-        assert tr_cnds == ['a']
-        assert te_cnds == ['b']
+        assert tr_cnds == ["a"]
+        assert te_cnds == ["b"]
 
     @pytest.mark.unit
     def test_nr_folds_one_resets_with_warning_for_within_condition(self):
         bdm = BDM.__new__(BDM)
         bdm.nr_folds = 1
-        bdm.to_decode = 'label'
-        df = pd.DataFrame({'cnd': ['a'] * 20, 'label': ['x'] * 10 + ['y'] * 10})
-        y = df['label'].values
+        bdm.to_decode = "label"
+        df = pd.DataFrame({"cnd": ["a"] * 20, "label": ["x"] * 10 + ["y"] * 10})
+        y = df["label"].values
 
-        with pytest.warns(UserWarning, match='Nr folds'):
-            bdm.set_bdm_param(y, df, ['a'], 'cnd', 'all', downscale=False)
+        with pytest.warns(UserWarning, match="Nr folds"):
+            bdm.set_bdm_param(y, df, ["a"], "cnd", "all", downscale=False)
 
         assert bdm.nr_folds == 10
 
@@ -345,16 +365,17 @@ class TestSetBdmParam:
 # get_condition_labels
 # ============================================================================
 
+
 class TestGetConditionLabels:
     @pytest.mark.unit
     def test_selects_condition_trials_and_labels(self):
         bdm = BDM.__new__(BDM)
-        bdm.to_decode = 'label'
+        bdm.to_decode = "label"
         bdm.cross = False
-        df = pd.DataFrame({'cnd': ['a', 'a', 'a', 'b', 'b'], 'label': [0, 1, 0, 1, 0]})
+        df = pd.DataFrame({"cnd": ["a", "a", "a", "b", "b"], "label": [0, 1, 0, 1, 0]})
 
         out_df, cnd_idx, cnd_labels, labels, max_tr = bdm.get_condition_labels(
-            df, 'cnd', 'a', [10], 'all'
+            df, "cnd", "a", [10], "all"
         )
 
         np.testing.assert_array_equal(cnd_idx, [0, 1, 2])
@@ -364,12 +385,12 @@ class TestGetConditionLabels:
     @pytest.mark.unit
     def test_labels_oi_subset_filters_trials(self):
         bdm = BDM.__new__(BDM)
-        bdm.to_decode = 'label'
+        bdm.to_decode = "label"
         bdm.cross = False
-        df = pd.DataFrame({'cnd': ['a', 'a', 'a', 'b', 'b'], 'label': [0, 1, 0, 1, 0]})
+        df = pd.DataFrame({"cnd": ["a", "a", "a", "b", "b"], "label": [0, 1, 0, 1, 0]})
 
         out_df, cnd_idx, cnd_labels, labels, max_tr = bdm.get_condition_labels(
-            df, 'cnd', 'a', [10], [1]
+            df, "cnd", "a", [10], [1]
         )
 
         np.testing.assert_array_equal(cnd_idx, [1])
@@ -378,12 +399,12 @@ class TestGetConditionLabels:
     @pytest.mark.unit
     def test_all_data_uses_every_trial(self):
         bdm = BDM.__new__(BDM)
-        bdm.to_decode = 'label'
+        bdm.to_decode = "label"
         bdm.cross = False
-        df = pd.DataFrame({'cnd': ['a', 'a', 'b', 'b'], 'label': [0, 1, 0, 1]})
+        df = pd.DataFrame({"cnd": ["a", "a", "b", "b"], "label": [0, 1, 0, 1]})
 
         _, cnd_idx, cnd_labels, labels, _ = bdm.get_condition_labels(
-            df, 'cnd', 'all_data', [10], 'all'
+            df, "cnd", "all_data", [10], "all"
         )
 
         np.testing.assert_array_equal(cnd_idx, [0, 1, 2, 3])
@@ -392,6 +413,7 @@ class TestGetConditionLabels:
 # ============================================================================
 # train_test_split / train_test_cross / train_test_select
 # ============================================================================
+
 
 class TestTrainTestSplit:
     @pytest.mark.unit
@@ -403,7 +425,7 @@ class TestTrainTestSplit:
         bdm.run_info = 1
         idx = np.arange(20)
         labels = np.array([0] * 10 + [1] * 10)
-        bdm_info = {'run_1': {}}
+        bdm_info = {"run_1": {}}
 
         train_tr, test_tr, bdm_info = bdm.train_test_split(idx, labels, 10, bdm_info)
 
@@ -425,7 +447,7 @@ class TestTrainTestSplit:
         bdm.run_info = 1
         idx = np.arange(20)
         labels = np.array([0] * 10 + [1] * 10)
-        bdm_info = {'run_1': {}}
+        bdm_info = {"run_1": {}}
 
         _, test_tr, _ = bdm.train_test_split(idx, labels, 10, bdm_info)
 
@@ -492,6 +514,7 @@ class TestTrainTestSelect:
 # set_bdm_weights
 # ============================================================================
 
+
 class TestSetBdmWeights:
     @pytest.mark.unit
     def test_haufe_transform_matches_manual_computation(self):
@@ -526,6 +549,7 @@ class TestSetBdmWeights:
 # sliding_window
 # ============================================================================
 
+
 class TestSlidingWindow:
     @pytest.mark.unit
     def test_not_suitable_preserves_3d_shape_regression(self):
@@ -559,7 +583,7 @@ class TestSlidingWindow:
         out = bdm.sliding_window(X, window_size=4, demean=False, avg_window=True)
 
         t = 5
-        expected = X[:, :, t - 3:t + 1].mean(axis=-1)
+        expected = X[:, :, t - 3 : t + 1].mean(axis=-1)
         np.testing.assert_allclose(out[:, :, t], expected)
 
 
@@ -567,14 +591,15 @@ class TestSlidingWindow:
 # cross_time_decoding
 # ============================================================================
 
+
 class TestCrossTimeDecoding:
     @staticmethod
-    def _make_bdm(pca_components=(0, 'across'), scale=True):
+    def _make_bdm(pca_components=(0, "across"), scale=True):
         bdm = BDM.__new__(BDM)
         bdm.scale = scale
         bdm.pca_components = pca_components
-        bdm.metric = 'auc'
-        bdm.classifier = 'LDA'
+        bdm.metric = "auc"
+        bdm.classifier = "LDA"
         bdm.tfr = None
         bdm.run_info = 1
         bdm.nr_folds = 1
@@ -640,7 +665,7 @@ class TestCrossTimeDecoding:
         """Spy on PCA._fit (the shared internal method both .fit() and
         .fit_transform() delegate to) to confirm 'across' mode fits
         once per iteration on training data only (no leakage)."""
-        bdm = self._make_bdm(pca_components=(2, 'across'))
+        bdm = self._make_bdm(pca_components=(2, "across"))
         rng = np.random.default_rng(0)
         Xtr = rng.normal(0, 1, size=(1, 1, 10, 4, 1))
         Xte = rng.normal(0, 1, size=(1, 1, 4, 4, 1))
@@ -655,7 +680,7 @@ class TestCrossTimeDecoding:
             fit_calls.append(X.shape[0])
             return orig_fit(self, X, *a, **k)
 
-        with patch.object(PCA, '_fit', spy_fit):
+        with patch.object(PCA, "_fit", spy_fit):
             bdm.cross_time_decoding(Xtr, Xte, Ytr, Yte, labels, GAT=False)
 
         assert len(fit_calls) == 1
@@ -669,7 +694,7 @@ class TestCrossTimeDecoding:
         fit_transform() on Xtr_ alone, silently degrading into
         'across' behavior. Now verifies exactly one fit call, sized to
         the full combined pool (X), not just Xtr."""
-        bdm = self._make_bdm(pca_components=(2, 'all'))
+        bdm = self._make_bdm(pca_components=(2, "all"))
         rng = np.random.default_rng(0)
         Xtr = rng.normal(0, 1, size=(1, 1, 10, 4, 1))
         Xte = rng.normal(0, 1, size=(1, 1, 4, 4, 1))
@@ -685,14 +710,14 @@ class TestCrossTimeDecoding:
             fit_calls.append(X.shape[0])
             return orig_fit(self, X, *a, **k)
 
-        with patch.object(PCA, 'fit', spy_fit):
+        with patch.object(PCA, "fit", spy_fit):
             bdm.cross_time_decoding(Xtr, Xte, Ytr, Yte, labels, GAT=False, X=X_full)
 
         assert fit_calls == [14]
 
     @pytest.mark.unit
     def test_pca_enabled_warns_weights_are_zero(self):
-        bdm = self._make_bdm(pca_components=(2, 'across'))
+        bdm = self._make_bdm(pca_components=(2, "across"))
         rng = np.random.default_rng(0)
         Xtr = rng.normal(0, 1, size=(1, 1, 10, 4, 1))
         Xte = rng.normal(0, 1, size=(1, 1, 4, 4, 1))
@@ -700,7 +725,7 @@ class TestCrossTimeDecoding:
         Yte = np.tile(np.array([0, 0, 1, 1]), (1, 1))
         labels = np.array([0, 1])
 
-        with pytest.warns(UserWarning, match='not computed when PCA'):
+        with pytest.warns(UserWarning, match="not computed when PCA"):
             class_acc, weights, conf_matrix = bdm.cross_time_decoding(
                 Xtr, Xte, Ytr, Yte, labels, GAT=False
             )
@@ -712,20 +737,27 @@ class TestCrossTimeDecoding:
 # classify(): end-to-end integration
 # ============================================================================
 
+
 class TestClassifyIntegration:
     @pytest.mark.unit
     def test_separable_signal_detected_only_after_onset(self):
         epochs, df = make_separable_epochs(
-            n_trials=80, n_ch=4, n_samples=50, sfreq=100, seed=0,
+            n_trials=80,
+            n_ch=4,
+            n_samples=50,
+            sfreq=100,
+            seed=0,
             separable_from_sample=25,
         )
         bdm = make_bdm(epochs, df)
 
         output, _ = bdm.classify(
-            cnds=dict(block_type=['main']), window_oi=(-0.1, 0.4),
-            labels_oi='all', GAT=False,
+            cnds=dict(block_type=["main"]),
+            window_oi=(-0.1, 0.4),
+            labels_oi="all",
+            GAT=False,
         )
-        scores = output['main']['dec_scores']
+        scores = output["main"]["dec_scores"]
 
         assert scores[:20].mean() == pytest.approx(0.5, abs=0.1)
         assert scores[30:].mean() > 0.95
@@ -736,17 +768,19 @@ class TestClassifyIntegration:
         place, leaking exclusion criteria into subsequent classify()
         calls sharing the same dict object."""
         epochs, df = make_separable_epochs(n_trials=80, seed=3)
-        df['extra_cnd'] = (['x'] * 40) + (['y'] * 40)
+        df["extra_cnd"] = (["x"] * 40) + (["y"] * 40)
         bdm = make_bdm(epochs, df)
 
-        excl = {'extra_cnd': ['y']}
+        excl = {"extra_cnd": ["y"]}
         bdm.classify(
-            cnds=dict(block_type=['main']), window_oi=(-0.1, 0.4),
-            labels_oi='all', GAT=False,
+            cnds=dict(block_type=["main"]),
+            window_oi=(-0.1, 0.4),
+            labels_oi="all",
+            GAT=False,
             excl_factor=excl,
         )
 
-        assert excl == {'extra_cnd': ['y']}
+        assert excl == {"extra_cnd": ["y"]}
 
     @pytest.mark.unit
     def test_permutation_scores_near_chance_regression(self):
@@ -755,19 +789,25 @@ class TestClassifyIntegration:
         original, unshuffled label array), so perm_scores silently
         reflected genuine (non-null) decoding instead of chance."""
         epochs, df = make_separable_epochs(
-            n_trials=80, n_ch=4, n_samples=50, sfreq=100, seed=0,
+            n_trials=80,
+            n_ch=4,
+            n_samples=50,
+            sfreq=100,
+            seed=0,
             separable_from_sample=25,
         )
         bdm = make_bdm(epochs, df)
 
         output, _ = bdm.classify(
-            cnds=dict(block_type=['main']), window_oi=(-0.1, 0.4),
-            labels_oi='all', GAT=False,
+            cnds=dict(block_type=["main"]),
+            window_oi=(-0.1, 0.4),
+            labels_oi="all",
+            GAT=False,
             nr_perm=5,
         )
 
-        perm_mean = output['main']['perm_scores'].mean()
-        real_late_mean = output['main']['dec_scores'][30:].mean()
+        perm_mean = output["main"]["perm_scores"].mean()
+        real_late_mean = output["main"]["dec_scores"][30:].mean()
 
         assert perm_mean == pytest.approx(0.5, abs=0.1)
         assert real_late_mean > 0.95  # real run unaffected by permutation
@@ -778,23 +818,30 @@ class TestClassifyIntegration:
         last of several averaged runs' training data, and (separately)
         this whole path previously wasn't exercised/verified at all."""
         epochs, df = make_separable_epochs(
-            n_trials=60, n_ch=4, n_samples=20, sfreq=100, seed=0,
+            n_trials=60,
+            n_ch=4,
+            n_samples=20,
+            sfreq=100,
+            seed=0,
             separable_from_sample=0,
         )
         bdm = make_bdm(epochs, df, nr_folds=5, avg_runs=3, output_params=True)
 
         output, params = bdm.classify(
-            cnds=dict(block_type=['main']), window_oi=(-0.1, 0.1),
-            labels_oi='all', GAT=False,
+            cnds=dict(block_type=["main"]),
+            window_oi=(-0.1, 0.1),
+            labels_oi="all",
+            GAT=False,
         )
 
-        assert output['main']['dec_scores'].mean() > 0.9
-        assert params['main']['W'].shape[-1] == 4  # nr_elec
+        assert output["main"]["dec_scores"].mean() > 0.9
+        assert params["main"]["W"].shape[-1] == 4  # nr_elec
 
 
 # ============================================================================
 # classify(): special_col test-label override
 # ============================================================================
+
 
 class TestSpecialCol:
     @pytest.mark.unit
@@ -806,18 +853,24 @@ class TestSpecialCol:
         should recover near-perfect decoding after signal onset."""
         epochs, df = make_cross_condition_priming_epochs(seed=0)
         bdm = make_bdm(epochs, df, nr_folds=5)
-        cnds = dict(block_type=[['localizer'], ['main']])
+        cnds = dict(block_type=[["localizer"], ["main"]])
 
         out_plain, _ = bdm.classify(
-            cnds=cnds, window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
+            cnds=cnds,
+            window_oi=(-0.1, 0.4),
+            labels_oi="all",
+            GAT=False,
         )
         out_override, _ = bdm.classify(
-            cnds=cnds, window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
-            special_col='prev_label',
+            cnds=cnds,
+            window_oi=(-0.1, 0.4),
+            labels_oi="all",
+            GAT=False,
+            special_col="prev_label",
         )
 
-        plain_scores = out_plain['localizer_main']['dec_scores']
-        override_scores = out_override['localizer_main']['dec_scores']
+        plain_scores = out_plain["localizer_main"]["dec_scores"]
+        override_scores = out_override["localizer_main"]["dec_scores"]
 
         assert plain_scores[30:].mean() == pytest.approx(0.5, abs=0.15)
         assert override_scores[:20].mean() == pytest.approx(0.5, abs=0.1)
@@ -830,9 +883,11 @@ class TestSpecialCol:
         df_before = bdm.df.copy()
 
         bdm.classify(
-            cnds=dict(block_type=[['localizer'], ['main']]),
-            window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
-            special_col='prev_label',
+            cnds=dict(block_type=[["localizer"], ["main"]]),
+            window_oi=(-0.1, 0.4),
+            labels_oi="all",
+            GAT=False,
+            special_col="prev_label",
         )
 
         pd.testing.assert_frame_equal(bdm.df, df_before)
@@ -842,11 +897,13 @@ class TestSpecialCol:
         epochs, df = make_cross_condition_priming_epochs(seed=2)
         bdm = make_bdm(epochs, df, nr_folds=5)
 
-        with pytest.raises(ValueError, match='cross-condition'):
+        with pytest.raises(ValueError, match="cross-condition"):
             bdm.classify(
-                cnds=dict(block_type=['localizer', 'main']),
-                window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
-                special_col='prev_label',
+                cnds=dict(block_type=["localizer", "main"]),
+                window_oi=(-0.1, 0.4),
+                labels_oi="all",
+                GAT=False,
+                special_col="prev_label",
             )
 
     @pytest.mark.unit
@@ -854,17 +911,20 @@ class TestSpecialCol:
         epochs, df = make_cross_condition_priming_epochs(seed=3)
         bdm = make_bdm(epochs, df, nr_folds=5)
 
-        with pytest.raises(ValueError, match='not found'):
+        with pytest.raises(ValueError, match="not found"):
             bdm.classify(
-                cnds=dict(block_type=[['localizer'], ['main']]),
-                window_oi=(-0.1, 0.4), labels_oi='all', GAT=False,
-                special_col='nonexistent',
+                cnds=dict(block_type=[["localizer"], ["main"]]),
+                window_oi=(-0.1, 0.4),
+                labels_oi="all",
+                GAT=False,
+                special_col="nonexistent",
             )
 
 
 # ============================================================================
 # localizer_classify(): independent train/test set decoding
 # ============================================================================
+
 
 class TestLocalizerClassifyIntegration:
     """Regression tests: this entire method previously crashed via four
@@ -877,33 +937,53 @@ class TestLocalizerClassifyIntegration:
     def test_gat_false_recovers_near_perfect_auc(self):
         epochs_tr, df_tr, epochs_te, df_te = make_localizer_epoch_pair()
         bdm = BDM(
-            sj=1, epochs=[epochs_tr, epochs_te], df=[df_tr, df_te],
-            to_decode='label', baseline=None, nr_folds=1, elec_oi='all',
-            data_type='raw', downsample=100, avg_trials=1,
+            sj=1,
+            epochs=[epochs_tr, epochs_te],
+            df=[df_tr, df_te],
+            to_decode="label",
+            baseline=None,
+            nr_folds=1,
+            elec_oi="all",
+            data_type="raw",
+            downsample=100,
+            avg_trials=1,
         )
 
         scores = bdm.localizer_classify(
-            tr_window_oi=(-0.1, 0.4), te_window_oi=(-0.1, 0.4),
-            tr_labels_oi='all', te_labels_oi='all', GAT=False,
+            tr_window_oi=(-0.1, 0.4),
+            te_window_oi=(-0.1, 0.4),
+            tr_labels_oi="all",
+            te_labels_oi="all",
+            GAT=False,
         )
 
-        assert scores['all_data']['dec_scores'].mean() > 0.95
+        assert scores["all_data"]["dec_scores"].mean() > 0.95
 
     @pytest.mark.unit
     def test_gat_true_diagonal_matches_within_time_result(self):
         epochs_tr, df_tr, epochs_te, df_te = make_localizer_epoch_pair()
         bdm = BDM(
-            sj=1, epochs=[epochs_tr, epochs_te], df=[df_tr, df_te],
-            to_decode='label', baseline=None, nr_folds=1, elec_oi='all',
-            data_type='raw', downsample=100, avg_trials=1,
+            sj=1,
+            epochs=[epochs_tr, epochs_te],
+            df=[df_tr, df_te],
+            to_decode="label",
+            baseline=None,
+            nr_folds=1,
+            elec_oi="all",
+            data_type="raw",
+            downsample=100,
+            avg_trials=1,
         )
 
         scores = bdm.localizer_classify(
-            tr_window_oi=(-0.1, 0.4), te_window_oi=(-0.1, 0.4),
-            tr_labels_oi='all', te_labels_oi='all', GAT=True,
+            tr_window_oi=(-0.1, 0.4),
+            te_window_oi=(-0.1, 0.4),
+            tr_labels_oi="all",
+            te_labels_oi="all",
+            GAT=True,
         )
 
-        gat = scores['all_data']['dec_scores']
+        gat = scores["all_data"]["dec_scores"]
         assert gat.ndim == 2
         assert gat.shape[0] == gat.shape[1]
         assert np.diag(gat).mean() > 0.95
@@ -913,23 +993,30 @@ class TestLocalizerClassifyIntegration:
 # iter_classify_ (via classify with split_fact)
 # ============================================================================
 
+
 class TestIterClassify:
     @pytest.mark.unit
     def test_split_factor_averages_across_subsets(self):
         epochs, df = make_separable_epochs(
-            n_trials=80, n_ch=4, n_samples=20, sfreq=100, seed=0,
+            n_trials=80,
+            n_ch=4,
+            n_samples=20,
+            sfreq=100,
+            seed=0,
             separable_from_sample=0,
         )
-        df['session'] = (['s1'] * 40) + (['s2'] * 40)
+        df["session"] = (["s1"] * 40) + (["s2"] * 40)
         bdm = make_bdm(epochs, df, nr_folds=5)
 
         output, _ = bdm.classify(
-            cnds=dict(block_type=['main']), window_oi=(-0.1, 0.1),
-            labels_oi='all', GAT=False,
-            split_fact={'session': ['s1', 's2']},
+            cnds=dict(block_type=["main"]),
+            window_oi=(-0.1, 0.1),
+            labels_oi="all",
+            GAT=False,
+            split_fact={"session": ["s1", "s2"]},
         )
 
-        assert output['main']['dec_scores'].mean() > 0.9
+        assert output["main"]["dec_scores"].mean() > 0.9
 
     @pytest.mark.unit
     def test_multi_condition_split_preserves_all_bdm_params_regression(self):
@@ -937,24 +1024,30 @@ class TestIterClassify:
         the ENTIRE bdm_params dict instead of just that key's entry,
         discarding params for all previously-processed conditions."""
         epochs, df = make_separable_epochs(
-            n_trials=160, n_ch=4, n_samples=20, sfreq=100, seed=0,
+            n_trials=160,
+            n_ch=4,
+            n_samples=20,
+            sfreq=100,
+            seed=0,
             separable_from_sample=0,
         )
         # crossed (not correlated) so every block_type x session
         # combination has trials of both labels
-        df['block_type'] = (['a'] * 80) + (['b'] * 80)
-        df['session'] = (['s1'] * 40 + ['s2'] * 40) * 2
+        df["block_type"] = (["a"] * 80) + (["b"] * 80)
+        df["session"] = (["s1"] * 40 + ["s2"] * 40) * 2
         bdm = make_bdm(epochs, df, nr_folds=5, output_params=False)
 
         output, params = bdm.classify(
-            cnds=dict(block_type=['a', 'b']), window_oi=(-0.1, 0.1),
-            labels_oi='all', GAT=False,
-            split_fact={'session': ['s1', 's2']},
+            cnds=dict(block_type=["a", "b"]),
+            window_oi=(-0.1, 0.1),
+            labels_oi="all",
+            GAT=False,
+            split_fact={"session": ["s1", "s2"]},
         )
 
-        assert {'a', 'b'} <= set(output.keys())
-        assert set(params.keys()) == {'a', 'b'}
+        assert {"a", "b"} <= set(output.keys())
+        assert set(params.keys()) == {"a", "b"}
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

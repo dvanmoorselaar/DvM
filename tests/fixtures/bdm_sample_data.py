@@ -2,9 +2,9 @@
 Sample data fixtures for testing open_dvm.analysis.BDM functionality.
 """
 
+import mne
 import numpy as np
 import pandas as pd
-import mne
 
 
 def make_separable_epochs(
@@ -14,9 +14,9 @@ def make_separable_epochs(
     sfreq: float = 100,
     seed: int = 0,
     separable_from_sample=None,
-    label_column: str = 'label',
-    cnd_column: str = 'block_type',
-    cnd_value: str = 'main',
+    label_column: str = "label",
+    cnd_column: str = "block_type",
+    cnd_value: str = "main",
 ):
     """
     Build synthetic epochs + behavioral dataframe for BDM decoding tests.
@@ -42,8 +42,8 @@ def make_separable_epochs(
     df : pd.DataFrame
     """
     rng = np.random.default_rng(seed)
-    ch_names = [f'Ch{i+1}' for i in range(n_ch)]
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    ch_names = [f"Ch{i+1}" for i in range(n_ch)]
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
     labels = rng.integers(0, 2, size=n_trials)
     data = rng.normal(0, 1, size=(n_trials, n_ch, n_samples))
     if separable_from_sample is not None:
@@ -61,7 +61,7 @@ def make_localizer_epoch_pair(
     sfreq: float = 100,
     seed_tr: int = 1,
     seed_te: int = 2,
-    label_column: str = 'label',
+    label_column: str = "label",
 ):
     """
     Build a (train_epochs, train_df, test_epochs, test_df) tuple for
@@ -70,14 +70,24 @@ def make_localizer_epoch_pair(
     constructor convention).
     """
     epochs_tr, df_tr = make_separable_epochs(
-        n_trials=n_trials_tr, n_ch=n_ch, n_samples=n_samples, sfreq=sfreq,
-        seed=seed_tr, separable_from_sample=0, label_column=label_column,
-        cnd_value='loc',
+        n_trials=n_trials_tr,
+        n_ch=n_ch,
+        n_samples=n_samples,
+        sfreq=sfreq,
+        seed=seed_tr,
+        separable_from_sample=0,
+        label_column=label_column,
+        cnd_value="loc",
     )
     epochs_te, df_te = make_separable_epochs(
-        n_trials=n_trials_te, n_ch=n_ch, n_samples=n_samples, sfreq=sfreq,
-        seed=seed_te, separable_from_sample=0, label_column=label_column,
-        cnd_value='loc',
+        n_trials=n_trials_te,
+        n_ch=n_ch,
+        n_samples=n_samples,
+        sfreq=sfreq,
+        seed=seed_te,
+        separable_from_sample=0,
+        label_column=label_column,
+        cnd_value="loc",
     )
     return epochs_tr, df_tr, epochs_te, df_te
 
@@ -90,11 +100,11 @@ def make_cross_condition_priming_epochs(
     sfreq: float = 100,
     separable_from_sample: int = 25,
     seed: int = 0,
-    label_column: str = 'label',
-    priming_column: str = 'prev_label',
-    cnd_column: str = 'block_type',
-    train_cnd: str = 'localizer',
-    test_cnd: str = 'main',
+    label_column: str = "label",
+    priming_column: str = "prev_label",
+    cnd_column: str = "block_type",
+    train_cnd: str = "localizer",
+    test_cnd: str = "main",
 ):
     """
     Build a single combined (epochs, df) pair for classify()'s
@@ -110,8 +120,8 @@ def make_cross_condition_priming_epochs(
     the current-trial location might still pick up on.
     """
     rng = np.random.default_rng(seed)
-    ch_names = [f'Ch{i+1}' for i in range(n_ch)]
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    ch_names = [f"Ch{i+1}" for i in range(n_ch)]
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
 
     label_tr = rng.integers(0, 2, size=n_trials_tr)
     data_tr = rng.normal(0, 1, size=(n_trials_tr, n_ch, n_samples))
@@ -125,9 +135,11 @@ def make_cross_condition_priming_epochs(
     data = np.concatenate([data_tr, data_te], axis=0)
     epochs = mne.EpochsArray(data, info, tmin=-0.1)
 
-    df = pd.DataFrame({
-        label_column: np.concatenate([label_tr, label_te]),
-        priming_column: np.concatenate([label_tr, priming_te]),
-        cnd_column: [train_cnd] * n_trials_tr + [test_cnd] * n_trials_te,
-    })
+    df = pd.DataFrame(
+        {
+            label_column: np.concatenate([label_tr, label_te]),
+            priming_column: np.concatenate([label_tr, priming_te]),
+            cnd_column: [train_cnd] * n_trials_tr + [test_cnd] * n_trials_te,
+        }
+    )
     return epochs, df

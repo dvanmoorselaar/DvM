@@ -1,8 +1,8 @@
 """
 Support utilities for EEG analysis.
 
-This module provides core utility functions for EEG data manipulation 
-andexperimental design handling. 
+This module provides core utility functions for EEG data manipulation
+andexperimental design handling.
 
 Functions
 ---------
@@ -25,18 +25,18 @@ Experimental design:
 
 """
 
-import os
-import json
-import mne
-import warnings
-import itertools
-import re
 import glob
+import itertools
+import json
+import os
+import re
+import warnings
+from typing import Optional, Tuple, Union
 
+import mne
 import numpy as np
 import pandas as pd
 
-from typing import Optional, Union, Tuple
 
 def format_subject_id(sj_id: Union[int, str], zero_pad: int = 2) -> str:
     """
@@ -44,14 +44,14 @@ def format_subject_id(sj_id: Union[int, str], zero_pad: int = 2) -> str:
 
     Converts subject/session identifiers to zero-padded string format
     for consistent file naming. Handles both integer and string inputs,
-    and automatically extracts numeric values from already-formatted 
+    and automatically extracts numeric values from already-formatted
     IDs.
 
     Parameters
     ----------
     sj_id : int or str
         Subject or session identifier. Can be integer (1, 2) or string
-        ('1', '01', 'sub_1', 'ses_01'). Non-numeric prefixes are 
+        ('1', '01', 'sub_1', 'ses_01'). Non-numeric prefixes are
         removed.
     zero_pad : int, default=2
         Number of digits for zero-padding (e.g., 2 → '01', 3 → '001').
@@ -79,21 +79,27 @@ def format_subject_id(sj_id: Union[int, str], zero_pad: int = 2) -> str:
         numeric = str(sj_id)
     else:
         # Extract numeric part from string (handles 'sub_1', 'ses_01', etc.)
-        match = re.search(r'(\d+)', str(sj_id))
+        match = re.search(r"(\d+)", str(sj_id))
         if match:
             numeric = match.group(1)
         else:
             raise ValueError(f"Cannot extract numeric ID from '{sj_id}'")
-    
+
     # Return zero-padded string
     return numeric.zfill(zero_pad)
 
-def find_raw_files(folder: str, sj: int, session: int, 
-                   run: Optional[int] = None, ext: str = 'bdf',
-                   flexible_run: bool = True) -> list:
+
+def find_raw_files(
+    folder: str,
+    sj: int,
+    session: int,
+    run: Optional[int] = None,
+    ext: str = "bdf",
+    flexible_run: bool = True,
+) -> list:
     """
     Find raw data files with flexible naming convention support.
-    
+
     Supports multiple naming formats regardless of digit padding:
     - sub_2_ses_1.bdf (single digit)
     - sub_02_ses_01.bdf (zero-padded)
@@ -101,7 +107,7 @@ def find_raw_files(folder: str, sj: int, session: int,
     Also handles optional run parameter:
     - sub_2_ses_1_run_1.bdf
     - sub_02_ses_01_run_01.bdf
-    
+
     Parameters
     ----------
     folder : str
@@ -115,17 +121,17 @@ def find_raw_files(folder: str, sj: int, session: int,
     ext : str, default='bdf'
         File extension to search for (without dot)
     flexible_run : bool, default=True
-        If True and run is specified, also accept files without run 
-        suffix (useful for single-run sessions where file may or may 
+        If True and run is specified, also accept files without run
+        suffix (useful for single-run sessions where file may or may
         not have _run_ suffix). If False, strictly match run presence.
-    
+
     Returns
     -------
     list of str
-        List of matching file paths. Returns empty list if no files 
-        found. Raises FileNotFoundError if multiple files match the 
+        List of matching file paths. Returns empty list if no files
+        found. Raises FileNotFoundError if multiple files match the
         criteria.
-    
+
     Examples
     --------
     >>> files = find_raw_files('/path/to/eeg/raw', sj=2, session=1)
@@ -133,22 +139,21 @@ def find_raw_files(folder: str, sj: int, session: int,
     """
     # Build glob pattern that matches any digit padding
     # Start with base pattern
-    pattern_base = f'sub_*_ses_*.{ext}'
+    pattern_base = f"sub_*_ses_*.{ext}"
     matching_files = glob.glob(os.path.join(folder, pattern_base))
-    
+
     if not matching_files:
         return []
-    
+
     # Regex to extract sj, session, and optionally run from filename
     candidates = []
     for fpath in matching_files:
-        match = re.search(r'sub_(\d+)_ses_(\d+)(?:_run_(\d+))?', 
-                          os.path.basename(fpath))
+        match = re.search(r"sub_(\d+)_ses_(\d+)(?:_run_(\d+))?", os.path.basename(fpath))
         if match:
             file_sj = int(match.group(1))
             file_ses = int(match.group(2))
             file_run = int(match.group(3)) if match.group(3) else None
-            
+
             # Check if matches our criteria
             if file_sj == sj and file_ses == session:
                 # If run specified
@@ -165,21 +170,19 @@ def find_raw_files(folder: str, sj: int, session: int,
 
     candidates = sorted(candidates)
     if len(candidates) > 1:
-        run_str = f', run {run}' if run is not None else ''
+        run_str = f", run {run}" if run is not None else ""
         raise FileNotFoundError(
-            f'Multiple files match subject {sj}, session {session}'
-            f'{run_str}: {candidates}. Please ensure file naming is '
-            'unambiguous.'
+            f"Multiple files match subject {sj}, session {session}"
+            f"{run_str}: {candidates}. Please ensure file naming is "
+            "unambiguous."
         )
 
     return candidates
 
-def select_electrodes(
-    epochs: mne.Epochs,
-    elec_oi: Union[list, str] = 'all'
-    ) -> np.ndarray:
+
+def select_electrodes(epochs: mne.Epochs, elec_oi: Union[list, str] = "all") -> np.ndarray:
     """
-    Select subset of electrodes based on available channels and 
+    Select subset of electrodes based on available channels and
     electrode groupings.
 
     Parameters
@@ -190,9 +193,9 @@ def select_electrodes(
     elec_oi : list or str, default='all'
         Electrode selection criteria:
         - 'all': Use all available electrodes in ch_names
-        - 'posterior': Posterior electrodes (parietal, occipital 
+        - 'posterior': Posterior electrodes (parietal, occipital
             regions)
-        - 'frontal': Frontal electrodes (prefrontal, frontal regions)  
+        - 'frontal': Frontal electrodes (prefrontal, frontal regions)
         - 'central': Central electrodes (motor, somatosensory regions)
         - list: Specific electrode names to select
 
@@ -203,9 +206,9 @@ def select_electrodes(
 
     Notes
     -----
-    The function automatically detects which electrodes are available in 
-    the dataset and only selects those that exist. Regional groupings 
-    are defined based on standard 10-20 electrode naming conventions and 
+    The function automatically detects which electrodes are available in
+    the dataset and only selects those that exist. Regional groupings
+    are defined based on standard 10-20 electrode naming conventions and
     will work across different EEG systems (32, 64, 128+ channels).
 
     For unknown electrode names, the function will issue a warning but
@@ -215,84 +218,144 @@ def select_electrodes(
     ch_names = epochs.ch_names
 
     if isinstance(elec_oi, str):
-        if elec_oi == 'all':
+        if elec_oi == "all":
             eeg_picks = mne.pick_types(epochs.info, eeg=True)
             # Use all available electrodes
             elec_oi = list(np.array(ch_names)[eeg_picks])
-            
-        elif elec_oi == 'posterior':
+
+        elif elec_oi == "posterior":
             # Posterior electrodes: parietal, occipital, and posterior temporal
             posterior_electrodes = [
                 # Occipital
-                'Oz', 'O1', 'O2', 'Iz',
-                # Parietal-Occipital  
-                'POz', 'PO3', 'PO4', 'PO7', 'PO8', 'PO1', 'PO2', 'PO5', 'PO6',
+                "Oz",
+                "O1",
+                "O2",
+                "Iz",
+                # Parietal-Occipital
+                "POz",
+                "PO3",
+                "PO4",
+                "PO7",
+                "PO8",
+                "PO1",
+                "PO2",
+                "PO5",
+                "PO6",
                 # Parietal
-                'Pz', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6',
-                'P7', 'P8', 'P9', 'P10',
+                "Pz",
+                "P1",
+                "P2",
+                "P3",
+                "P4",
+                "P5",
+                "P6",
+                "P7",
+                "P8",
+                "P9",
+                "P10",
                 # Central-Parietal
-                'CPz', 'CP1', 'CP2', 'CP3', 'CP4', 'CP5', 'CP6',
+                "CPz",
+                "CP1",
+                "CP2",
+                "CP3",
+                "CP4",
+                "CP5",
+                "CP6",
                 # Posterior temporal
-                'TP7', 'TP8', 'TP9', 'TP10'
+                "TP7",
+                "TP8",
+                "TP9",
+                "TP10",
             ]
             elec_oi = posterior_electrodes
-            
-        elif elec_oi == 'frontal':
+
+        elif elec_oi == "frontal":
             # Frontal electrodes: prefrontal, frontal, and frontal-central
             frontal_electrodes = [
                 # Prefrontal
-                'Fpz', 'Fp1', 'Fp2', 
+                "Fpz",
+                "Fp1",
+                "Fp2",
                 # Anterior frontal
-                'AFz', 'AF3', 'AF4', 'AF7', 'AF8', 'AF1', 'AF2', 'AF5', 'AF6',
+                "AFz",
+                "AF3",
+                "AF4",
+                "AF7",
+                "AF8",
+                "AF1",
+                "AF2",
+                "AF5",
+                "AF6",
                 # Frontal
-                'Fz', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 
-                'F10',
+                "Fz",
+                "F1",
+                "F2",
+                "F3",
+                "F4",
+                "F5",
+                "F6",
+                "F7",
+                "F8",
+                "F9",
+                "F10",
                 # Frontal-Central
-                'FCz', 'FC1', 'FC2', 'FC3', 'FC4', 'FC5', 'FC6',
+                "FCz",
+                "FC1",
+                "FC2",
+                "FC3",
+                "FC4",
+                "FC5",
+                "FC6",
                 # Frontal-Temporal
-                'FT7', 'FT8', 'FT9', 'FT10'
+                "FT7",
+                "FT8",
+                "FT9",
+                "FT10",
             ]
             elec_oi = frontal_electrodes
-            
-        elif elec_oi == 'central':
+
+        elif elec_oi == "central":
             # Central electrodes: motor and somatosensory regions
             central_electrodes = [
-                'Cz', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
-                'T7', 'T8', 'T9', 'T10'  # Temporal electrodes
+                "Cz",
+                "C1",
+                "C2",
+                "C3",
+                "C4",
+                "C5",
+                "C6",
+                "T7",
+                "T8",
+                "T9",
+                "T10",  # Temporal electrodes
             ]
             elec_oi = central_electrodes
-            
-            
+
     # Filter elec_oi to only include electrodes that exist in ch_names
     available_electrodes = [e for e in elec_oi if e in ch_names]
 
     if not available_electrodes:
         warnings.warn(
-            'None of the specified electrodes found in channel names. '
-            f'Available channels: {list(ch_names)[:10]}...'
+            "None of the specified electrodes found in channel names. "
+            f"Available channels: {list(ch_names)[:10]}..."
         )
         return np.array([], dtype=int)
-        
+
     # Log how many electrodes were found vs requested
     if len(available_electrodes) != len(elec_oi) and isinstance(elec_oi, list):
         missing = set(elec_oi) - set(available_electrodes)
         if len(missing) <= 5:  # Only show if reasonable number
-            print(f'Note: {len(missing)} requested electrodes not found: '
-                    f'{list(missing)}')
+            print(f"Note: {len(missing)} requested electrodes not found: " f"{list(missing)}")
 
         else:
-            print(f'Note: {len(missing)} requested electrodes not found '
-                    'in dataset')
+            print(f"Note: {len(missing)} requested electrodes not found " "in dataset")
 
     picks = mne.pick_channels(ch_names, include=available_electrodes)
 
-    return picks	 
+    return picks
 
-def baseline_correction(
-    X: np.ndarray,
-    times: np.ndarray,
-    baseline: tuple
-    ) -> np.ndarray:
+
+def baseline_correction(X: np.ndarray, times: np.ndarray, baseline: tuple) -> np.ndarray:
     """Perform baseline correction on 3D EEG data.
 
     Subtracts the mean activity during a baseline period from all time
@@ -339,11 +402,8 @@ def baseline_correction(
     get_time_slice : Convert time window to array indices
     """
     # Check if the input data is 3D
-    if X.ndim != 3:	
-        raise ValueError(
-            f"Input data must be 3D (epochs x electrodes x time), "
-            f"got {X.ndim}D"
-        )
+    if X.ndim != 3:
+        raise ValueError(f"Input data must be 3D (epochs x electrodes x time), " f"got {X.ndim}D")
 
     # find indices of baseline period
     base_idx = get_time_slice(times, baseline[0], baseline[1])
@@ -358,6 +418,7 @@ def baseline_correction(
     corrected_data = X - baseline_mean
 
     return corrected_data
+
 
 def match_epochs_times(erps: list) -> list:
     """
@@ -415,14 +476,15 @@ def match_epochs_times(erps: list) -> list:
 
     return erps
 
+
 def get_diff_pairs(ch_names: list) -> dict:
     """
     Create electrode pairing for contralateral-ipsilateral analysis.
 
     Returns a dictionary mapping each electrode to its contralateral
     pair, enabling computation of lateralized difference topographies
-    (contra - ipsi). Left hemisphere electrodes are assumed 
-    contralateral to the effect of interest. Midline electrodes map to 
+    (contra - ipsi). Left hemisphere electrodes are assumed
+    contralateral to the effect of interest. Midline electrodes map to
     themselves (resulting in zero difference).
 
     The function automatically detects available electrodes from the
@@ -476,35 +538,66 @@ def get_diff_pairs(ch_names: list) -> dict:
     # This covers 32, 64, 128+ channel systems
     all_pairs = {
         # Frontal polar
-        'Fp1': 'Fp2', 'Fpz': 'Fpz',
+        "Fp1": "Fp2",
+        "Fpz": "Fpz",
         # Anterior frontal
-        'AF9': 'AF10', 'AF7': 'AF8', 'AF5': 'AF6', 'AF3': 'AF4',
-        'AF1': 'AF2', 'AFz': 'AFz',
+        "AF9": "AF10",
+        "AF7": "AF8",
+        "AF5": "AF6",
+        "AF3": "AF4",
+        "AF1": "AF2",
+        "AFz": "AFz",
         # Frontal
-        'F9': 'F10', 'F7': 'F8', 'F5': 'F6', 'F3': 'F4',
-        'F1': 'F2', 'Fz': 'Fz',
+        "F9": "F10",
+        "F7": "F8",
+        "F5": "F6",
+        "F3": "F4",
+        "F1": "F2",
+        "Fz": "Fz",
         # Frontal-temporal
-        'FT9': 'FT10', 'FT7': 'FT8',
+        "FT9": "FT10",
+        "FT7": "FT8",
         # Frontal-central
-        'FC5': 'FC6', 'FC3': 'FC4', 'FC1': 'FC2', 'FCz': 'FCz',
+        "FC5": "FC6",
+        "FC3": "FC4",
+        "FC1": "FC2",
+        "FCz": "FCz",
         # Temporal
-        'T9': 'T10', 'T7': 'T8',
+        "T9": "T10",
+        "T7": "T8",
         # Central
-        'C5': 'C6', 'C3': 'C4', 'C1': 'C2', 'Cz': 'Cz',
+        "C5": "C6",
+        "C3": "C4",
+        "C1": "C2",
+        "Cz": "Cz",
         # Temporal-parietal
-        'TP9': 'TP10', 'TP7': 'TP8',
+        "TP9": "TP10",
+        "TP7": "TP8",
         # Central-parietal
-        'CP5': 'CP6', 'CP3': 'CP4', 'CP1': 'CP2', 'CPz': 'CPz',
+        "CP5": "CP6",
+        "CP3": "CP4",
+        "CP1": "CP2",
+        "CPz": "CPz",
         # Parietal
-        'P9': 'P10', 'P7': 'P8', 'P5': 'P6', 'P3': 'P4',
-        'P1': 'P2', 'Pz': 'Pz',
+        "P9": "P10",
+        "P7": "P8",
+        "P5": "P6",
+        "P3": "P4",
+        "P1": "P2",
+        "Pz": "Pz",
         # Parietal-occipital
-        'PO9': 'PO10', 'PO7': 'PO8', 'PO5': 'PO6', 'PO3': 'PO4',
-        'PO1': 'PO2', 'POz': 'POz',
+        "PO9": "PO10",
+        "PO7": "PO8",
+        "PO5": "PO6",
+        "PO3": "PO4",
+        "PO1": "PO2",
+        "POz": "POz",
         # Occipital
-        'O1': 'O2', 'Oz': 'Oz',
+        "O1": "O2",
+        "Oz": "Oz",
         # Inion
-        'I1': 'I2', 'Iz': 'Iz'
+        "I1": "I2",
+        "Iz": "Iz",
     }
 
     # Filter to only include pairs where both electrodes exist
@@ -513,23 +606,20 @@ def get_diff_pairs(ch_names: list) -> dict:
         if contra in ch_names and ipsi in ch_names:
             idx_pairs[contra] = (ch_names.index(contra), ch_names.index(ipsi))
             if contra != ipsi:  # Don't duplicate midline electrodes
-                idx_pairs[ipsi] = (
-                    ch_names.index(ipsi), ch_names.index(contra)
-                )
+                idx_pairs[ipsi] = (ch_names.index(ipsi), ch_names.index(contra))
 
     if not idx_pairs:
         warnings.warn(
-            'No standard electrode pairs found in channel names. '
-            'Ensure channel names follow 10-20 naming conventions.'
+            "No standard electrode pairs found in channel names. "
+            "Ensure channel names follow 10-20 naming conventions."
         )
 
     return idx_pairs
 
+
 def trial_exclusion(
-    df: pd.DataFrame,
-    epochs: mne.Epochs,
-    excl_factor: dict
-    ) -> Tuple[pd.DataFrame, mne.Epochs, np.ndarray]:
+    df: pd.DataFrame, epochs: mne.Epochs, excl_factor: dict
+) -> Tuple[pd.DataFrame, mne.Epochs, np.ndarray]:
     """
     Exclude trials based on experimental condition criteria.
 
@@ -574,7 +664,7 @@ def trial_exclusion(
     >>> # Exclude error trials
     >>> excl = {'correct': [0]}
     >>> df, epochs, idx = trial_exclusion(df, epochs, excl)
-    >>> 
+    >>>
     >>> # Exclude multiple conditions
     >>> excl = {
     ...     'cue_side': ['right'],
@@ -589,38 +679,39 @@ def trial_exclusion(
     support.FolderStructure.load_processed_epochs : Load with exclusion
     """
 
-
-    mask = [(df[key] == f).values for key in excl_factor.keys() 
-                                    for f in excl_factor[key]]
-    for m in mask: 
-        mask[0] = np.logical_or(mask[0],m)
+    mask = [(df[key] == f).values for key in excl_factor.keys() for f in excl_factor[key]]
+    for m in mask:
+        mask[0] = np.logical_or(mask[0], m)
     mask = mask[0]
 
     idx = np.where(mask)[0]
     if mask.sum() > 0:
         # Suppress verbose MNE epoch drop output
         from contextlib import redirect_stdout
-        with open(os.devnull, 'w', encoding='utf-8') as f:
+
+        with open(os.devnull, "w", encoding="utf-8") as f:
             with redirect_stdout(f):
-                epochs.drop(idx, reason='trial exclusion')
-        df.drop(idx, inplace = True)
-        df.reset_index(inplace = True, drop = True)	
-        print(f'Dropped {sum(mask)} trials after specifying excl_factor')
-        print('NOTE DROPPING IS DONE IN PLACE. ' \
-        'PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN')
+                epochs.drop(idx, reason="trial exclusion")
+        df.drop(idx, inplace=True)
+        df.reset_index(inplace=True, drop=True)
+        print(f"Dropped {sum(mask)} trials after specifying excl_factor")
+        print(
+            "NOTE DROPPING IS DONE IN PLACE. "
+            "PLEASE REREAD DATA IF THAT CONDITION IS NECESSARY AGAIN"
+        )
     else:
-        print('Trial exclusion: no trials selected ' \
-        'that matched specified criteria')
+        print("Trial exclusion: no trials selected " "that matched specified criteria")
 
     return df, epochs, idx
+
 
 def get_time_slice(
     times: np.ndarray,
     start_time: Optional[float],
     end_time: Optional[float],
     include_final: bool = True,
-    step: Optional[int] = None
-    ) -> slice:
+    step: Optional[int] = None,
+) -> slice:
     """
     Convert time window to array slice indices.
 
@@ -658,24 +749,23 @@ def get_time_slice(
     >>> # Get baseline window
     >>> baseline_slice = get_time_slice(times, -0.2, 0)
     >>> baseline_data = epochs_data[:, :, baseline_slice]
-    >>> 
+    >>>
     >>> # Get post-stimulus window
     >>> post_slice = get_time_slice(times, 0, 0.5)
-    >>> 
+    >>>
     >>> # Downsample by 2
     >>> downsampled_slice = get_time_slice(times, 0, 1.0, step=2)
     """
 
     # get start and end index
-    idx = [np.argmin(abs(times - t)) 
-                for t in (start_time, end_time) if t is not None]
+    idx = [np.argmin(abs(times - t)) for t in (start_time, end_time) if t is not None]
     if len(idx) == 0:
         idx = [0, times.size - 1]
     elif len(idx) == 1:
         if start_time is None:
-            idx.insert(0,0)
+            idx.insert(0, 0)
         else:
-            idx.insert(1,times.size - 1)
+            idx.insert(1, times.size - 1)
 
     s, e = idx
     if include_final:
@@ -683,6 +773,7 @@ def get_time_slice(
     time_slice = slice(s, e, step)
 
     return time_slice
+
 
 def create_cnd_loop(cnds: dict) -> list:
     """
@@ -703,7 +794,7 @@ def create_cnd_loop(cnds: dict) -> list:
     Returns
     -------
     filters : list of tuple
-        List of (query_string, condition_name) tuples. Each tuple 
+        List of (query_string, condition_name) tuples. Each tuple
         contains:
             - query_string : str for DataFrame.query() or eval()
             - condition_name : str combining all factor values with '_'
@@ -727,7 +818,7 @@ def create_cnd_loop(cnds: dict) -> list:
     left_invalid: cue_side == 'left' and validity == 'invalid'
     right_valid: cue_side == 'right' and validity == 'valid'
     right_invalid: cue_side == 'right' and validity == 'invalid'
-    >>> 
+    >>>
     >>> # Use in analysis
     >>> for query, cnd_name in filters:
     ...     cnd_data = df.query(query)
@@ -745,33 +836,30 @@ def create_cnd_loop(cnds: dict) -> list:
         for i, (k, v) in enumerate(var_combo.items()):
             name += [str(v)]
             if i == 0:
-                if isinstance(v,str):
-                    df_filt = f'{k} == \'{v}\'' 
+                if isinstance(v, str):
+                    df_filt = f"{k} == '{v}'"
                 else:
-                    df_filt = f'{k} == {v}'
+                    df_filt = f"{k} == {v}"
             else:
-                if isinstance(v,str):
-                    df_filt += f' and {k} == \'{v}\''
+                if isinstance(v, str):
+                    df_filt += f" and {k} == '{v}'"
                 else:
-                    df_filt += f' and {k} == {v}'
-        
-        filters.append((df_filt,'_'.join(name)))
+                    df_filt += f" and {k} == {v}"
+
+        filters.append((df_filt, "_".join(name)))
 
     return filters
 
+
 def log_preproc(
-    idx: tuple,
-    file: str,
-    nr_sj: int = 1,
-    nr_sessions: int = 1,
-    to_update: Optional[dict] = None
-    ) -> None:
+    idx: tuple, file: str, nr_sj: int = 1, nr_sessions: int = 1, to_update: Optional[dict] = None
+) -> None:
     """
     Log preprocessing parameters to JSON file.
 
     Creates or updates a preprocessing log file with nested structure
     organized by subject and session. More robust than CSV format.
-    Useful for tracking preprocessing parameters across subjects and 
+    Useful for tracking preprocessing parameters across subjects and
     sessions.
 
     Parameters
@@ -829,25 +917,26 @@ def log_preproc(
     # Create composite key for subject and session. 'all' (session-
     # combined entries) is passed through as-is; anything else is
     # coerced to a zero-padded int.
-    session_token = 'all' if isinstance(session, str) and \
-        session.lower() == 'all' else f'{int(session):02d}'
-    entry_key = f'sub_{int(sj):02d}_ses_{session_token}'
-    
+    session_token = (
+        "all" if isinstance(session, str) and session.lower() == "all" else f"{int(session):02d}"
+    )
+    entry_key = f"sub_{int(sj):02d}_ses_{session_token}"
+
     # Load existing data or create new
     if os.path.isfile(file):
         try:
-            with open(file, 'r') as f:
+            with open(file, "r") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, IOError):
             # File is corrupted or empty, start fresh
             data = {}
     else:
         data = {}
-    
+
     # Ensure entry key exists
     if entry_key not in data:
         data[entry_key] = {}
-    
+
     # Update with new values
     if to_update is not None:
         for key, value in to_update.items():
@@ -855,8 +944,8 @@ def log_preproc(
             if isinstance(value, list):
                 value = str(value)
             data[entry_key][key] = value
-    
+
     # Save to JSON
     os.makedirs(os.path.dirname(file), exist_ok=True)
-    with open(file, 'w') as f:
-            json.dump(data, f, indent=4)
+    with open(file, "w") as f:
+        json.dump(data, f, indent=4)

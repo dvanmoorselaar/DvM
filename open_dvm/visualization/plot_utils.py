@@ -1,4 +1,3 @@
-  
 """
 Support functions for plotting
 
@@ -6,28 +5,29 @@ Created by Dirk van Moorselaar on 30-03-2016.
 Copyright (c) 2016 DvM. All rights reserved.
 """
 
-import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.colors import Normalize
-
 from typing import List, Optional, Tuple, Union
 
+import matplotlib
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import Normalize
+
+
 def shifted_color_map(cmap, min_val, max_val, name):
-    '''Function to offset the "center" of a colormap. 
-    Useful for data with a negative min and positive max and you want the middle of 
-    the colormap's dynamic range to be at zero. Function sets the new start 
-    (defaults to no lower offset; should be between 0 and 'midpoint'), 
+    """Function to offset the "center" of a colormap.
+    Useful for data with a negative min and positive max and you want the middle of
+    the colormap's dynamic range to be at zero. Function sets the new start
+    (defaults to no lower offset; should be between 0 and 'midpoint'),
     and the new stop (defaults to no upper ofset; should be between
     'midpoint` and 1.0)
-    
+
     Adapted from https://stackoverflow.com/questions/7404116/defining-the-midpoint-of-a-colormap-in-matplotlib
 
     Arguments
     - - - - -
     cmap: The matplotlib colormap to be altered.
-    min_val (float): new min value of the shifted color map 
+    min_val (float): new min value of the shifted color map
     max_val (float): new max value of the shifted color map
     name (str): name of the shifted color map
 
@@ -35,32 +35,38 @@ def shifted_color_map(cmap, min_val, max_val, name):
     - - - -
 
     newcmap : shifted colormap
-    '''
+    """
 
     epsilon = 0.001
     start, stop = 0.0, 1.0
-    min_val, max_val = min(0.0, min_val), max(0.0, max_val) # Edit #2
-    midpoint = 1.0 - max_val/(max_val + abs(min_val))
-    cdict = {'red': [], 'green': [], 'blue': [], 'alpha': []}
+    min_val, max_val = min(0.0, min_val), max(0.0, max_val)  # Edit #2
+    midpoint = 1.0 - max_val / (max_val + abs(min_val))
+    cdict = {"red": [], "green": [], "blue": [], "alpha": []}
     # regular index to compute the colors
     reg_index = np.linspace(start, stop, 257)
     # shifted index to match the data
-    shift_index = np.hstack([np.linspace(0.0, midpoint, 128, endpoint=False), np.linspace(midpoint, 1.0, 129, endpoint=True)])
+    shift_index = np.hstack(
+        [
+            np.linspace(0.0, midpoint, 128, endpoint=False),
+            np.linspace(midpoint, 1.0, 129, endpoint=True),
+        ]
+    )
     for ri, si in zip(reg_index, shift_index):
         if abs(si - midpoint) < epsilon:
-            r, g, b, a = cmap(0.5) # 0.5 = original midpoint.
+            r, g, b, a = cmap(0.5)  # 0.5 = original midpoint.
         else:
             r, g, b, a = cmap(ri)
-        cdict['red'].append((si, r, r))
-        cdict['green'].append((si, g, g))
-        cdict['blue'].append((si, b, b))
-        cdict['alpha'].append((si, a, a))
+        cdict["red"].append((si, r, r))
+        cdict["green"].append((si, g, g))
+        cdict["blue"].append((si, b, b))
+        cdict["alpha"].append((si, a, a))
     newcmap = matplotlib.colors.LinearSegmentedColormap(name, cdict)
     return newcmap
 
+
 def resolve_cnd_diff_list(
-        cnd_diff: Union[Tuple[str, str], List[Tuple[str, str]]]
-    ) -> List[Tuple[str, str]]:
+    cnd_diff: Union[Tuple[str, str], List[Tuple[str, str]]],
+) -> List[Tuple[str, str]]:
     """Normalize `cnd_diff` to a list of (cnd_a, cnd_b) contrast tuples.
 
     Accepts either a single pair (e.g. ('easy', 'hard')) or a list of
@@ -74,10 +80,10 @@ def resolve_cnd_diff_list(
         return [cnd_diff]
     return list(cnd_diff)
 
+
 def resolve_cnd_diff_colors(
-        cnd_diff_color: Optional[Union[str, List[str]]],
-        n_contrasts: int, default: str = 'grey'
-    ) -> List[str]:
+    cnd_diff_color: Optional[Union[str, List[str]]], n_contrasts: int, default: str = "grey"
+) -> List[str]:
     """Resolve `cnd_diff_color` to one flat color per contrast.
 
     - None: a single contrast falls back to `default` ('grey', matching
@@ -101,11 +107,16 @@ def resolve_cnd_diff_colors(
         )
     return list(cnd_diff_color)
 
+
 def cnd_diff_point_colors(
-        cnd_a: str, cnd_b: str, sig_mask: Union[np.ndarray, list],
-        stats: str, n_timepoints: int,
-        cnds: Optional[list], colors: Optional[list]
-    ) -> Optional[np.ndarray]:
+    cnd_a: str,
+    cnd_b: str,
+    sig_mask: Union[np.ndarray, list],
+    stats: str,
+    n_timepoints: int,
+    cnds: Optional[list],
+    colors: Optional[list],
+) -> Optional[np.ndarray]:
     """Auto-derive per-timepoint marker colors for a condition-difference
     contrast, using each condition's own assigned plot color.
 
@@ -147,9 +158,12 @@ def cnd_diff_point_colors(
     if idx_a >= len(colors) or idx_b >= len(colors):
         return None
 
-    if stats == 'perm':
-        sig_idx = np.unique(np.concatenate([cl[0] for cl in sig_mask])) \
-            if len(sig_mask) else np.array([], dtype=int)
+    if stats == "perm":
+        sig_idx = (
+            np.unique(np.concatenate([cl[0] for cl in sig_mask]))
+            if len(sig_mask)
+            else np.array([], dtype=int)
+        )
     else:
         sig_idx = np.where(sig_mask)[0]
 

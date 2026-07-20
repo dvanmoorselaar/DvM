@@ -4,9 +4,9 @@ Sample data fixtures for testing open_dvm.analysis.EEG functionality.
 
 import os
 
+import mne
 import numpy as np
 import pandas as pd
-import mne
 
 from open_dvm.analysis.EEG import RAW, Epochs
 
@@ -95,8 +95,8 @@ def make_synthetic_raw_with_stim(
     for sample, value in trigger_samples_values:
         stim[sample] = value
 
-    ch_names = [f'F{i+1}' for i in range(n_channels)] + ['STI']
-    ch_types = ['eeg'] * n_channels + ['stim']
+    ch_names = [f"F{i+1}" for i in range(n_channels)] + ["STI"]
+    ch_types = ["eeg"] * n_channels + ["stim"]
     rng = np.random.default_rng(0)
     eeg_data = rng.normal(0, 1e-5, size=(n_channels, n_samples))
     data = np.vstack([eeg_data, stim[None, :]])
@@ -110,7 +110,7 @@ def make_synthetic_epochs(
     sj: int = 1,
     session: int = 1,
     ch_names: list = None,
-    ch_types='eeg',
+    ch_types="eeg",
     sfreq: float = 250,
     tmin: float = -0.2,
     tmax: float = 0.2,
@@ -146,7 +146,7 @@ def make_synthetic_epochs(
     epochs : Epochs
     """
     if ch_names is None:
-        ch_names = ['F1', 'F2', 'Cz']
+        ch_names = ["F1", "F2", "Cz"]
 
     info = mne.create_info(ch_names, sfreq, ch_types=ch_types)
     rng = np.random.default_rng(seed)
@@ -155,29 +155,34 @@ def make_synthetic_epochs(
 
     n_events = len(triggers)
     margin = int(0.3 * n_samples / max(n_events, 1)) + 500
-    sample_positions = np.linspace(
-        margin, n_samples - margin, n_events
-    ).astype(int)
+    sample_positions = np.linspace(margin, n_samples - margin, n_events).astype(int)
     events = np.zeros((n_events, 3), dtype=int)
     events[:, 0] = sample_positions
     events[:, 2] = triggers
 
     return Epochs(
-        sj, session, raw, events, event_id=event_id,
-        tmin=tmin, tmax=tmax, flt_pad=flt_pad, baseline=None,
+        sj,
+        session,
+        raw,
+        events,
+        event_id=event_id,
+        tmin=tmin,
+        tmax=tmax,
+        flt_pad=flt_pad,
+        baseline=None,
     )
 
 
-def write_behavioral_csv(sj: int, session: int, df: pd.DataFrame, name: str = 'main'):
+def write_behavioral_csv(sj: int, session: int, df: pd.DataFrame, name: str = "main"):
     """
     Write a behavioral CSV file to the location Epochs.align_meta_data
     (via FolderStructure.read_raw_beh) expects to find it, relative to
     the current working directory. Callers must chdir into a temp
     project folder first (e.g. via monkeypatch.chdir(tmp_path)).
     """
-    beh_dir = os.path.join('behavioral', 'raw')
+    beh_dir = os.path.join("behavioral", "raw")
     os.makedirs(beh_dir, exist_ok=True)
-    fname = os.path.join(beh_dir, f'sub_{sj:02d}_ses_{session:02d}_{name}.csv')
+    fname = os.path.join(beh_dir, f"sub_{sj:02d}_ses_{session:02d}_{name}.csv")
     df.to_csv(fname, index=False)
     return fname
 
@@ -217,9 +222,9 @@ def make_artefact_epochs(
     -------
     epochs : mne.EpochsArray
     """
-    montage = mne.channels.make_standard_montage('standard_1020')
+    montage = mne.channels.make_standard_montage("standard_1020")
     ch_names = montage.ch_names[:n_ch]
-    info = mne.create_info(ch_names, sfreq, ch_types='eeg')
+    info = mne.create_info(ch_names, sfreq, ch_types="eeg")
     rng = np.random.default_rng(seed)
     data = rng.normal(0, 1e-6, size=(n_epochs, n_ch, n_samples))
     epochs = mne.EpochsArray(data.copy(), info, tmin=tmin)
@@ -247,8 +252,8 @@ def make_eog_correlated_raw(
     dedicated EOG channel, for testing automated_ica_blink_selection's
     has-EOG-channels path.
     """
-    ch_names = [f'Ch{i+1}' for i in range(n_ch)] + ['EOG1']
-    info = mne.create_info(ch_names, sfreq, ch_types=['eeg'] * n_ch + ['eog'])
+    ch_names = [f"Ch{i+1}" for i in range(n_ch)] + ["EOG1"]
+    info = mne.create_info(ch_names, sfreq, ch_types=["eeg"] * n_ch + ["eog"])
     rng = np.random.default_rng(seed)
     eeg_data = rng.normal(0, 1e-5, size=(n_ch, n_samples))
     blink = rng.normal(0, 1e-5, size=n_samples)
